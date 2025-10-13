@@ -1,0 +1,34 @@
+# ScientistCloud Job Processing System Requirements
+
+# Core dependencies
+pymongo>=4.0.0
+psutil>=5.8.0
+
+# Optional dependencies for enhanced functionality
+# Uncomment as needed
+
+# For web monitoring interface
+# flask>=2.0.0
+# flask-cors>=3.0.0
+
+# For advanced scheduling
+# celery>=5.2.0
+# redis>=4.0.0
+
+# For data validation
+# pydantic>=1.10.0
+
+# For enhanced logging
+# structlog>=22.0.0
+
+# For configuration management
+# python-dotenv>=0.19.0
+
+# For testing
+# pytest>=7.0.0
+# pytest-mock>=3.7.0
+
+# For development
+# black>=22.0.0
+# flake8>=4.0.0
+# mypy>=0.950
