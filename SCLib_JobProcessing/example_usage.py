@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Example usage of SC_Config and SC_MongoConnection
+Example usage of SCLib_Config and SCLib_MongoConnection
 Demonstrates how to use the configuration system and MongoDB connection manager.
 """
 

@@ -138,17 +138,20 @@ This separation allows you to:
 
 4. **Start FastAPI Server**:
    ```bash
-   # Load environment variables
+   # Load environment variables first
    source ${SCLIB_MYTEST}/env.local
    
-   # Start the server
+   # The script will automatically find and load env.local
    cd ${SCLIB_HOME}
    python start_fastapi_server.py --port 8000
+   
+   # Or specify the env file explicitly
+   python start_fastapi_server.py --port 8000 --env-file ${SCLIB_MYTEST}/env.local
    ```
 
 5. **Verify Setup**:
    ```bash
-   # Load environment and change to source directory
+   # Load environment variables first
    source ${SCLIB_MYTEST}/env.local
    cd ${SCLIB_HOME}
    
@@ -214,6 +217,8 @@ server {
 ```
 
 #### 2. Uvicorn Configuration
+# Your FastAPI App → Uvicorn Server → HTTP Requests/Responses
+# Your FastAPI server uses Uvicorn internally
 
 ```bash
 # Run the large file API with optimized settings
@@ -701,10 +706,12 @@ pip install awscli
 ### Starting the FastAPI Server
 
 ```bash
-# Load environment and start server
-source ${SCLIB_MYTEST}/env.local
+# The script will automatically find and load env.local
 cd ${SCLIB_HOME}
 python start_fastapi_server.py --port 8000
+
+# Or specify the env file explicitly
+python start_fastapi_server.py --port 8000 --env-file ${SCLIB_MYTEST}/env.local
 
 # The server will start on http://localhost:8000
 # Automatically handles both small and large files

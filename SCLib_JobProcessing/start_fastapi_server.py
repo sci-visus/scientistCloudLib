@@ -13,6 +13,49 @@ from pathlib import Path
 # Add the current directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
+def load_env_file(env_path: str = None):
+    """Load environment variables from env.local file."""
+    if env_path is None:
+        # Try to find env.local in common locations
+        possible_paths = [
+            Path.cwd() / "env.local",
+            Path.cwd().parent / "env.local", 
+            Path.cwd().parent / "SCLib_TryTest" / "env.local",
+            Path.cwd().parent.parent / "SCLib_TryTest" / "env.local",  # Go up one more level
+            Path.home() / "env.local",
+            # Try to use SCLIB_MYTEST if it's already set
+            Path(os.getenv('SCLIB_MYTEST', '')) / "env.local" if os.getenv('SCLIB_MYTEST') else None
+        ]
+        
+        # Filter out None values
+        possible_paths = [p for p in possible_paths if p is not None]
+        
+        print(f"🔍 Searching for env.local in {len(possible_paths)} locations...")
+        for i, path in enumerate(possible_paths):
+            exists = path.exists()
+            print(f"   {i+1}. {path} {'✅' if exists else '❌'}")
+            if exists:
+                env_path = str(path)
+                break
+    
+    if env_path and Path(env_path).exists():
+        print(f"📁 Loading environment from: {env_path}")
+        loaded_vars = []
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    # Remove quotes if present
+                    value = value.strip('"\'')
+                    os.environ[key] = value
+                    loaded_vars.append(key)
+        print(f"✅ Loaded {len(loaded_vars)} environment variables: {', '.join(loaded_vars[:5])}{'...' if len(loaded_vars) > 5 else ''}")
+        return True
+    else:
+        print("⚠️  No env.local file found. Using system environment variables.")
+        return False
+
 def setup_logging(level: str = "INFO"):
     """Setup logging configuration."""
     logging.basicConfig(
@@ -88,6 +131,7 @@ def main():
     parser.add_argument("--log-level", default="info", help="Log level (default: info)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
     parser.add_argument("--skip-checks", action="store_true", help="Skip environment and dependency checks")
+    parser.add_argument("--env-file", help="Path to env.local file (auto-detected if not specified)")
     
     args = parser.parse_args()
     
@@ -96,6 +140,10 @@ def main():
     print(f"   Host: {args.host}")
     print(f"   Port: {args.port}")
     print(f"   Workers: {args.workers}")
+    print()
+    
+    # Load environment variables from env.local
+    load_env_file(args.env_file)
     print()
     
     # Setup logging

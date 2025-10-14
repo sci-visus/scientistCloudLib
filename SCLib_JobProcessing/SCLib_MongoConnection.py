@@ -156,8 +156,12 @@ class SCLib_MongoConnectionManager:
             # Basic ping
             self.client.admin.command('ping')
             
-            # Check server status
-            server_status = self.client.admin.command('serverStatus')
+            # Try to check server status (may fail with limited permissions)
+            try:
+                server_status = self.client.admin.command('serverStatus')
+            except Exception as e:
+                logger.warning(f"Could not get server status (limited permissions): {e}")
+                # Continue with other checks even if serverStatus fails
             
             # Check if we can read and write
             test_db = self.client['_health_check']
