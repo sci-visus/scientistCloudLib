@@ -15,7 +15,10 @@ from typing import Dict, Any, Optional, List
 from pymongo import MongoClient
 
 # Import our job queue manager
-from SCLib_JobQueueManager import SCLib_JobQueueManager
+try:
+    from .SCLib_JobQueueManager import SCLib_JobQueueManager
+except ImportError:
+    from SCLib_JobQueueManager import SCLib_JobQueueManager
 
 
 class SCLib_BackgroundService:

@@ -12,12 +12,20 @@ import tempfile
 from datetime import datetime
 import threading
 
-from SCLib_Config import get_config
-from SCLib_UploadProcessor import get_upload_processor
-from SCLib_UploadJobTypes import (
-    UploadJobConfig, UploadSourceType, SensorType, create_local_upload_job,
-    create_google_drive_upload_job, create_s3_upload_job, create_url_upload_job
-)
+try:
+    from .SCLib_Config import get_config
+    from .SCLib_UploadProcessor import get_upload_processor
+    from .SCLib_UploadJobTypes import (
+        UploadJobConfig, UploadSourceType, SensorType, create_local_upload_job,
+        create_google_drive_upload_job, create_s3_upload_job, create_url_upload_job
+    )
+except ImportError:
+    from SCLib_Config import get_config
+    from SCLib_UploadProcessor import get_upload_processor
+    from SCLib_UploadJobTypes import (
+        UploadJobConfig, UploadSourceType, SensorType, create_local_upload_job,
+        create_google_drive_upload_job, create_s3_upload_job, create_url_upload_job
+    )
 
 # Configure Flask app
 app = Flask(__name__)

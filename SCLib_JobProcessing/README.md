@@ -2,6 +2,71 @@
 
 This directory contains the enhanced job processing system for ScientistCloud 2.0, designed to replace the existing background service with a more robust, scalable, and maintainable solution.
 
+## Quick Start
+
+### Upload API Client (Recommended)
+
+The easiest way to use the library is through the upload client:
+
+```python
+from SCLib_JobProcessing import ScientistCloudUploadClient
+
+# Initialize client
+client = ScientistCloudUploadClient("http://localhost:5000")
+
+# Upload a local file
+result = client.upload_local_file(
+    file_path="/path/to/dataset.zip",
+    user_email="user@example.com",
+    dataset_name="My Dataset",
+    sensor="TIFF",
+    convert=True,
+    is_public=False
+)
+
+print(f"Upload job started: {result['job_id']}")
+
+# Monitor progress
+final_status = client.wait_for_completion(result['job_id'])
+print(f"Upload completed: {final_status['status']}")
+```
+
+### Other Upload Sources
+
+```python
+# Google Drive import
+result = client.initiate_google_drive_upload(
+    file_id="1ABC123DEF456",
+    service_account_file="/path/to/service.json",
+    user_email="user@example.com",
+    dataset_name="Google Drive Dataset",
+    sensor="NETCDF"
+)
+
+# S3 import
+result = client.initiate_s3_upload(
+    bucket_name="my-bucket",
+    object_key="data/dataset.zip",
+    access_key_id="AKIA...",
+    secret_access_key="secret...",
+    user_email="user@example.com",
+    dataset_name="S3 Dataset",
+    sensor="HDF5"
+)
+
+# URL download
+result = client.initiate_url_upload(
+    url="https://example.com/dataset.zip",
+    user_email="user@example.com",
+    dataset_name="URL Dataset",
+    sensor="OTHER"
+)
+```
+
+### Complete Example
+
+See `example_usage_new_api.py` for a complete example showing all the main features of the library.
+
 ## Overview
 
 The SCLib_JobProcessing system provides:
@@ -288,10 +353,31 @@ python SCLib_UploadAPI.py
 
 ### Using the Upload System
 
-#### Python Client Example
+#### Python Client (Recommended)
+
+The `ScientistCloudUploadClient` provides a clean, easy-to-use interface:
 
 ```python
-from upload_examples import ScientistCloudUploadClient
+from SCLib_JobProcessing import ScientistCloudUploadClient
+
+client = ScientistCloudUploadClient("http://localhost:5000")
+
+# Upload a local file
+result = client.upload_local_file(
+    file_path="/path/to/dataset.zip",
+    user_email="user@example.com", 
+    dataset_name="My Dataset",
+    sensor="TIFF"
+)
+
+# Monitor progress
+status = client.wait_for_completion(result['job_id'])
+```
+
+#### Direct API Example
+
+```python
+from SCLib_JobProcessing import ScientistCloudUploadClient
 
 # Initialize client
 client = ScientistCloudUploadClient("http://localhost:5000")

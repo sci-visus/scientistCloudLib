@@ -16,12 +16,20 @@ from pathlib import Path
 import tempfile
 import shutil
 
-from SCLib_Config import get_config, get_collection_name, get_database_name
-from SCLib_MongoConnection import get_collection_by_type, mongo_collection_by_type_context
-from SCLib_UploadJobTypes import (
-    UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress,
-    UploadJobManager, get_tool_config
-)
+try:
+    from .SCLib_Config import get_config, get_collection_name, get_database_name
+    from .SCLib_MongoConnection import get_collection_by_type, mongo_collection_by_type_context
+    from .SCLib_UploadJobTypes import (
+        UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress,
+        UploadJobManager, get_tool_config
+    )
+except ImportError:
+    from SCLib_Config import get_config, get_collection_name, get_database_name
+    from SCLib_MongoConnection import get_collection_by_type, mongo_collection_by_type_context
+    from SCLib_UploadJobTypes import (
+        UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress,
+        UploadJobManager, get_tool_config
+    )
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -556,7 +564,10 @@ if __name__ == '__main__':
         processor.start()
         
         # Create example upload jobs
-        from SCLib_UploadJobTypes import create_local_upload_job, create_url_upload_job
+        try:
+            from .SCLib_UploadJobTypes import create_local_upload_job, create_url_upload_job
+        except ImportError:
+            from SCLib_UploadJobTypes import create_local_upload_job, create_url_upload_job
         
         local_job = create_local_upload_job(
             file_path="/tmp/test_file.zip",

@@ -11,11 +11,18 @@ from typing import Dict, Any, List, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SCLib_JobQueueManager import SCLib_JobQueueManager
-from SCLib_JobTypes import (
-    SCLib_JobType, SCLib_DatasetStatus, LEGACY_STATUS_MAPPING, 
-    convert_legacy_status, convert_to_legacy_status
-)
+try:
+    from .SCLib_JobQueueManager import SCLib_JobQueueManager
+    from .SCLib_JobTypes import (
+        SCLib_JobType, SCLib_DatasetStatus, LEGACY_STATUS_MAPPING, 
+        convert_legacy_status, convert_to_legacy_status
+    )
+except ImportError:
+    from SCLib_JobQueueManager import SCLib_JobQueueManager
+    from SCLib_JobTypes import (
+        SCLib_JobType, SCLib_DatasetStatus, LEGACY_STATUS_MAPPING, 
+        convert_legacy_status, convert_to_legacy_status
+    )
 
 
 class SCLib_JobMigration:
