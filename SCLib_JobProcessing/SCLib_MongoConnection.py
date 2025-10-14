@@ -26,7 +26,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class SC_MongoConnectionManager:
+class SCLib_MongoConnectionManager:
     """
     Enhanced MongoDB connection manager for ScientistCloud Job Processing.
     Provides connection pooling, health monitoring, and automatic reconnection.
@@ -39,7 +39,7 @@ class SC_MongoConnectionManager:
         if cls._instance is None:
             with cls._lock:
                 if cls._instance is None:
-                    cls._instance = super(SC_MongoConnectionManager, cls).__new__(cls)
+                    cls._instance = super(SCLib_MongoConnectionManager, cls).__new__(cls)
         return cls._instance
     
     def __init__(self):
@@ -237,7 +237,7 @@ class SC_MongoConnectionManager:
 
 
 # Global connection manager instance
-_connection_manager: Optional[SC_MongoConnectionManager] = None
+_connection_manager: Optional[SCLib_MongoConnectionManager] = None
 
 
 def get_mongo_connection() -> MongoClient:
@@ -247,7 +247,7 @@ def get_mongo_connection() -> MongoClient:
     """
     global _connection_manager
     if _connection_manager is None:
-        _connection_manager = SC_MongoConnectionManager()
+        _connection_manager = SCLib_MongoConnectionManager()
     return _connection_manager.get_client()
 
 
@@ -258,7 +258,7 @@ def get_mongo_database(database_name: Optional[str] = None) -> Database:
     
     global _connection_manager
     if _connection_manager is None:
-        _connection_manager = SC_MongoConnectionManager()
+        _connection_manager = SCLib_MongoConnectionManager()
     return _connection_manager.get_database(database_name)
 
 
@@ -269,7 +269,7 @@ def get_mongo_collection(database_name: Optional[str] = None, collection_name: O
     
     global _connection_manager
     if _connection_manager is None:
-        _connection_manager = SC_MongoConnectionManager()
+        _connection_manager = SCLib_MongoConnectionManager()
     return _connection_manager.get_collection(database_name, collection_name)
 
 

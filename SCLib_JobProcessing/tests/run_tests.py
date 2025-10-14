@@ -14,13 +14,13 @@ from io import StringIO
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import all test modules
-from test_SCLib_JobQueueManager import TestSC_JobQueueManager
-from test_SCLib_BackgroundService import TestSC_BackgroundService
-from test_SCLib_JobTypes import TestSC_JobTypes
-from test_SCLib_JobMonitor import TestSC_JobMonitor
-from test_SCLib_JobMigration import TestSC_JobMigration
+from test_SCLib_JobQueueManager import TestSCLib_JobQueueManager
+from test_SCLib_BackgroundService import TestSCLib_BackgroundService
+from test_SCLib_JobTypes import TestSCLib_JobTypes
+from test_SCLib_JobMonitor import TestSCLib_JobMonitor
+from test_SCLib_JobMigration import TestSCLib_JobMigration
 from test_SCLib_UploadJobTypes import TestSC_UploadJobTypes
-from test_SCLib_UploadProcessor import TestSC_UploadProcessor
+from test_SCLib_UploadProcessor import TestSCLib_UploadProcessor
 from test_SCLib_UploadAPI import TestSC_UploadAPI
 from test_integration import TestSC_JobProcessingIntegration
 
@@ -81,13 +81,13 @@ def run_all_tests():
     
     # Define test suites
     test_suites = [
-        (TestSC_JobTypes, "SC_JobTypes Tests"),
-        (TestSC_JobQueueManager, "SC_JobQueueManager Tests"),
-        (TestSC_BackgroundService, "SC_BackgroundService Tests"),
-        (TestSC_JobMonitor, "SC_JobMonitor Tests"),
-        (TestSC_JobMigration, "SC_JobMigration Tests"),
+        (TestSCLib_JobTypes, "SC_JobTypes Tests"),
+        (TestSCLib_JobQueueManager, "SC_JobQueueManager Tests"),
+        (TestSCLib_BackgroundService, "SC_BackgroundService Tests"),
+        (TestSCLib_JobMonitor, "SC_JobMonitor Tests"),
+        (TestSCLib_JobMigration, "SC_JobMigration Tests"),
         (TestSC_UploadJobTypes, "SC_UploadJobTypes Tests"),
-        (TestSC_UploadProcessor, "SC_UploadProcessor Tests"),
+        (TestSCLib_UploadProcessor, "SC_UploadProcessor Tests"),
         (TestSC_UploadAPI, "SC_UploadAPI Tests"),
         (TestSC_JobProcessingIntegration, "Integration Tests")
     ]
@@ -129,13 +129,13 @@ def run_specific_tests(test_names):
     
     # Map test names to test classes
     test_map = {
-        'types': (TestSC_JobTypes, "SC_JobTypes Tests"),
-        'queue': (TestSC_JobQueueManager, "SC_JobQueueManager Tests"),
-        'service': (TestSC_BackgroundService, "SC_BackgroundService Tests"),
-        'monitor': (TestSC_JobMonitor, "SC_JobMonitor Tests"),
-        'migration': (TestSC_JobMigration, "SC_JobMigration Tests"),
+        'types': (TestSCLib_JobTypes, "SC_JobTypes Tests"),
+        'queue': (TestSCLib_JobQueueManager, "SC_JobQueueManager Tests"),
+        'service': (TestSCLib_BackgroundService, "SC_BackgroundService Tests"),
+        'monitor': (TestSCLib_JobMonitor, "SC_JobMonitor Tests"),
+        'migration': (TestSCLib_JobMigration, "SC_JobMigration Tests"),
         'upload_types': (TestSC_UploadJobTypes, "SC_UploadJobTypes Tests"),
-        'upload_processor': (TestSC_UploadProcessor, "SC_UploadProcessor Tests"),
+        'upload_processor': (TestSCLib_UploadProcessor, "SC_UploadProcessor Tests"),
         'upload_api': (TestSC_UploadAPI, "SC_UploadAPI Tests"),
         'integration': (TestSC_JobProcessingIntegration, "Integration Tests")
     }

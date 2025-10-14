@@ -10,10 +10,10 @@ from unittest.mock import Mock, patch, MagicMock
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SCLib_JobQueueManager
 
 
-class TestSC_JobQueueManager(unittest.TestCase):
+class TestSCLib_JobQueueManager(unittest.TestCase):
     """Test cases for SC_JobQueueManager."""
     
     def setUp(self):
@@ -29,7 +29,7 @@ class TestSC_JobQueueManager(unittest.TestCase):
             'visstoredatas': self.mock_datasets
         }[name])
         
-        self.job_queue = SC_JobQueueManager(self.mock_client, 'test_db')
+        self.job_queue = SCLib_JobQueueManager(self.mock_client, 'test_db')
         self.job_queue.jobs = self.mock_jobs
         self.job_queue.datasets = self.mock_datasets
     

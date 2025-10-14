@@ -11,11 +11,11 @@ from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock, call
 import subprocess
 
-from SCLib_BackgroundService import SC_BackgroundService
-from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_BackgroundService import SCLib_BackgroundService
+from SCLib_JobQueueManager import SCLib_JobQueueManager
 
 
-class TestSC_BackgroundService(unittest.TestCase):
+class TestSCLib_BackgroundService(unittest.TestCase):
     """Test cases for SC_BackgroundService."""
     
     def setUp(self):
@@ -37,15 +37,15 @@ class TestSC_BackgroundService(unittest.TestCase):
         
         # Mock MongoDB connection
         self.mock_mongo_client = Mock()
-        self.mock_job_queue = Mock(spec=SC_JobQueueManager)
+        self.mock_job_queue = Mock(spec=SCLib_JobQueueManager)
         
-        with patch('SC_BackgroundService.SC_JobQueueManager') as mock_job_queue_class:
+        with patch('SCLib_BackgroundService.SCLib_JobQueueManager') as mock_job_queue_class:
             mock_job_queue_class.return_value = self.mock_job_queue
             
-            with patch('SC_MongoConnection.get_mongo_connection') as mock_get_connection:
+            with patch('SCLib_MongoConnection.get_mongo_connection') as mock_get_connection:
                 mock_get_connection.return_value = self.mock_mongo_client
                 
-                self.service = SC_BackgroundService(self.settings)
+                self.service = SCLib_BackgroundService(self.settings)
     
     def tearDown(self):
         """Clean up test fixtures."""
@@ -69,7 +69,7 @@ class TestSC_BackgroundService(unittest.TestCase):
         for handler in expected_handlers:
             self.assertIn(handler, self.service.job_handlers)
     
-    @patch('SC_BackgroundService.time.sleep')
+    @patch('SCLib_BackgroundService.time.sleep')
     def test_process_jobs_no_jobs(self, mock_sleep):
         """Test job processing when no jobs are available."""
         # Mock no jobs available
@@ -82,7 +82,7 @@ class TestSC_BackgroundService(unittest.TestCase):
             # Verify cleanup was called
             mock_cleanup.assert_called_once()
     
-    @patch('SC_BackgroundService.time.sleep')
+    @patch('SCLib_BackgroundService.time.sleep')
     def test_process_jobs_with_job(self, mock_sleep):
         """Test job processing with available job."""
         # Mock job

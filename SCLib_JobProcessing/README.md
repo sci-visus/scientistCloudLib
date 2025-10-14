@@ -475,7 +475,7 @@ Each job type has configurable parameters in `SCLib_JobTypes.py`:
 
 ```python
 SC_JOB_TYPE_CONFIGS = {
-    SC_JobType.DATASET_CONVERSION: {
+    SCLib_JobType.DATASET_CONVERSION: {
         'description': 'Convert dataset to streamable format',
         'timeout_minutes': 120,
         'max_attempts': 2,
@@ -605,13 +605,13 @@ The system logs to:
 
 1. **Define Job Type** in `SCLib_JobTypes.py`:
    ```python
-   class SC_JobType(Enum):
+   class SCLib_JobType(Enum):
        NEW_JOB_TYPE = "new_job_type"
    ```
 
 2. **Add Configuration**:
    ```python
-   SC_JOB_TYPE_CONFIGS[SC_JobType.NEW_JOB_TYPE] = {
+   SC_JOB_TYPE_CONFIGS[SCLib_JobType.NEW_JOB_TYPE] = {
        'description': 'New job type description',
        'timeout_minutes': 30,
        'max_attempts': 3,

@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-class SC_UploadProcessor:
+class SCLib_UploadProcessor:
     """
     Processes upload jobs asynchronously using various tools.
     Integrates with the SC_JobProcessing system.
@@ -520,14 +520,14 @@ scope = drive
 
 
 # Global upload processor instance
-_upload_processor: Optional[SC_UploadProcessor] = None
+_upload_processor: Optional[SCLib_UploadProcessor] = None
 
 
-def get_upload_processor() -> SC_UploadProcessor:
+def get_upload_processor() -> SCLib_UploadProcessor:
     """Get global upload processor instance."""
     global _upload_processor
     if _upload_processor is None:
-        _upload_processor = SC_UploadProcessor()
+        _upload_processor = SCLib_UploadProcessor()
     return _upload_processor
 
 

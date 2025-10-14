@@ -11,11 +11,11 @@ from typing import Dict, Any, List, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SCLib_JobQueueManager import SC_JobQueueManager
-from SCLib_JobTypes import SC_JobType, SC_JobStatus, SC_DatasetStatus, SC_JOB_PRIORITY
+from SCLib_JobQueueManager import SCLib_JobQueueManager
+from SCLib_JobTypes import SCLib_JobType, SCLib_JobStatus, SCLib_DatasetStatus, SC_JOB_PRIORITY
 
 
-class SC_JobMonitor:
+class SCLib_JobMonitor:
     """
     Monitor and manage the ScientistCloud job queue system.
     Provides statistics, health checks, and administrative functions.
@@ -29,7 +29,7 @@ class SC_JobMonitor:
             mongo_client: MongoDB client instance
             db_name: Database name
         """
-        self.job_queue = SC_JobQueueManager(mongo_client, db_name)
+        self.job_queue = SCLib_JobQueueManager(mongo_client, db_name)
         self.db = mongo_client[db_name]
         self.jobs = self.db.jobs
         self.datasets = self.db.visstoredatas

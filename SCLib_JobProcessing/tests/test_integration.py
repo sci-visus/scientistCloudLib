@@ -11,11 +11,11 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 
-from SCLib_JobQueueManager import SC_JobQueueManager
-from SCLib_BackgroundService import SC_BackgroundService
-from SCLib_JobMonitor import SC_JobMonitor
-from SCLib_JobMigration import SC_JobMigration
-from SCLib_JobTypes import SC_JobType, SC_DatasetStatus
+from SCLib_JobQueueManager import SCLib_JobQueueManager
+from SCLib_BackgroundService import SCLib_BackgroundService
+from SCLib_JobMonitor import SCLib_JobMonitor
+from SCLib_JobMigration import SCLib_JobMigration
+from SCLib_JobTypes import SCLib_JobType, SCLib_DatasetStatus
 
 
 class TestSC_JobProcessingIntegration(unittest.TestCase):
@@ -56,7 +56,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_end_to_end_job_processing(self):
         """Test complete job processing workflow."""
         # Initialize components
-        job_queue = SC_JobQueueManager(self.mock_mongo_client, 'test_db')
+        job_queue = SCLib_JobQueueManager(self.mock_mongo_client, 'test_db')
         job_queue.jobs = self.mock_jobs
         job_queue.datasets = self.mock_datasets
         
@@ -100,7 +100,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         self.mock_jobs.find_one_and_update.return_value = mock_job
         
         # Initialize job queue
-        job_queue = SC_JobQueueManager(self.mock_mongo_client, 'test_db')
+        job_queue = SCLib_JobQueueManager(self.mock_mongo_client, 'test_db')
         job_queue.jobs = self.mock_jobs
         job_queue.datasets = self.mock_datasets
         
@@ -129,11 +129,11 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         }
         
         # Initialize components
-        job_queue = SC_JobQueueManager(self.mock_mongo_client, 'test_db')
+        job_queue = SCLib_JobQueueManager(self.mock_mongo_client, 'test_db')
         job_queue.jobs = self.mock_jobs
         job_queue.datasets = self.mock_datasets
         
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         monitor.job_queue = job_queue
@@ -172,7 +172,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         ]
         
         # Initialize migration
-        migration = SC_JobMigration(self.mock_mongo_client, 'test_db')
+        migration = SCLib_JobMigration(self.mock_mongo_client, 'test_db')
         migration.jobs = self.mock_jobs
         migration.datasets = self.mock_datasets
         
@@ -200,7 +200,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_error_handling_and_recovery(self):
         """Test error handling and recovery mechanisms."""
         # Initialize job queue
-        job_queue = SC_JobQueueManager(self.mock_mongo_client, 'test_db')
+        job_queue = SCLib_JobQueueManager(self.mock_mongo_client, 'test_db')
         job_queue.jobs = self.mock_jobs
         job_queue.datasets = self.mock_datasets
         
@@ -231,10 +231,10 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     
     def test_job_type_configuration_integration(self):
         """Test job type configuration integration."""
-        from SCLib_JobTypes import SC_JOB_TYPE_CONFIGS, SC_JobType
+        from SCLib_JobTypes import SC_JOB_TYPE_CONFIGS, SCLib_JobType
         
         # Test dataset conversion configuration
-        config = SC_JOB_TYPE_CONFIGS[SC_JobType.DATASET_CONVERSION]
+        config = SC_JOB_TYPE_CONFIGS[SCLib_JobType.DATASET_CONVERSION]
         
         # Verify configuration values
         self.assertEqual(config['timeout_minutes'], 120)
@@ -244,7 +244,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         self.assertEqual(config['description'], 'Convert dataset to streamable format')
         
         # Test Google sync configuration
-        config = SC_JOB_TYPE_CONFIGS[SC_JobType.GOOGLE_SYNC]
+        config = SC_JOB_TYPE_CONFIGS[SCLib_JobType.GOOGLE_SYNC]
         
         # Verify configuration values
         self.assertEqual(config['timeout_minutes'], 60)
@@ -256,40 +256,40 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_dataset_status_transitions(self):
         """Test dataset status transition logic."""
         from SCLib_JobTypes import (
-            SC_DATASET_STATUS_TRANSITIONS, SC_DatasetStatus,
+            SC_DATASET_STATUS_TRANSITIONS, SCLib_DatasetStatus,
             is_valid_transition, get_next_possible_states
         )
         
         # Test valid transitions
         self.assertTrue(is_valid_transition(
-            SC_DatasetStatus.SUBMITTED, SC_DatasetStatus.SYNC_QUEUED
+            SCLib_DatasetStatus.SUBMITTED, SCLib_DatasetStatus.SYNC_QUEUED
         ))
         self.assertTrue(is_valid_transition(
-            SC_DatasetStatus.SYNC_QUEUED, SC_DatasetStatus.SYNCING
+            SCLib_DatasetStatus.SYNC_QUEUED, SCLib_DatasetStatus.SYNCING
         ))
         self.assertTrue(is_valid_transition(
-            SC_DatasetStatus.SYNCING, SC_DatasetStatus.CONVERSION_QUEUED
+            SCLib_DatasetStatus.SYNCING, SCLib_DatasetStatus.CONVERSION_QUEUED
         ))
         self.assertTrue(is_valid_transition(
-            SC_DatasetStatus.CONVERSION_QUEUED, SC_DatasetStatus.CONVERTING
+            SCLib_DatasetStatus.CONVERSION_QUEUED, SCLib_DatasetStatus.CONVERTING
         ))
         self.assertTrue(is_valid_transition(
-            SC_DatasetStatus.CONVERTING, SC_DatasetStatus.DONE
+            SCLib_DatasetStatus.CONVERTING, SCLib_DatasetStatus.DONE
         ))
         
         # Test invalid transitions
         self.assertFalse(is_valid_transition(
-            SC_DatasetStatus.SUBMITTED, SC_DatasetStatus.DONE
+            SCLib_DatasetStatus.SUBMITTED, SCLib_DatasetStatus.DONE
         ))
         self.assertFalse(is_valid_transition(
-            SC_DatasetStatus.DONE, SC_DatasetStatus.SUBMITTED
+            SCLib_DatasetStatus.DONE, SCLib_DatasetStatus.SUBMITTED
         ))
         
         # Test next possible states
-        next_states = get_next_possible_states(SC_DatasetStatus.SUBMITTED)
-        self.assertIn(SC_DatasetStatus.SYNC_QUEUED, next_states)
-        self.assertIn(SC_DatasetStatus.CONVERSION_QUEUED, next_states)
-        self.assertIn(SC_DatasetStatus.UPLOAD_QUEUED, next_states)
+        next_states = get_next_possible_states(SCLib_DatasetStatus.SUBMITTED)
+        self.assertIn(SCLib_DatasetStatus.SYNC_QUEUED, next_states)
+        self.assertIn(SCLib_DatasetStatus.CONVERSION_QUEUED, next_states)
+        self.assertIn(SCLib_DatasetStatus.UPLOAD_QUEUED, next_states)
     
     def test_legacy_status_compatibility(self):
         """Test legacy status compatibility."""
@@ -312,17 +312,17 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         # Test conversion functions
         self.assertEqual(
             convert_legacy_status('sync queued'),
-            SC_DatasetStatus.SYNC_QUEUED
+            SCLib_DatasetStatus.SYNC_QUEUED
         )
         self.assertEqual(
-            convert_to_legacy_status(SC_DatasetStatus.SYNC_QUEUED),
+            convert_to_legacy_status(SCLib_DatasetStatus.SYNC_QUEUED),
             'sync queued'
         )
     
     def test_performance_monitoring_integration(self):
         """Test performance monitoring integration."""
         # Initialize monitor
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         
@@ -364,7 +364,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_cleanup_and_maintenance_integration(self):
         """Test cleanup and maintenance operations."""
         # Initialize monitor
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         
@@ -389,7 +389,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_worker_management_integration(self):
         """Test worker management and monitoring."""
         # Initialize monitor
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         
@@ -424,7 +424,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_health_monitoring_integration(self):
         """Test health monitoring integration."""
         # Initialize monitor
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         
@@ -452,7 +452,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_job_cancellation_integration(self):
         """Test job cancellation workflow."""
         # Initialize monitor
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         
@@ -483,7 +483,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     def test_error_recovery_integration(self):
         """Test error recovery mechanisms."""
         # Initialize monitor
-        monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+        monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
         monitor.jobs = self.mock_jobs
         monitor.datasets = self.mock_datasets
         

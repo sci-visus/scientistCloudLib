@@ -17,19 +17,19 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from SCLib_UploadProcessor import SC_UploadProcessor
+from SCLib_UploadProcessor import SCLib_UploadProcessor
 from SCLib_UploadJobTypes import (
     UploadJobConfig, UploadSourceType, UploadStatus, SensorType
 )
 
 
-class TestSC_UploadProcessor(unittest.TestCase):
+class TestSCLib_UploadProcessor(unittest.TestCase):
     """Test SC_UploadProcessor class."""
     
     def setUp(self):
         """Set up test fixtures."""
         # Mock MongoDB operations before creating processor
-        self.mongo_patcher = patch('SC_UploadProcessor.mongo_collection_by_type_context')
+        self.mongo_patcher = patch('SCLib_UploadProcessor.mongo_collection_by_type_context')
         self.mock_mongo_context = self.mongo_patcher.start()
         
         # Create mock collection
@@ -37,10 +37,10 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.mock_mongo_context.return_value.__enter__.return_value = self.mock_collection
         self.mock_mongo_context.return_value.__exit__.return_value = None
         
-        self.processor = SC_UploadProcessor()
+        self.processor = SCLib_UploadProcessor()
         
         # Mock the configuration
-        with patch('SC_UploadProcessor.get_config') as mock_config:
+        with patch('SCLib_UploadProcessor.get_config') as mock_config:
             mock_config.return_value = MagicMock()
             self.processor.config = mock_config.return_value
     
@@ -60,7 +60,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.assertFalse(self.processor.running)
         self.assertIsNone(self.processor.worker_thread)
     
-    @patch('SC_UploadProcessor.get_collection_by_type')
+    @patch('SCLib_UploadProcessor.get_collection_by_type')
     def test_submit_upload_job(self, mock_get_collection):
         """Test submitting an upload job."""
         # Mock MongoDB collection
@@ -151,7 +151,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         success = self.processor.cancel_job("non_existent_job")
         self.assertFalse(success)
     
-    @patch('SC_UploadProcessor.get_collection_by_type')
+    @patch('SCLib_UploadProcessor.get_collection_by_type')
     def test_cancel_job_with_active_process(self, mock_get_collection):
         """Test canceling a job with an active process."""
         # Mock MongoDB collection
@@ -189,7 +189,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         # Verify job was removed from active jobs
         self.assertNotIn(job_id, self.processor.active_jobs)
     
-    @patch('SC_UploadProcessor.get_collection_by_type')
+    @patch('SCLib_UploadProcessor.get_collection_by_type')
     def test_cancel_job_process_timeout(self, mock_get_collection):
         """Test canceling a job when process termination times out."""
         # Mock MongoDB collection
@@ -438,7 +438,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.assertIn(f"service_account_file = {service_account_file}", config)
         self.assertIn("scope = drive", config)
     
-    @patch('SC_UploadProcessor.get_collection_by_type')
+    @patch('SCLib_UploadProcessor.get_collection_by_type')
     def test_store_job_in_db(self, mock_get_collection):
         """Test storing job in database."""
         # Mock MongoDB collection

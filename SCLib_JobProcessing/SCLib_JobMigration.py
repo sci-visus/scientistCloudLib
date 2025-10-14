@@ -11,14 +11,14 @@ from typing import Dict, Any, List, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SCLib_JobQueueManager
 from SCLib_JobTypes import (
-    SC_JobType, SC_DatasetStatus, LEGACY_STATUS_MAPPING, 
+    SCLib_JobType, SCLib_DatasetStatus, LEGACY_STATUS_MAPPING, 
     convert_legacy_status, convert_to_legacy_status
 )
 
 
-class SC_JobMigration:
+class SCLib_JobMigration:
     """
     Handles migration of existing datasets from the old system to the new job queue system.
     """
@@ -31,7 +31,7 @@ class SC_JobMigration:
             mongo_client: MongoDB client instance
             db_name: Database name
         """
-        self.job_queue = SC_JobQueueManager(mongo_client, db_name)
+        self.job_queue = SCLib_JobQueueManager(mongo_client, db_name)
         self.db = mongo_client[db_name]
         self.datasets = self.db.visstoredatas
         self.jobs = self.db.jobs
@@ -165,7 +165,7 @@ class SC_JobMigration:
         }
     
     def _determine_jobs_to_create(self, dataset: Dict[str, Any], 
-                                 dataset_status: SC_DatasetStatus) -> List[Dict[str, Any]]:
+                                 dataset_status: SCLib_DatasetStatus) -> List[Dict[str, Any]]:
         """Determine what jobs need to be created for a dataset."""
         jobs_to_create = []
         dataset_uuid = dataset['uuid']
@@ -181,9 +181,9 @@ class SC_JobMigration:
         output_dir = os.path.join(base_data_dir, 'converted', dataset_uuid)
         
         # Create jobs based on current status
-        if dataset_status == SC_DatasetStatus.SYNC_QUEUED:
+        if dataset_status == SCLib_DatasetStatus.SYNC_QUEUED:
             jobs_to_create.append({
-                'job_type': SC_JobType.GOOGLE_SYNC.value,
+                'job_type': SCLib_JobType.GOOGLE_SYNC.value,
                 'parameters': {
                     'user_email': user_email,
                     'input_dir': input_dir,
@@ -192,10 +192,10 @@ class SC_JobMigration:
                 'priority': 2
             })
         
-        elif dataset_status == SC_DatasetStatus.SYNCING:
+        elif dataset_status == SCLib_DatasetStatus.SYNCING:
             # Job is already running, create a monitoring job
             jobs_to_create.append({
-                'job_type': SC_JobType.GOOGLE_SYNC.value,
+                'job_type': SCLib_JobType.GOOGLE_SYNC.value,
                 'parameters': {
                     'user_email': user_email,
                     'input_dir': input_dir,
@@ -205,9 +205,9 @@ class SC_JobMigration:
                 'priority': 1
             })
         
-        elif dataset_status == SC_DatasetStatus.CONVERSION_QUEUED:
+        elif dataset_status == SCLib_DatasetStatus.CONVERSION_QUEUED:
             jobs_to_create.append({
-                'job_type': SC_JobType.DATASET_CONVERSION.value,
+                'job_type': SCLib_JobType.DATASET_CONVERSION.value,
                 'parameters': {
                     'input_path': self._determine_conversion_input(dataset, data_url, input_dir),
                     'output_path': output_dir,
@@ -217,10 +217,10 @@ class SC_JobMigration:
                 'priority': 1
             })
         
-        elif dataset_status == SC_DatasetStatus.CONVERTING:
+        elif dataset_status == SCLib_DatasetStatus.CONVERTING:
             # Job is already running, create a monitoring job
             jobs_to_create.append({
-                'job_type': SC_JobType.DATASET_CONVERSION.value,
+                'job_type': SCLib_JobType.DATASET_CONVERSION.value,
                 'parameters': {
                     'input_path': self._determine_conversion_input(dataset, data_url, input_dir),
                     'output_path': output_dir,
@@ -231,9 +231,9 @@ class SC_JobMigration:
                 'priority': 1
             })
         
-        elif dataset_status == SC_DatasetStatus.UPLOAD_QUEUED:
+        elif dataset_status == SCLib_DatasetStatus.UPLOAD_QUEUED:
             jobs_to_create.append({
-                'job_type': SC_JobType.FILE_UPLOAD.value,
+                'job_type': SCLib_JobType.FILE_UPLOAD.value,
                 'parameters': {
                     'files': self._get_upload_files(input_dir),
                     'destination': output_dir
@@ -241,9 +241,9 @@ class SC_JobMigration:
                 'priority': 2
             })
         
-        elif dataset_status == SC_DatasetStatus.UPLOADING:
+        elif dataset_status == SCLib_DatasetStatus.UPLOADING:
             jobs_to_create.append({
-                'job_type': SC_JobType.FILE_UPLOAD.value,
+                'job_type': SCLib_JobType.FILE_UPLOAD.value,
                 'parameters': {
                     'files': self._get_upload_files(input_dir),
                     'destination': output_dir,
@@ -252,9 +252,9 @@ class SC_JobMigration:
                 'priority': 1
             })
         
-        elif dataset_status == SC_DatasetStatus.UNZIPPING:
+        elif dataset_status == SCLib_DatasetStatus.UNZIPPING:
             jobs_to_create.append({
-                'job_type': SC_JobType.FILE_EXTRACTION.value,
+                'job_type': SCLib_JobType.FILE_EXTRACTION.value,
                 'parameters': {
                     'zip_file': self._find_zip_file(input_dir),
                     'extract_dir': os.path.join(input_dir, 'unzipped')
@@ -262,9 +262,9 @@ class SC_JobMigration:
                 'priority': 1
             })
         
-        elif dataset_status == SC_DatasetStatus.ZIPPING:
+        elif dataset_status == SCLib_DatasetStatus.ZIPPING:
             jobs_to_create.append({
-                'job_type': SC_JobType.DATA_COMPRESSION.value,
+                'job_type': SCLib_JobType.DATA_COMPRESSION.value,
                 'parameters': {
                     'source_dir': output_dir,
                     'compression_type': 'lz4'

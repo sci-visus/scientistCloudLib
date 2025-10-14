@@ -7,17 +7,17 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 
-from SCLib_JobMonitor import SC_JobMonitor
-from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobMonitor import SCLib_JobMonitor
+from SCLib_JobQueueManager import SCLib_JobQueueManager
 
 
-class TestSC_JobMonitor(unittest.TestCase):
+class TestSCLib_JobMonitor(unittest.TestCase):
     """Test cases for SC_JobMonitor."""
     
     def setUp(self):
         """Set up test fixtures."""
         self.mock_mongo_client = Mock()
-        self.mock_job_queue = Mock(spec=SC_JobQueueManager)
+        self.mock_job_queue = Mock(spec=SCLib_JobQueueManager)
         self.mock_db = Mock()
         self.mock_jobs = Mock()
         self.mock_datasets = Mock()
@@ -29,10 +29,10 @@ class TestSC_JobMonitor(unittest.TestCase):
             'visstoredatas': self.mock_datasets
         }[name])
         
-        with patch('SC_JobMonitor.SC_JobQueueManager') as mock_job_queue_class:
+        with patch('SCLib_JobMonitor.SCLib_JobQueueManager') as mock_job_queue_class:
             mock_job_queue_class.return_value = self.mock_job_queue
             
-            self.monitor = SC_JobMonitor(self.mock_mongo_client, 'test_db')
+            self.monitor = SCLib_JobMonitor(self.mock_mongo_client, 'test_db')
             self.monitor.jobs = self.mock_jobs
             self.monitor.datasets = self.mock_datasets
     

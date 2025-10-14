@@ -15,10 +15,10 @@ from typing import Dict, Any, Optional, List
 from pymongo import MongoClient
 
 # Import our job queue manager
-from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SCLib_JobQueueManager
 
 
-class SC_BackgroundService:
+class SCLib_BackgroundService:
     """
     Enhanced background service for processing ScientistCloud jobs.
     Handles job execution, monitoring, and error recovery.
@@ -33,7 +33,7 @@ class SC_BackgroundService:
         """
         self.settings = settings
         self.mongo_client = self._get_mongo_connection()
-        self.job_queue = SC_JobQueueManager(self.mongo_client, settings.get('db_name', 'scientistcloud'))
+        self.job_queue = SCLib_JobQueueManager(self.mongo_client, settings.get('db_name', 'scientistcloud'))
         self.worker_id = f"sc_worker_{os.getpid()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.running = False
         

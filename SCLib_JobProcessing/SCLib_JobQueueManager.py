@@ -11,7 +11,7 @@ from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
 
-class SC_JobQueueManager:
+class SCLib_JobQueueManager:
     """
     Manages job queue operations for ScientistCloud.
     Handles job creation, retrieval, status updates, and retry logic.

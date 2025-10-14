@@ -29,10 +29,10 @@ class TestSC_UploadAPI(unittest.TestCase):
     
     def test_health_check(self):
         """Test upload health check endpoint."""
-        with patch('SC_UploadAPI.upload_processor') as mock_processor:
+        with patch('SCLib_UploadAPI.upload_processor') as mock_processor:
             mock_processor.running = True
             
-            with patch('SC_UploadAPI._check_available_tools') as mock_tools:
+            with patch('SCLib_UploadAPI._check_available_tools') as mock_tools:
                 mock_tools.return_value = {
                     'rclone': True,
                     'rsync': True,
@@ -135,7 +135,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         response_data = json.loads(response.data)
         self.assertIn('Invalid source type', response_data['error'])
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_initiate_google_drive_upload(self, mock_processor):
         """Test initiating Google Drive upload."""
         mock_processor.submit_upload_job.return_value = "upload_12345"
@@ -170,7 +170,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         # Verify job was submitted
         mock_processor.submit_upload_job.assert_called_once()
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_initiate_s3_upload(self, mock_processor):
         """Test initiating S3 upload."""
         mock_processor.submit_upload_job.return_value = "upload_67890"
@@ -204,7 +204,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         # Verify job was submitted
         mock_processor.submit_upload_job.assert_called_once()
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_initiate_url_upload(self, mock_processor):
         """Test initiating URL upload."""
         mock_processor.submit_upload_job.return_value = "upload_11111"
@@ -297,7 +297,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         response_data = json.loads(response.data)
         self.assertIn('convert and is_public must be boolean values', response_data['error'])
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     @patch('tempfile.mkdtemp')
     @patch('builtins.open', new_callable=mock_open)
     def test_upload_local_file_success(self, mock_file, mock_mkdtemp, mock_processor):
@@ -334,7 +334,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         # Verify job was submitted
         mock_processor.submit_upload_job.assert_called_once()
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_get_upload_status(self, mock_processor):
         """Test getting upload status."""
         from SCLib_UploadJobTypes import UploadProgress, UploadStatus
@@ -366,7 +366,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         self.assertEqual(response_data['eta_seconds'], 120)
         self.assertEqual(response_data['current_file'], 'dataset.zip')
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_get_upload_status_not_found(self, mock_processor):
         """Test getting upload status for non-existent job."""
         mock_processor.get_job_status.return_value = None
@@ -377,7 +377,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         response_data = json.loads(response.data)
         self.assertIn('Job not found', response_data['error'])
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_cancel_upload(self, mock_processor):
         """Test canceling an upload."""
         mock_processor.cancel_job.return_value = True
@@ -393,7 +393,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         # Verify cancel was called
         mock_processor.cancel_job.assert_called_once_with('upload_12345')
     
-    @patch('SC_UploadAPI.upload_processor')
+    @patch('SCLib_UploadAPI.upload_processor')
     def test_cancel_upload_not_found(self, mock_processor):
         """Test canceling a non-existent upload."""
         mock_processor.cancel_job.return_value = False
@@ -404,7 +404,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         response_data = json.loads(response.data)
         self.assertIn('Job not found or already completed', response_data['error'])
     
-    @patch('SC_MongoConnection.execute_collection_query')
+    @patch('SCLib_MongoConnection.execute_collection_query')
     def test_list_upload_jobs(self, mock_execute_query):
         """Test listing upload jobs."""
         # Mock database query result
@@ -485,7 +485,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         
         # Test 500 error handler (simulated)
-        with patch('SC_UploadAPI.upload_processor') as mock_processor:
+        with patch('SCLib_UploadAPI.upload_processor') as mock_processor:
             mock_processor.submit_upload_job.side_effect = Exception("Test error")
             
             data = {

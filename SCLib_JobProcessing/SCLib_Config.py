@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SC_DatabaseConfig:
+class SCLib_DatabaseConfig:
     """Database configuration settings."""
     mongo_url: str
     db_name: str
@@ -45,7 +45,7 @@ class SC_DatabaseConfig:
 
 
 @dataclass
-class SC_CollectionConfig:
+class SCLib_CollectionConfig:
     """Collection names configuration."""
     # Core collections (from existing system)
     admins: str = 'admins'
@@ -68,7 +68,7 @@ class SC_CollectionConfig:
 
 
 @dataclass
-class SC_ServerConfig:
+class SCLib_ServerConfig:
     """Server and deployment configuration."""
     deploy_server: str
     domain_name: str
@@ -88,7 +88,7 @@ class SC_ServerConfig:
 
 
 @dataclass
-class SC_AuthConfig:
+class SCLib_AuthConfig:
     """Authentication configuration."""
     # Auth0 settings
     auth0_domain: str
@@ -112,7 +112,7 @@ class SC_AuthConfig:
 
 
 @dataclass
-class SC_GitConfig:
+class SCLib_GitConfig:
     """Git configuration."""
     git_branch_visstore: str
     git_branch_js: str
@@ -120,7 +120,7 @@ class SC_GitConfig:
 
 
 @dataclass
-class SC_JobProcessingConfig:
+class SCLib_JobProcessingConfig:
     """Job processing specific configuration."""
     # Job processing directories
     in_data_dir: str = '/mnt/visus_datasets/upload'
@@ -145,7 +145,7 @@ class SC_JobProcessingConfig:
     cleanup_old_jobs_days: int = 30
 
 
-class SC_Config:
+class SCLib_Config:
     """
     Centralized configuration manager for ScientistCloud.
     Handles environment variables, collection names, and system settings.
@@ -218,7 +218,7 @@ class SC_Config:
     def _initialize_configs(self):
         """Initialize all configuration objects."""
         # Database configuration
-        self.database = SC_DatabaseConfig(
+        self.database = SCLib_DatabaseConfig(
             mongo_url=os.getenv('MONGO_URL', ''),
             db_name=os.getenv('DB_NAME', 'scientistcloud'),
             db_host=os.getenv('DB_HOST', ''),
@@ -247,7 +247,7 @@ class SC_Config:
         )
         
         # Collection configuration
-        self.collections = SC_CollectionConfig(
+        self.collections = SCLib_CollectionConfig(
             # Core collections (from existing system)
             admins=os.getenv('COLLECTION_ADMINS', 'admins'),
             shared_team=os.getenv('COLLECTION_SHARED_TEAM', 'shared_team'),
@@ -269,7 +269,7 @@ class SC_Config:
         )
         
         # Server configuration
-        self.server = SC_ServerConfig(
+        self.server = SCLib_ServerConfig(
             deploy_server=os.getenv('DEPLOY_SERVER', 'https://scientistcloud.com'),
             domain_name=os.getenv('DOMAIN_NAME', 'scientistcloud.com'),
             env_file=os.getenv('ENV_FILE', 'env.scientistcloud.com'),
@@ -284,7 +284,7 @@ class SC_Config:
         )
         
         # Authentication configuration
-        self.auth = SC_AuthConfig(
+        self.auth = SCLib_AuthConfig(
             auth0_domain=os.getenv('AUTH0_DOMAIN', ''),
             auth0_client_id=os.getenv('AUTH0_CLIENT_ID', ''),
             auth0_client_secret=os.getenv('AUTH0_CLIENT_SECRET', ''),
@@ -300,14 +300,14 @@ class SC_Config:
         )
         
         # Git configuration
-        self.git = SC_GitConfig(
+        self.git = SCLib_GitConfig(
             git_branch_visstore=os.getenv('GIT_BRANCH_VISSTORE', 'ScientistCloud_merging'),
             git_branch_js=os.getenv('GIT_BRANCH_JS', 'VisStoreOpenVisusJS_5181'),
             git_token=os.getenv('GIT_TOKEN', '')
         )
         
         # Job processing configuration
-        self.job_processing = SC_JobProcessingConfig(
+        self.job_processing = SCLib_JobProcessingConfig(
             in_data_dir=os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload'),
             out_data_dir=os.getenv('JOB_OUT_DATA_DIR', '/mnt/visus_datasets/converted'),
             sync_data_dir=os.getenv('JOB_SYNC_DATA_DIR', '/mnt/visus_datasets/sync'),
@@ -506,10 +506,10 @@ class SC_Config:
 
 
 # Global configuration instance
-_config_instance: Optional[SC_Config] = None
+_config_instance: Optional[SCLib_Config] = None
 
 
-def get_config(env_file: Optional[str] = None) -> SC_Config:
+def get_config(env_file: Optional[str] = None) -> SCLib_Config:
     """
     Get global configuration instance.
     
@@ -517,15 +517,15 @@ def get_config(env_file: Optional[str] = None) -> SC_Config:
         env_file: Optional path to environment file
     
     Returns:
-        SC_Config instance
+        SCLib_Config instance
     """
     global _config_instance
     if _config_instance is None:
-        _config_instance = SC_Config(env_file)
+        _config_instance = SCLib_Config(env_file)
     return _config_instance
 
 
-def reload_config(env_file: Optional[str] = None) -> SC_Config:
+def reload_config(env_file: Optional[str] = None) -> SCLib_Config:
     """
     Reload configuration from environment.
     
@@ -533,10 +533,10 @@ def reload_config(env_file: Optional[str] = None) -> SC_Config:
         env_file: Optional path to environment file
     
     Returns:
-        New SC_Config instance
+        New SCLib_Config instance
     """
     global _config_instance
-    _config_instance = SC_Config(env_file)
+    _config_instance = SCLib_Config(env_file)
     return _config_instance
 
 
@@ -564,7 +564,7 @@ def get_job_processing_settings() -> Dict[str, Any]:
 
 if __name__ == '__main__':
     # Example usage and testing
-    print("SC_Config - ScientistCloud Configuration Manager")
+    print("SCLib_Config - ScientistCloud Configuration Manager")
     print("=" * 60)
     
     try:
