@@ -51,7 +51,7 @@ export DB_NAME="scientistcloud"
 export AUTH0_DOMAIN="your-domain.auth0.com"
 export AUTH0_CLIENT_ID="your-client-id"
 export AUTH0_CLIENT_SECRET="your-client-secret"
-export TEMP_DIR="/mnt/large_uploads"  # For large files
+# No separate temp directory needed - UUID handles organization
 ```
 
 ### 3. Start the Server

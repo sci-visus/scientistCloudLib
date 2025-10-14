@@ -67,7 +67,6 @@ def create_temp_directories():
     visus_datasets = os.getenv('VISUS_DATASETS', '/tmp')
     temp_dirs = [
         "/tmp/scientistcloud_uploads",
-        f"{visus_datasets}/large_uploads",
         f"{visus_datasets}/tmp"
     ]
     

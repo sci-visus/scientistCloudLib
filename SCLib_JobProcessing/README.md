@@ -168,14 +168,14 @@ Ensure proper permissions for data directories:
 
 **For Production/Server:**
 ```bash
-sudo mkdir -p /mnt/visus_datasets/{upload,converted,sync,auth,tmp,large_uploads}
+sudo mkdir -p /mnt/visus_datasets/{upload,converted,sync,auth,tmp}
 sudo chown -R $USER:$USER /mnt/visus_datasets
 sudo chmod -R 755 /mnt/visus_datasets
 ```
 
 **For Localhost Development:**
 ```bash
-mkdir -p ${VISUS_DATASETS}/{upload,converted,sync,auth,tmp,large_uploads}
+mkdir -p ${VISUS_DATASETS}/{upload,converted,sync,auth,tmp}
 chmod -R 755 ${VISUS_DATASETS}
 ```
 
@@ -236,16 +236,13 @@ echo "fs.file-max = 2097152" >> /etc/sysctl.conf
 sysctl -p
 ```
 
-#### 4. Temporary Directory Setup
+#### 4. Directory Organization
 
 ```bash
-# Create dedicated temp directory for large uploads
-sudo mkdir -p /mnt/large_uploads
-sudo chown -R $USER:$USER /mnt/large_uploads
-sudo chmod -R 755 /mnt/large_uploads
-
-# Set environment variable
-export TEMP_DIR="/mnt/large_uploads"
+# All files use UUID-based organization
+# Files are stored in: ${VISUS_DATASETS}/upload/{uuid}/
+# No separate directories needed - UUID handles organization
+# Large and small files use the same structure
 ```
 
 ## 🗂️ TB-Scale File Handling
