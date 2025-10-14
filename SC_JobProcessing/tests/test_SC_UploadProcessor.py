@@ -28,6 +28,15 @@ class TestSC_UploadProcessor(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
+        # Mock MongoDB operations before creating processor
+        self.mongo_patcher = patch('SC_UploadProcessor.mongo_collection_by_type_context')
+        self.mock_mongo_context = self.mongo_patcher.start()
+        
+        # Create mock collection
+        self.mock_collection = MagicMock()
+        self.mock_mongo_context.return_value.__enter__.return_value = self.mock_collection
+        self.mock_mongo_context.return_value.__exit__.return_value = None
+        
         self.processor = SC_UploadProcessor()
         
         # Mock the configuration
@@ -39,6 +48,9 @@ class TestSC_UploadProcessor(unittest.TestCase):
         """Clean up test fixtures."""
         if hasattr(self.processor, 'running') and self.processor.running:
             self.processor.stop()
+        
+        # Stop the MongoDB patcher
+        self.mongo_patcher.stop()
     
     def test_processor_initialization(self):
         """Test processor initialization."""
@@ -59,7 +71,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -75,13 +87,13 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.assertIn(job_id, self.processor.job_manager.progress_tracking)
         
         # Verify database storage
-        mock_collection.insert_one.assert_called_once()
-        call_args = mock_collection.insert_one.call_args[0][0]
+        self.mock_collection.insert_one.assert_called_once()
+        call_args = self.mock_collection.insert_one.call_args[0][0]
         self.assertEqual(call_args['job_id'], job_id)
         self.assertEqual(call_args['job_type'], 'upload')
         self.assertEqual(call_args['source_type'], 'local')
         self.assertEqual(call_args['dataset_uuid'], 'test_dataset_123')
-        self.assertEqual(call_args['user_email'], 'user@example.com')
+        self.assertEqual(call_args['config']['user_email'], 'user@example.com')
     
     def test_get_job_status(self):
         """Test getting job status."""
@@ -89,7 +101,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -116,7 +128,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -150,7 +162,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -188,7 +200,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -218,7 +230,8 @@ class TestSC_UploadProcessor(unittest.TestCase):
     
     @patch('os.path.exists')
     @patch('os.path.getsize')
-    def test_process_local_upload(self, mock_getsize, mock_exists):
+    @patch('pathlib.Path.mkdir')
+    def test_process_local_upload(self, mock_mkdir, mock_getsize, mock_exists):
         """Test processing local file upload."""
         # Mock file system
         mock_exists.return_value = True
@@ -228,7 +241,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -260,7 +273,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/nonexistent_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -284,7 +297,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.GOOGLE_DRIVE,
             source_path="1ABC123DEF456",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -313,7 +326,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.GOOGLE_DRIVE,
             source_path="1ABC123DEF456",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -338,7 +351,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.S3,
             source_path="s3://my-bucket/data/dataset.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -369,7 +382,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.URL,
             source_path="https://example.com/dataset.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -436,7 +449,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -447,23 +460,19 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.processor._store_job_in_db("test_job_123", job_config)
         
         # Verify database call
-        mock_collection.insert_one.assert_called_once()
-        call_args = mock_collection.insert_one.call_args[0][0]
+        self.mock_collection.insert_one.assert_called_once()
+        call_args = self.mock_collection.insert_one.call_args[0][0]
         self.assertEqual(call_args['job_id'], "test_job_123")
         self.assertEqual(call_args['job_type'], 'upload')
         self.assertEqual(call_args['source_type'], 'local')
         self.assertEqual(call_args['dataset_uuid'], 'test_dataset_123')
-        self.assertEqual(call_args['user_email'], 'user@example.com')
+        # user_email is stored in config section
+        self.assertEqual(call_args['config']['user_email'], 'user@example.com')
     
-    @patch('SC_UploadProcessor.get_collection_by_type')
-    def test_get_queued_jobs(self, mock_get_collection):
+    def test_get_queued_jobs(self):
         """Test getting queued jobs from database."""
-        # Mock MongoDB collection
-        mock_collection = MagicMock()
-        mock_get_collection.return_value = mock_collection
-        
         # Mock database query result
-        mock_collection.find.return_value = [
+        self.mock_collection.find.return_value = [
             {"job_id": "job_1"},
             {"job_id": "job_2"},
             {"job_id": "job_3"}
@@ -476,18 +485,13 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.assertEqual(jobs, ["job_1", "job_2", "job_3"])
         
         # Verify database query
-        mock_collection.find.assert_called_once_with({
+        self.mock_collection.find.assert_called_once_with({
             "job_type": "upload",
             "status": "queued"
         }, {"job_id": 1})
     
-    @patch('SC_UploadProcessor.get_collection_by_type')
-    def test_update_job_in_db(self, mock_get_collection):
+    def test_update_job_in_db(self):
         """Test updating job in database."""
-        # Mock MongoDB collection
-        mock_collection = MagicMock()
-        mock_get_collection.return_value = mock_collection
-        
         # Update job
         update_data = {
             "status": "uploading",
@@ -497,7 +501,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         self.processor._update_job_in_db("test_job_123", update_data)
         
         # Verify database call
-        mock_collection.update_one.assert_called_once_with(
+        self.mock_collection.update_one.assert_called_once_with(
             {"job_id": "test_job_123"},
             {"$set": update_data}
         )
@@ -508,7 +512,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",
@@ -536,7 +540,7 @@ class TestSC_UploadProcessor(unittest.TestCase):
         job_config = UploadJobConfig(
             source_type=UploadSourceType.LOCAL,
             source_path="/tmp/test_file.zip",
-            destination_path="/mnt/visus_datasets/upload/test_dataset",
+            destination_path=os.path.join(tempfile.mkdtemp(), "test_dataset"),
             dataset_uuid="test_dataset_123",
             user_email="user@example.com",
             dataset_name="Test Dataset",

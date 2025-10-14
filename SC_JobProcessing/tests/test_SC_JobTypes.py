@@ -45,16 +45,18 @@ class TestSC_JobTypes(unittest.TestCase):
     def test_dataset_status_enum_values(self):
         """Test that dataset status enum has expected values."""
         expected_statuses = [
-            'submitted', 'sync_queued', 'syncing', 'conversion_queued',
-            'converting', 'upload_queued', 'uploading', 'unzipping',
-            'zipping', 'done', 'sync_error', 'conversion_error',
-            'upload_error', 'unzip_error', 'compression_error',
+            'submitted', 'sync queued', 'syncing', 'conversion queued',
+            'converting', 'upload queued', 'uploading', 'unzipping',
+            'zipping', 'done', 'sync error', 'conversion error',
+            'upload error', 'unzip error', 'compression error',
             'failed', 'retrying'
         ]
         
         for status in expected_statuses:
-            self.assertTrue(hasattr(SC_DatasetStatus, status.upper()))
-            self.assertEqual(getattr(SC_DatasetStatus, status.upper()).value, status)
+            # Convert spaces to underscores for enum attribute names
+            attr_name = status.upper().replace(' ', '_')
+            self.assertTrue(hasattr(SC_DatasetStatus, attr_name))
+            self.assertEqual(getattr(SC_DatasetStatus, attr_name).value, status)
     
     def test_job_priority_values(self):
         """Test job priority values."""

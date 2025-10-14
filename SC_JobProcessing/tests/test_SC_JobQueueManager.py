@@ -23,11 +23,11 @@ class TestSC_JobQueueManager(unittest.TestCase):
         self.mock_jobs = Mock()
         self.mock_datasets = Mock()
         
-        self.mock_client.__getitem__.return_value = self.mock_db
-        self.mock_db.__getitem__.side_effect = lambda name: {
+        self.mock_client.__getitem__ = Mock(return_value=self.mock_db)
+        self.mock_db.__getitem__ = Mock(side_effect=lambda name: {
             'jobs': self.mock_jobs,
             'visstoredatas': self.mock_datasets
-        }[name]
+        }[name])
         
         self.job_queue = SC_JobQueueManager(self.mock_client, 'test_db')
         self.job_queue.jobs = self.mock_jobs

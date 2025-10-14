@@ -199,10 +199,15 @@ def upload_local_file():
         
         # Parse boolean values
         try:
+            if convert_str.lower() not in ['true', '1', 'yes', 'on', 'false', '0', 'no', 'off']:
+                return jsonify({'error': 'convert and is_public must be boolean values'}), 400
+            if is_public_str.lower() not in ['true', '1', 'yes', 'on', 'false', '0', 'no', 'off']:
+                return jsonify({'error': 'convert and is_public must be boolean values'}), 400
+            
             convert = convert_str.lower() in ['true', '1', 'yes', 'on']
             is_public = is_public_str.lower() in ['true', '1', 'yes', 'on']
         except AttributeError:
-            return jsonify({'error': 'Invalid boolean values for convert or is_public'}), 400
+            return jsonify({'error': 'convert and is_public must be boolean values'}), 400
         
         # Get optional parameters
         folder = request.form.get('folder')
@@ -228,8 +233,7 @@ def upload_local_file():
             convert=convert,
             is_public=is_public,
             folder=folder,
-            team_uuid=team_uuid,
-            delete_after_upload=True  # Clean up temp file after upload
+            team_uuid=team_uuid
         )
         
         # Submit job

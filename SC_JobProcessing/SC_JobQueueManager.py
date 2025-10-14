@@ -34,17 +34,18 @@ class SC_JobQueueManager:
     
     def _create_indexes(self):
         """Create database indexes for optimal performance."""
-        try:
-            # Index for job retrieval
-            self.jobs.create_index([("status", 1), ("priority", 1), ("created_at", 1)])
-            # Index for dataset lookup
-            self.jobs.create_index([("dataset_uuid", 1)])
-            # Index for worker lookup
-            self.jobs.create_index([("worker_id", 1)])
-            # Index for stale job detection
-            self.jobs.create_index([("status", 1), ("started_at", 1)])
-        except PyMongoError as e:
-            print(f"Warning: Could not create indexes: {e}")
+        indexes = [
+            [("status", 1), ("priority", 1), ("created_at", 1)],  # Job retrieval
+            [("dataset_uuid", 1)],  # Dataset lookup
+            [("worker_id", 1)],  # Worker lookup
+            [("status", 1), ("started_at", 1)]  # Stale job detection
+        ]
+        
+        for index in indexes:
+            try:
+                self.jobs.create_index(index)
+            except PyMongoError as e:
+                print(f"Warning: Could not create index {index}: {e}")
     
     def create_job(self, dataset_uuid: str, job_type: str, parameters: Dict[str, Any], 
                    priority: int = 2, max_attempts: int = 3) -> str:
@@ -154,16 +155,19 @@ class SC_JobQueueManager:
         if error:
             update_data['error'] = error
         
+        # Prepare update document
+        update_doc = {'$set': update_data}
+        
         # Add log entry if provided
         if log_message:
             log_entry = {
                 'timestamp': datetime.utcnow(),
                 'message': log_message
             }
-            update_data['$push'] = {'logs': log_entry}
+            update_doc['$push'] = {'logs': log_entry}
         
         try:
-            result = self.jobs.update_one({'job_id': job_id}, {'$set': update_data})
+            result = self.jobs.update_one({'job_id': job_id}, update_doc)
             if result.modified_count > 0:
                 print(f"Updated job {job_id} status to {status}")
                 return True

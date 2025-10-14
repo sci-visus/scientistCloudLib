@@ -482,6 +482,11 @@ scope = drive
     def _store_job_in_db(self, job_id: str, job_config: UploadJobConfig):
         """Store upload job in database."""
         with mongo_collection_by_type_context('jobs') as collection:
+            # Convert config to BSON-serializable format
+            config_dict = job_config.__dict__.copy()
+            config_dict['source_type'] = job_config.source_type.value
+            config_dict['sensor'] = job_config.sensor.value
+            
             job_doc = {
                 "job_id": job_id,
                 "job_type": "upload",
@@ -492,7 +497,7 @@ scope = drive
                 "user_id": job_config.user_id,
                 "status": UploadStatus.QUEUED.value,
                 "created_at": job_config.created_at,
-                "config": job_config.__dict__
+                "config": config_dict
             }
             collection.insert_one(job_doc)
     

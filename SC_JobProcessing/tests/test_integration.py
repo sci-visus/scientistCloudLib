@@ -194,7 +194,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         
         # Verify migration results
         self.assertEqual(result['statistics']['datasets_processed'], 2)
-        self.assertEqual(result['statistics']['jobs_created'], 0)  # Not tracked in this test
+        self.assertEqual(result['statistics']['jobs_created'], 2)  # Should create 2 jobs for 2 datasets
         self.assertEqual(result['statistics']['errors'], 0)
     
     def test_error_handling_and_recovery(self):

@@ -133,7 +133,7 @@ class TestSC_UploadAPI(unittest.TestCase):
         
         self.assertEqual(response.status_code, 400)
         response_data = json.loads(response.data)
-        self.assertIn('Unsupported source type', response_data['error'])
+        self.assertIn('Invalid source type', response_data['error'])
     
     @patch('SC_UploadAPI.upload_processor')
     def test_initiate_google_drive_upload(self, mock_processor):
@@ -404,11 +404,11 @@ class TestSC_UploadAPI(unittest.TestCase):
         response_data = json.loads(response.data)
         self.assertIn('Job not found or already completed', response_data['error'])
     
-    @patch('SC_UploadAPI.upload_processor.get_jobs_by_user')
-    def test_list_upload_jobs(self, mock_get_jobs):
+    @patch('SC_MongoConnection.execute_collection_query')
+    def test_list_upload_jobs(self, mock_execute_query):
         """Test listing upload jobs."""
         # Mock database query result
-        mock_get_jobs.return_value = [
+        mock_execute_query.return_value = [
             {
                 'job_id': 'upload_1',
                 'dataset_uuid': 'dataset_1',
@@ -478,8 +478,10 @@ class TestSC_UploadAPI(unittest.TestCase):
     
     def test_error_handlers(self):
         """Test error handlers."""
-        # Test 400 error handler
-        response = self.app.get('/api/upload/initiate')  # Missing data
+        # Test 400 error handler - POST with missing data
+        response = self.app.post('/api/upload/initiate',
+                               data=json.dumps({}),
+                               content_type='application/json')
         self.assertEqual(response.status_code, 400)
         
         # Test 500 error handler (simulated)

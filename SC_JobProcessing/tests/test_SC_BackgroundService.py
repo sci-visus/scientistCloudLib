@@ -42,7 +42,7 @@ class TestSC_BackgroundService(unittest.TestCase):
         with patch('SC_BackgroundService.SC_JobQueueManager') as mock_job_queue_class:
             mock_job_queue_class.return_value = self.mock_job_queue
             
-            with patch('SC_BackgroundService.get_mongo_connection') as mock_get_connection:
+            with patch('SC_MongoConnection.get_mongo_connection') as mock_get_connection:
                 mock_get_connection.return_value = self.mock_mongo_client
                 
                 self.service = SC_BackgroundService(self.settings)
@@ -128,9 +128,12 @@ class TestSC_BackgroundService(unittest.TestCase):
         mock_file = Mock()
         mock_open.return_value.__enter__.return_value = mock_file
         
-        # Mock job handler
+        # Mock job handler - patch before calling the method
         with patch.object(self.service, '_handle_dataset_conversion') as mock_handler:
             mock_handler.return_value = {'status': 'success'}
+            
+            # Update the job_handlers dictionary to use the mocked method
+            self.service.job_handlers['dataset_conversion'] = mock_handler
             
             # Mock cleanup
             with patch.object(self.service, '_cleanup_job') as mock_cleanup:
@@ -526,7 +529,8 @@ class TestSC_BackgroundService(unittest.TestCase):
     @patch('psutil.Process')
     def test_is_process_running_false(self, mock_process_class):
         """Test process running check when process is not running."""
-        mock_process_class.side_effect = Exception("Process not found")
+        import psutil
+        mock_process_class.side_effect = psutil.NoSuchProcess(12345)
         
         result = self.service._is_process_running(12345)
         

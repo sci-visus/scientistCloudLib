@@ -52,7 +52,7 @@ class SC_BackgroundService:
     def _get_mongo_connection(self) -> MongoClient:
         """Get MongoDB connection."""
         try:
-            from mongo_connection import get_mongo_connection
+            from SC_MongoConnection import get_mongo_connection
             return get_mongo_connection()
         except ImportError:
             # Fallback for direct connection

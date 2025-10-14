@@ -23,11 +23,11 @@ class TestSC_JobMonitor(unittest.TestCase):
         self.mock_datasets = Mock()
         
         # Setup mock database structure
-        self.mock_mongo_client.__getitem__.return_value = self.mock_db
-        self.mock_db.__getitem__.side_effect = lambda name: {
+        self.mock_mongo_client.__getitem__ = Mock(return_value=self.mock_db)
+        self.mock_db.__getitem__ = Mock(side_effect=lambda name: {
             'jobs': self.mock_jobs,
             'visstoredatas': self.mock_datasets
-        }[name]
+        }[name])
         
         with patch('SC_JobMonitor.SC_JobQueueManager') as mock_job_queue_class:
             mock_job_queue_class.return_value = self.mock_job_queue
@@ -546,7 +546,7 @@ class TestSC_JobMonitor(unittest.TestCase):
             {
                 '_id': 'dataset_conversion',
                 'count': 150,  # High volume
-                'avg_duration': 7200.0  # 2 hours (long duration)
+                'avg_duration_seconds': 7200.0  # 2 hours (long duration)
             }
         ]
         
