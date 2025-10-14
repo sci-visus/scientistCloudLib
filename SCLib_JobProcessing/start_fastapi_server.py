@@ -16,27 +16,45 @@ sys.path.insert(0, str(Path(__file__).parent))
 def load_env_file(env_path: str = None):
     """Load environment variables from env.local file."""
     if env_path is None:
-        # Try to find env.local in common locations
-        possible_paths = [
-            Path.cwd() / "env.local",
-            Path.cwd().parent / "env.local", 
-            Path.cwd().parent / "SCLib_TryTest" / "env.local",
-            Path.cwd().parent.parent / "SCLib_TryTest" / "env.local",  # Go up one more level
-            Path.home() / "env.local",
-            # Try to use SCLIB_MYTEST if it's already set
-            Path(os.getenv('SCLIB_MYTEST', '')) / "env.local" if os.getenv('SCLIB_MYTEST') else None
-        ]
-        
-        # Filter out None values
-        possible_paths = [p for p in possible_paths if p is not None]
-        
-        print(f"🔍 Searching for env.local in {len(possible_paths)} locations...")
-        for i, path in enumerate(possible_paths):
-            exists = path.exists()
-            print(f"   {i+1}. {path} {'✅' if exists else '❌'}")
-            if exists:
-                env_path = str(path)
-                break
+        # Check for explicit environment file variable first
+        env_file_from_env = os.getenv('SCLIB_ENV_FILE')
+        if env_file_from_env and Path(env_file_from_env).exists():
+            env_path = env_file_from_env
+            print(f"📁 Using environment file from SCLIB_ENV_FILE: {env_path}")
+        else:
+            # Try to find env.local in common locations
+            possible_paths = []
+            
+            # Check SCLIB_MYTEST first
+            sclib_mytest = os.getenv('SCLIB_MYTEST')
+            if sclib_mytest:
+                possible_paths.append(Path(sclib_mytest) / "env.local")
+            
+            # Check SCLIB_HOME
+            sclib_home = os.getenv('SCLIB_HOME')
+            if sclib_home:
+                possible_paths.append(Path(sclib_home) / "env.local")
+                possible_paths.append(Path(sclib_home).parent / "env.local")
+            
+            # Add relative paths
+            possible_paths.extend([
+                Path.cwd() / "env.local",
+                Path.cwd().parent / "env.local", 
+                Path.cwd().parent / "SCLib_TryTest" / "env.local",
+                Path.cwd().parent.parent / "SCLib_TryTest" / "env.local",
+                Path.home() / "env.local"
+            ])
+            
+            # Filter out None values and non-existent paths
+            possible_paths = [p for p in possible_paths if p is not None]
+            
+            print(f"🔍 Searching for env.local in {len(possible_paths)} locations...")
+            for i, path in enumerate(possible_paths):
+                exists = path.exists()
+                print(f"   {i+1}. {path} {'✅' if exists else '❌'}")
+                if exists:
+                    env_path = str(path)
+                    break
     
     if env_path and Path(env_path).exists():
         print(f"📁 Loading environment from: {env_path}")
@@ -141,6 +159,11 @@ def main():
     print(f"   Port: {args.port}")
     print(f"   Workers: {args.workers}")
     print()
+    
+    # Set SCLIB_ENV_FILE environment variable if specified
+    if args.env_file:
+        os.environ['SCLIB_ENV_FILE'] = args.env_file
+        print(f"🔧 Set SCLIB_ENV_FILE: {args.env_file}")
     
     # Load environment variables from env.local
     load_env_file(args.env_file)

@@ -57,6 +57,9 @@ Before using the upload client, you need to set up several services:
 The system requires extensive environment configuration. Create an environment file with these variables:
 
 ```bash
+# Explicit environment file path to this file
+SCLIB_ENV_FILE=/path/to/your/env.local                     # Override auto-detection
+
 # Database Configuration
 MONGO_URL=mongodb://localhost:27017
 DB_NAME=scientistcloud
@@ -66,6 +69,7 @@ DB_PASS=your_password
 # SCLib Directory Structure
 SCLIB_HOME=/path/to/scientistCloudLib/SCLib_JobProcessing  # Source code directory
 SCLIB_MYTEST=/path/to/SCLib_TryTest                        # Test environment directory
+
 
 # Server Configuration
 DEPLOY_SERVER=your-server.com
@@ -138,15 +142,16 @@ This separation allows you to:
 
 4. **Start FastAPI Server**:
    ```bash
-   # Load environment variables first
-   source ${SCLIB_MYTEST}/env.local
-   
-   # The script will automatically find and load env.local
+   # Option 1: Auto-detection (uses SCLIB_MYTEST or SCLIB_HOME)
    cd ${SCLIB_HOME}
    python start_fastapi_server.py --port 8000
    
-   # Or specify the env file explicitly
+   # Option 2: Explicit env file path
    python start_fastapi_server.py --port 8000 --env-file ${SCLIB_MYTEST}/env.local
+   
+   # Option 3: Set environment variable first
+   export SCLIB_ENV_FILE=${SCLIB_MYTEST}/env.local
+   python start_fastapi_server.py --port 8000
    ```
 
 5. **Verify Setup**:
@@ -160,6 +165,8 @@ This separation allows you to:
    
    # Test MongoDB connection
    python -c "from SCLib_MongoConnection import get_mongo_connection; print('MongoDB connected:', get_mongo_connection())"
+
+   cd /Users/amygooch/GIT/ScientistCloud_2.0/SCLib_TryTest && source env.local && python test_mongodb_access.py
    
    # Test API server
    curl -s http://localhost:8000/api/upload/supported-sources
@@ -663,9 +670,12 @@ pip install awscli
 ### Setup
 
 1. **Environment Variables**:
-   The system automatically detects and loads environment files from:
-   - `/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.scientistcloud.com`
-   - `/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.all`
+   The system automatically detects and loads environment files in this priority order:
+   - **`SCLIB_ENV_FILE`** - Explicit path (highest priority)
+   - **`SCLIB_MYTEST/env.local`** - From SCLIB_MYTEST directory
+   - **`SCLIB_HOME/env.local`** - From SCLIB_HOME directory
+   - **`SCLIB_HOME/../env.local`** - From SCLIB_HOME parent directory
+   - **Relative paths** - `./env.local`, `../env.local`, etc.
    
    Or set manually:
    ```bash
@@ -706,12 +716,16 @@ pip install awscli
 ### Starting the FastAPI Server
 
 ```bash
-# The script will automatically find and load env.local
+# Option 1: Auto-detection (uses SCLIB_MYTEST or SCLIB_HOME)
 cd ${SCLIB_HOME}
 python start_fastapi_server.py --port 8000
 
-# Or specify the env file explicitly
+# Option 2: Explicit env file path
 python start_fastapi_server.py --port 8000 --env-file ${SCLIB_MYTEST}/env.local
+
+# Option 3: Set environment variable first
+export SCLIB_ENV_FILE=${SCLIB_MYTEST}/env.local
+python start_fastapi_server.py --port 8000
 
 # The server will start on http://localhost:8000
 # Automatically handles both small and large files

@@ -190,10 +190,47 @@ class SCLib_Config:
     
     def _auto_detect_env_file(self):
         """Auto-detect environment file based on common patterns."""
-        # Common environment file locations
+        # Check for environment variable first
+        env_file_from_env = os.getenv('SCLIB_ENV_FILE')
+        if env_file_from_env and os.path.exists(env_file_from_env):
+            logger.info(f"Using environment file from SCLIB_ENV_FILE: {env_file_from_env}")
+            self._load_env_file(env_file_from_env)
+            return
+        
+        # Check for SCLIB_MYTEST environment variable
+        sclib_mytest = os.getenv('SCLIB_MYTEST')
+        if sclib_mytest:
+            env_local_path = os.path.join(sclib_mytest, 'env.local')
+            if os.path.exists(env_local_path):
+                logger.info(f"Using environment file from SCLIB_MYTEST: {env_local_path}")
+                self._load_env_file(env_local_path)
+                return
+        
+        # Check for SCLIB_HOME environment variable
+        sclib_home = os.getenv('SCLIB_HOME')
+        if sclib_home:
+            # Look for env.local in SCLIB_HOME directory
+            env_local_path = os.path.join(sclib_home, 'env.local')
+            if os.path.exists(env_local_path):
+                logger.info(f"Using environment file from SCLIB_HOME: {env_local_path}")
+                self._load_env_file(env_local_path)
+                return
+            
+            # Look for env.local in parent directory of SCLIB_HOME
+            parent_env_path = os.path.join(os.path.dirname(sclib_home), 'env.local')
+            if os.path.exists(parent_env_path):
+                logger.info(f"Using environment file from SCLIB_HOME parent: {parent_env_path}")
+                self._load_env_file(parent_env_path)
+                return
+        
+        # Fallback to relative paths (no hardcoded absolute paths)
         possible_paths = [
-            '/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.scientistcloud.com',
-            '/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.all',
+            './env.local',
+            '../env.local',
+            './config/env.local',
+            '../config/env.local',
+            './SCLib_TryTest/env.local',
+            '../SCLib_TryTest/env.local',
             './config/env.scientistcloud.com',
             './config/env.all',
             '../config/env.scientistcloud.com',
@@ -205,6 +242,8 @@ class SCLib_Config:
                 logger.info(f"Auto-detected environment file: {path}")
                 self._load_env_file(path)
                 break
+        else:
+            logger.info("No environment file found, using system environment variables only")
     
     def _load_system_environment(self):
         """Load system environment variables."""
