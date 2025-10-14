@@ -738,15 +738,49 @@ python start_fastapi_server.py --port 8000
 The `ScientistCloudUploadClient` provides a clean, easy-to-use interface:
 
 ```python
-from SCLib_JobProcessing import ScientistCloudUploadClient
+from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
 client = ScientistCloudUploadClient("http://localhost:8000")
 
-# Upload a local file
-result = client.upload_local_file(
-    file_path="/path/to/dataset.zip",
-    user_email="user@example.com", 
+# Upload a single file
+result = client.upload_file(
+    file_path="/path/to/your/file.tiff",
+    user_email="user@example.com",
     dataset_name="My Dataset",
+    sensor="TIFF"
+)
+
+# Upload an entire directory
+results = client.upload_directory(
+    directory_path="/path/to/your/directory",
+    user_email="user@example.com",
+    dataset_name="My Dataset",
+    sensor="IDX"
+)
+
+# Upload from Google Drive
+result = client.upload_from_source(
+    source_type="google_drive",
+    source_config={
+        "file_id": "your-file-id",
+        "service_account_file": "/path/to/service-account.json"
+    },
+    user_email="user@example.com",
+    dataset_name="Google Drive Dataset",
+    sensor="TIFF"
+)
+
+# Upload from S3
+result = client.upload_from_source(
+    source_type="s3",
+    source_config={
+        "bucket_name": "my-bucket",
+        "object_key": "path/to/file.tiff",
+        "access_key_id": "your-access-key",
+        "secret_access_key": "your-secret-key"
+    },
+    user_email="user@example.com",
+    dataset_name="S3 Dataset",
     sensor="TIFF"
 )
 

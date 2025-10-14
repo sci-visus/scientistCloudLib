@@ -362,6 +362,9 @@ class SCLib_Config:
             performance_report_interval=int(os.getenv('PERFORMANCE_REPORT_INTERVAL', '3600')),
             cleanup_old_jobs_days=int(os.getenv('CLEANUP_OLD_JOBS_DAYS', '30'))
         )
+        
+        # Source directory for uploads
+        self.source_dir = os.getenv('SCLIB_SOURCE_DIR', os.getcwd())
     
     def get_mongo_url(self) -> str:
         """Get the complete MongoDB URL with all connection parameters."""

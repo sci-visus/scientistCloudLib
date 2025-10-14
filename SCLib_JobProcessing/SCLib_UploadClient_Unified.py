@@ -326,6 +326,257 @@ class ScientistCloudUploadClient:
         response = self.session.get(url, timeout=self.timeout)
         response.raise_for_status()
         return response.json()
+    
+    def upload_directory(self, directory_path: str, user_email: str, dataset_name: str,
+                        sensor: str, convert: bool = True, is_public: bool = False,
+                        folder: str = None, team_uuid: str = None,
+                        progress_callback: Callable[[float], None] = None) -> List[UploadResult]:
+        """
+        Upload all files in a directory automatically.
+        
+        Args:
+            directory_path: Path to directory containing files to upload
+            user_email: User email address
+            dataset_name: Base name for the dataset
+            sensor: Sensor type
+            convert: Whether to convert the data
+            is_public: Whether dataset is public
+            folder: Optional folder name
+            team_uuid: Optional team UUID
+            progress_callback: Progress callback function
+            
+        Returns:
+            List of UploadResult objects for each file uploaded
+        """
+        directory_path_obj = Path(directory_path)
+        
+        if not directory_path_obj.exists():
+            raise FileNotFoundError(f"Directory not found: {directory_path}")
+        
+        if not directory_path_obj.is_dir():
+            raise ValueError(f"Path is not a directory: {directory_path}")
+        
+        # Find all files in the directory
+        files_to_upload = []
+        for file_path in directory_path_obj.rglob('*'):
+            if file_path.is_file():
+                files_to_upload.append(file_path)
+        
+        if not files_to_upload:
+            raise ValueError(f"No files found in directory: {directory_path}")
+        
+        print(f"📁 Found {len(files_to_upload)} files in directory: {directory_path}")
+        
+        # Upload each file
+        results = []
+        for i, file_path in enumerate(files_to_upload, 1):
+            relative_path = file_path.relative_to(directory_path_obj)
+            
+            # Create dataset name with subdirectory structure
+            if relative_path.parent != Path('.'):
+                file_dataset_name = f"{dataset_name}/{relative_path.parent}"
+            else:
+                file_dataset_name = dataset_name
+            
+            # Create folder with subdirectory structure
+            if folder:
+                file_folder = f"{folder}/{relative_path.parent}" if relative_path.parent != Path('.') else folder
+            else:
+                file_folder = f"directory_upload/{dataset_name}/{relative_path.parent}" if relative_path.parent != Path('.') else f"directory_upload/{dataset_name}"
+            
+            print(f"📤 Uploading {i}/{len(files_to_upload)}: {relative_path}")
+            
+            try:
+                # Create progress callback for this file
+                def file_progress_callback(progress: float):
+                    if progress_callback:
+                        # Calculate overall progress across all files
+                        overall_progress = ((i - 1) + progress) / len(files_to_upload)
+                        progress_callback(overall_progress)
+                    print(f"   Progress: {progress*100:.1f}%", end='\r')
+                
+                result = self.upload_file(
+                    file_path=str(file_path),
+                    user_email=user_email,
+                    dataset_name=file_dataset_name,
+                    sensor=sensor,
+                    convert=convert,
+                    is_public=is_public,
+                    folder=file_folder,
+                    team_uuid=team_uuid,
+                    progress_callback=file_progress_callback
+                )
+                
+                print(f"   ✅ Uploaded: {result.job_id}")
+                results.append(result)
+                
+            except Exception as e:
+                print(f"   ❌ Failed: {e}")
+                # Create a failed result
+                failed_result = UploadResult(
+                    job_id="",
+                    status="failed",
+                    message=f"Failed to upload {relative_path}: {e}",
+                    upload_type="failed"
+                )
+                results.append(failed_result)
+        
+        print(f"\n🎉 Directory upload complete!")
+        print(f"   Successfully uploaded: {len([r for r in results if r.status != 'failed'])} files")
+        print(f"   Failed uploads: {len([r for r in results if r.status == 'failed'])} files")
+        
+        return results
+    
+    def upload_from_source(self, source_type: str, source_config: dict, user_email: str, 
+                          dataset_name: str, sensor: str, convert: bool = True, 
+                          is_public: bool = False, folder: str = None, 
+                          team_uuid: str = None, progress_callback: Callable[[float], None] = None) -> UploadResult:
+        """
+        Upload from any source type (Google Drive, S3, URL, etc.).
+        
+        Args:
+            source_type: Type of source ('google_drive', 's3', 'url', 'local')
+            source_config: Source-specific configuration
+            user_email: User email address
+            dataset_name: Name for the dataset
+            sensor: Sensor type
+            convert: Whether to convert the data
+            is_public: Whether dataset is public
+            folder: Optional folder name
+            team_uuid: Optional team UUID
+            progress_callback: Progress callback function
+            
+        Returns:
+            UploadResult object
+        """
+        # Prepare the request data
+        data = {
+            "source_type": source_type,
+            "source_config": source_config,
+            "user_email": user_email,
+            "dataset_name": dataset_name,
+            "sensor": sensor,
+            "convert": convert,
+            "is_public": is_public,
+            "folder": folder,
+            "team_uuid": team_uuid
+        }
+        
+        # Send the request
+        url = f"{self.base_url}/api/upload/initiate"
+        response = self.session.post(url, json=data, timeout=self.timeout)
+        response.raise_for_status()
+        
+        result = response.json()
+        return UploadResult(
+            job_id=result['job_id'],
+            status=result['status'],
+            message=result['message'],
+            upload_type=result.get('upload_type', 'standard'),
+            estimated_duration=result.get('estimated_duration')
+        )
+    
+    def upload_directory_from_source(self, source_type: str, source_config: dict, 
+                                   user_email: str, dataset_name: str, sensor: str,
+                                   convert: bool = True, is_public: bool = False,
+                                   folder: str = None, team_uuid: str = None,
+                                   progress_callback: Callable[[float], None] = None) -> List[UploadResult]:
+        """
+        Upload directory from any source type (Google Drive, S3, etc.).
+        
+        This method handles directory uploads from remote sources by:
+        1. For Google Drive: Lists all files in a folder and uploads each
+        2. For S3: Lists all objects with a prefix and uploads each
+        3. For URLs: Downloads and processes directory structures
+        4. For local: Uses the existing upload_directory method
+        
+        Args:
+            source_type: Type of source ('google_drive', 's3', 'url', 'local')
+            source_config: Source-specific configuration
+            user_email: User email address
+            dataset_name: Name for the dataset
+            sensor: Sensor type
+            convert: Whether to convert the data
+            is_public: Whether dataset is public
+            folder: Optional folder name
+            team_uuid: Optional team UUID
+            progress_callback: Progress callback function
+            
+        Returns:
+            List of UploadResult objects for each file uploaded
+        """
+        if source_type == 'local':
+            # Use the existing directory upload method for local files
+            directory_path = source_config.get('directory_path')
+            if not directory_path:
+                raise ValueError("For local source type, 'directory_path' must be provided in source_config")
+            
+            return self.upload_directory(
+                directory_path=directory_path,
+                user_email=user_email,
+                dataset_name=dataset_name,
+                sensor=sensor,
+                convert=convert,
+                is_public=is_public,
+                folder=folder,
+                team_uuid=team_uuid,
+                progress_callback=progress_callback
+            )
+        
+        # For remote sources, we need to get the list of files first
+        # This would require implementing source-specific file listing
+        # For now, we'll provide a framework that can be extended
+        
+        if source_type == 'google_drive':
+            return self._upload_google_drive_directory(
+                source_config, user_email, dataset_name, sensor,
+                convert, is_public, folder, team_uuid, progress_callback
+            )
+        elif source_type == 's3':
+            return self._upload_s3_directory(
+                source_config, user_email, dataset_name, sensor,
+                convert, is_public, folder, team_uuid, progress_callback
+            )
+        elif source_type == 'url':
+            return self._upload_url_directory(
+                source_config, user_email, dataset_name, sensor,
+                convert, is_public, folder, team_uuid, progress_callback
+            )
+        else:
+            raise ValueError(f"Directory upload not supported for source type: {source_type}")
+    
+    def _upload_google_drive_directory(self, source_config: dict, user_email: str, 
+                                     dataset_name: str, sensor: str, convert: bool,
+                                     is_public: bool, folder: str, team_uuid: str,
+                                     progress_callback: Callable[[float], None]) -> List[UploadResult]:
+        """Upload directory from Google Drive."""
+        # This would need to be implemented with Google Drive API
+        # For now, return a placeholder
+        print("📁 Google Drive directory upload not yet implemented")
+        print("💡 This would list all files in a Google Drive folder and upload each one")
+        return []
+    
+    def _upload_s3_directory(self, source_config: dict, user_email: str,
+                           dataset_name: str, sensor: str, convert: bool,
+                           is_public: bool, folder: str, team_uuid: str,
+                           progress_callback: Callable[[float], None]) -> List[UploadResult]:
+        """Upload directory from S3."""
+        # This would need to be implemented with S3 API
+        # For now, return a placeholder
+        print("📁 S3 directory upload not yet implemented")
+        print("💡 This would list all objects with a prefix and upload each one")
+        return []
+    
+    def _upload_url_directory(self, source_config: dict, user_email: str,
+                            dataset_name: str, sensor: str, convert: bool,
+                            is_public: bool, folder: str, team_uuid: str,
+                            progress_callback: Callable[[float], None]) -> List[UploadResult]:
+        """Upload directory from URL."""
+        # This would need to be implemented with web scraping or API calls
+        # For now, return a placeholder
+        print("📁 URL directory upload not yet implemented")
+        print("💡 This would discover directory structure from a URL and download each file")
+        return []
 
 # Async version for better performance
 class AsyncScientistCloudUploadClient:
@@ -423,3 +674,87 @@ class AsyncScientistCloudUploadClient:
             await asyncio.sleep(poll_interval)
         
         raise TimeoutError(f"Upload job {job_id} did not complete within {timeout} seconds")
+    
+    async def upload_directory(self, directory_path: str, user_email: str, dataset_name: str,
+                              sensor: str, convert: bool = True, is_public: bool = False,
+                              folder: str = None, team_uuid: str = None,
+                              progress_callback: Callable[[float], None] = None) -> List[UploadResult]:
+        """Async version of upload_directory."""
+        directory_path_obj = Path(directory_path)
+        
+        if not directory_path_obj.exists():
+            raise FileNotFoundError(f"Directory not found: {directory_path}")
+        
+        if not directory_path_obj.is_dir():
+            raise ValueError(f"Path is not a directory: {directory_path}")
+        
+        # Find all files in the directory
+        files_to_upload = []
+        for file_path in directory_path_obj.rglob('*'):
+            if file_path.is_file():
+                files_to_upload.append(file_path)
+        
+        if not files_to_upload:
+            raise ValueError(f"No files found in directory: {directory_path}")
+        
+        print(f"📁 Found {len(files_to_upload)} files in directory: {directory_path}")
+        
+        # Upload each file
+        results = []
+        for i, file_path in enumerate(files_to_upload, 1):
+            relative_path = file_path.relative_to(directory_path_obj)
+            
+            # Create dataset name with subdirectory structure
+            if relative_path.parent != Path('.'):
+                file_dataset_name = f"{dataset_name}/{relative_path.parent}"
+            else:
+                file_dataset_name = dataset_name
+            
+            # Create folder with subdirectory structure
+            if folder:
+                file_folder = f"{folder}/{relative_path.parent}" if relative_path.parent != Path('.') else folder
+            else:
+                file_folder = f"directory_upload/{dataset_name}/{relative_path.parent}" if relative_path.parent != Path('.') else f"directory_upload/{dataset_name}"
+            
+            print(f"📤 Uploading {i}/{len(files_to_upload)}: {relative_path}")
+            
+            try:
+                # Create progress callback for this file
+                def file_progress_callback(progress: float):
+                    if progress_callback:
+                        # Calculate overall progress across all files
+                        overall_progress = ((i - 1) + progress) / len(files_to_upload)
+                        progress_callback(overall_progress)
+                    print(f"   Progress: {progress*100:.1f}%", end='\r')
+                
+                result = await self.upload_file(
+                    file_path=str(file_path),
+                    user_email=user_email,
+                    dataset_name=file_dataset_name,
+                    sensor=sensor,
+                    convert=convert,
+                    is_public=is_public,
+                    folder=file_folder,
+                    team_uuid=team_uuid,
+                    progress_callback=file_progress_callback
+                )
+                
+                print(f"   ✅ Uploaded: {result.job_id}")
+                results.append(result)
+                
+            except Exception as e:
+                print(f"   ❌ Failed: {e}")
+                # Create a failed result
+                failed_result = UploadResult(
+                    job_id="",
+                    status="failed",
+                    message=f"Failed to upload {relative_path}: {e}",
+                    upload_type="failed"
+                )
+                results.append(failed_result)
+        
+        print(f"\n🎉 Directory upload complete!")
+        print(f"   Successfully uploaded: {len([r for r in results if r.status != 'failed'])} files")
+        print(f"   Failed uploads: {len([r for r in results if r.status == 'failed'])} files")
+        
+        return results
