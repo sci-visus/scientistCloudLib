@@ -487,7 +487,7 @@ class ScientistCloudUploadClient:
         This method handles directory uploads from remote sources by:
         1. For Google Drive: Lists all files in a folder and uploads each
         2. For S3: Lists all objects with a prefix and uploads each
-        3. For URLs: Downloads and processes directory structures
+        3. For URLs: Not supported - URLs are stored as direct links
         4. For local: Uses the existing upload_directory method
         
         Args:
@@ -538,10 +538,8 @@ class ScientistCloudUploadClient:
                 convert, is_public, folder, team_uuid, progress_callback
             )
         elif source_type == 'url':
-            return self._upload_url_directory(
-                source_config, user_email, dataset_name, sensor,
-                convert, is_public, folder, team_uuid, progress_callback
-            )
+            # URL directory upload is not supported - URLs are just stored as links
+            raise ValueError("URL directory upload is not supported. URLs are stored as direct links without downloading.")
         else:
             raise ValueError(f"Directory upload not supported for source type: {source_type}")
     
@@ -567,16 +565,6 @@ class ScientistCloudUploadClient:
         print("💡 This would list all objects with a prefix and upload each one")
         return []
     
-    def _upload_url_directory(self, source_config: dict, user_email: str,
-                            dataset_name: str, sensor: str, convert: bool,
-                            is_public: bool, folder: str, team_uuid: str,
-                            progress_callback: Callable[[float], None]) -> List[UploadResult]:
-        """Upload directory from URL."""
-        # This would need to be implemented with web scraping or API calls
-        # For now, return a placeholder
-        print("📁 URL directory upload not yet implemented")
-        print("💡 This would discover directory structure from a URL and download each file")
-        return []
 
 # Async version for better performance
 class AsyncScientistCloudUploadClient:

@@ -395,14 +395,17 @@ class TestSCLib_UploadProcessor(unittest.TestCase):
         # Submit job
         job_id = self.processor.submit_upload_job(job_config)
         
-        # Mock wget availability
-        with patch.object(self.processor, '_is_tool_available', return_value=True):
-            with patch.object(self.processor, '_download_with_wget') as mock_download:
-                # Process the job
-                self.processor._process_upload_job(job_id)
-                
-                # Verify download was called
-                mock_download.assert_called_once()
+        # Mock the job status update methods
+        with patch.object(self.processor, '_update_job_status') as mock_update_status:
+            # Process the job
+            self.processor._process_upload_job(job_id)
+            
+            # Verify status was updated to UPLOADING and then COMPLETED
+            # URL uploads now just store the URL without downloading
+            assert mock_update_status.call_count >= 2
+            calls = mock_update_status.call_args_list
+            assert calls[0][0][1] == UploadStatus.UPLOADING
+            assert calls[-1][0][1] == UploadStatus.COMPLETED
     
     def test_is_tool_available(self):
         """Test checking tool availability."""
