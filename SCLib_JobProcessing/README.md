@@ -11,12 +11,25 @@ This directory contains the enhanced job processing system for ScientistCloud 2.
 - **TB-Scale Support**: Chunked uploads for enormous datasets (up to 10TB)
 - **Resumable Uploads**: Handle network interruptions gracefully
 - **Parallel Processing**: Multiple concurrent upload streams
+- **Automatic Handling**: No need to choose between standard and large file APIs!
 
-### API Versions Available
+### 🎯 Unified API - No More Choices!
 
-1. **Standard FastAPI** (`SCLib_UploadAPI_FastAPI.py`) - For regular uploads
-2. **Large Files FastAPI** (`SCLib_UploadAPI_LargeFiles.py`) - For TB-scale datasets
-3. **Legacy Flask** (`SCLib_UploadAPI.py`) - Deprecated, use FastAPI instead
+**Use the Unified API** - it automatically handles both regular and TB-scale uploads:
+
+1. **Unified FastAPI** (`SCLib_UploadAPI_Unified.py`) - **RECOMMENDED** - Automatically handles all file sizes
+2. **Standard FastAPI** (`SCLib_UploadAPI_FastAPI.py`) - For regular uploads only
+3. **Large Files FastAPI** (`SCLib_UploadAPI_LargeFiles.py`) - For TB-scale datasets only
+4. **Legacy Flask** (`SCLib_UploadAPI.py`) - Deprecated, use FastAPI instead
+
+### 🧠 Smart File Handling
+
+The Unified API automatically determines the best upload method:
+- **Files ≤ 100MB**: Standard upload (fast and efficient)
+- **Files > 100MB**: Chunked upload (reliable for large files)
+- **TB-Scale Files**: Full chunked upload with resumable transfers
+
+**No configuration needed - it just works!**
 
 ## Prerequisites and Setup
 
@@ -224,30 +237,43 @@ For enormous datasets (TB-scale), we provide specialized APIs and clients:
 - **Hash Validation**: SHA-256 verification for data integrity
 - **Cloud Integration**: Direct S3/Google Drive support for large files
 
-### Quick Start for Large Files
+### Quick Start - Unified API (Recommended)
 
 ```python
-from SCLib_UploadClient_LargeFiles import LargeFileUploadClient
+from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
-# Initialize client for large files
-client = LargeFileUploadClient(
-    base_url="http://localhost:5001",  # Large file API
-    chunk_size=100 * 1024 * 1024,     # 100MB chunks
-    max_workers=4                      # 4 parallel uploads
-)
+# Initialize unified client - handles all file sizes automatically!
+client = ScientistCloudUploadClient("http://localhost:5000")
 
-# Upload a TB-scale file
-upload_id = client.upload_file_parallel(
-    file_path="/path/to/your/5TB/dataset.idx",
+# Upload any file - automatically chooses best method
+result = client.upload_file(
+    file_path="/path/to/your/file.dat",  # Can be 1MB or 10TB!
     user_email="scientist@example.com",
-    dataset_name="Massive Imaging Dataset",
+    dataset_name="My Dataset",
     sensor="IDX",
     progress_callback=lambda p: print(f"Progress: {p*100:.1f}%")
 )
 
+print(f"Upload type: {result.upload_type}")  # "standard" or "chunked"
+print(f"Job ID: {result.job_id}")
+
 # Wait for completion
-final_status = client.wait_for_completion(upload_id)
-print(f"Upload complete: {final_status.is_complete}")
+final_status = client.wait_for_completion(result.job_id)
+print(f"Upload complete: {final_status.status}")
+```
+
+### Advanced: Manual API Selection (Not Recommended)
+
+If you need specific control, you can still use the separate APIs:
+
+```python
+# For large files only
+from SCLib_UploadClient_LargeFiles import LargeFileUploadClient
+client = LargeFileUploadClient("http://localhost:5001")
+
+# For standard files only  
+from SCLib_UploadClient_FastAPI import ScientistCloudUploadClient
+client = ScientistCloudUploadClient("http://localhost:5000")
 ```
 
 ## Quick Start
