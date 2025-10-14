@@ -15,7 +15,7 @@ import threading
 from SC_Config import get_config
 from SC_UploadProcessor import get_upload_processor
 from SC_UploadJobTypes import (
-    UploadJobConfig, UploadSourceType, create_local_upload_job,
+    UploadJobConfig, UploadSourceType, SensorType, create_local_upload_job,
     create_google_drive_upload_job, create_s3_upload_job, create_url_upload_job
 )
 
@@ -36,23 +36,30 @@ def initiate_upload():
     {
         "source_type": "local|google_drive|s3|url",
         "source_config": {...},
-        "dataset_metadata": {
-            "name": "My Dataset",
-            "description": "Dataset description",
-            "tags": ["tag1", "tag2"]
-        },
-        "user_id": "user_123",
-        "team_id": "team_456"  // optional
+        "user_email": "user@example.com",
+        "dataset_name": "My Dataset",
+        "sensor": "IDX|TIFF|TIFF RGB|NETCDF|HDF5|4D_NEXUS|RGB|MAPIR|OTHER",
+        "convert": true|false,
+        "is_public": true|false,
+        "folder": "optional_folder_name",
+        "team_uuid": "optional_team_uuid"
     }
     """
     try:
         data = request.get_json()
         
         # Validate required fields
-        required_fields = ['source_type', 'source_config', 'dataset_metadata', 'user_id']
+        required_fields = ['source_type', 'source_config', 'user_email', 'dataset_name', 'sensor', 'convert', 'is_public']
         for field in required_fields:
             if field not in data:
                 return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        # Validate sensor type
+        try:
+            sensor = SensorType(data['sensor'])
+        except ValueError:
+            valid_sensors = [s.value for s in SensorType]
+            return jsonify({'error': f'Invalid sensor type. Must be one of: {valid_sensors}'}), 400
         
         # Generate dataset UUID
         dataset_uuid = str(uuid.uuid4())
@@ -60,9 +67,12 @@ def initiate_upload():
         # Create upload job based on source type
         source_type = UploadSourceType(data['source_type'])
         source_config = data['source_config']
-        dataset_metadata = data['dataset_metadata']
-        user_id = data['user_id']
-        team_id = data.get('team_id')
+        user_email = data['user_email']
+        dataset_name = data['dataset_name']
+        convert = data['convert']
+        is_public = data['is_public']
+        folder = data.get('folder')
+        team_uuid = data.get('team_uuid')
         
         if source_type == UploadSourceType.LOCAL:
             # For local uploads, we need to handle file upload first
@@ -72,12 +82,14 @@ def initiate_upload():
             job_config = create_google_drive_upload_job(
                 file_id=source_config['file_id'],
                 dataset_uuid=dataset_uuid,
-                user_id=user_id,
+                user_email=user_email,
+                dataset_name=dataset_name,
+                sensor=sensor,
                 service_account_file=source_config.get('service_account_file', ''),
-                dataset_name=dataset_metadata.get('name', ''),
-                description=dataset_metadata.get('description', ''),
-                tags=dataset_metadata.get('tags', []),
-                team_id=team_id
+                convert=convert,
+                is_public=is_public,
+                folder=folder,
+                team_uuid=team_uuid
             )
         
         elif source_type == UploadSourceType.S3:
@@ -85,24 +97,28 @@ def initiate_upload():
                 bucket_name=source_config['bucket_name'],
                 object_key=source_config['object_key'],
                 dataset_uuid=dataset_uuid,
-                user_id=user_id,
+                user_email=user_email,
+                dataset_name=dataset_name,
+                sensor=sensor,
                 access_key_id=source_config['access_key_id'],
                 secret_access_key=source_config['secret_access_key'],
-                dataset_name=dataset_metadata.get('name', ''),
-                description=dataset_metadata.get('description', ''),
-                tags=dataset_metadata.get('tags', []),
-                team_id=team_id
+                convert=convert,
+                is_public=is_public,
+                folder=folder,
+                team_uuid=team_uuid
             )
         
         elif source_type == UploadSourceType.URL:
             job_config = create_url_upload_job(
                 url=source_config['url'],
                 dataset_uuid=dataset_uuid,
-                user_id=user_id,
-                dataset_name=dataset_metadata.get('name', ''),
-                description=dataset_metadata.get('description', ''),
-                tags=dataset_metadata.get('tags', []),
-                team_id=team_id
+                user_email=user_email,
+                dataset_name=dataset_name,
+                sensor=sensor,
+                convert=convert,
+                is_public=is_public,
+                folder=folder,
+                team_uuid=team_uuid
             )
         
         else:
@@ -131,6 +147,16 @@ def upload_local_file():
     """
     Upload a local file and initiate processing.
     This endpoint handles the actual file upload for local files.
+    
+    Form data:
+    - file: The file to upload (required)
+    - user_email: User email (required)
+    - dataset_name: Name of dataset (required)
+    - sensor: Sensor type (required)
+    - convert: true/false (required)
+    - is_public: true/false (required)
+    - folder: Optional folder name
+    - team_uuid: Optional team UUID
     """
     try:
         # Check if file is present
@@ -141,15 +167,40 @@ def upload_local_file():
         if file.filename == '':
             return jsonify({'error': 'No file selected'}), 400
         
-        # Get metadata from form data
+        # Get required parameters from form data
+        user_email = request.form.get('user_email')
         dataset_name = request.form.get('dataset_name', file.filename)
-        description = request.form.get('description', '')
-        tags = request.form.get('tags', '').split(',') if request.form.get('tags') else []
-        user_id = request.form.get('user_id')
-        team_id = request.form.get('team_id')
+        sensor_str = request.form.get('sensor')
+        convert_str = request.form.get('convert')
+        is_public_str = request.form.get('is_public')
         
-        if not user_id:
-            return jsonify({'error': 'user_id is required'}), 400
+        # Validate required fields
+        if not user_email:
+            return jsonify({'error': 'user_email is required'}), 400
+        if not sensor_str:
+            return jsonify({'error': 'sensor is required'}), 400
+        if not convert_str:
+            return jsonify({'error': 'convert is required'}), 400
+        if not is_public_str:
+            return jsonify({'error': 'is_public is required'}), 400
+        
+        # Validate sensor type
+        try:
+            sensor = SensorType(sensor_str)
+        except ValueError:
+            valid_sensors = [s.value for s in SensorType]
+            return jsonify({'error': f'Invalid sensor type. Must be one of: {valid_sensors}'}), 400
+        
+        # Parse boolean values
+        try:
+            convert = convert_str.lower() in ['true', '1', 'yes', 'on']
+            is_public = is_public_str.lower() in ['true', '1', 'yes', 'on']
+        except:
+            return jsonify({'error': 'convert and is_public must be boolean values'}), 400
+        
+        # Get optional parameters
+        folder = request.form.get('folder')
+        team_uuid = request.form.get('team_uuid')
         
         # Generate dataset UUID
         dataset_uuid = str(uuid.uuid4())
@@ -165,11 +216,13 @@ def upload_local_file():
         job_config = create_local_upload_job(
             file_path=temp_file_path,
             dataset_uuid=dataset_uuid,
-            user_id=user_id,
+            user_email=user_email,
             dataset_name=dataset_name,
-            description=description,
-            tags=tags,
-            team_id=team_id,
+            sensor=sensor,
+            convert=convert,
+            is_public=is_public,
+            folder=folder,
+            team_uuid=team_uuid,
             delete_after_upload=True  # Clean up temp file after upload
         )
         
@@ -238,18 +291,18 @@ def cancel_upload(job_id: str):
 def list_upload_jobs():
     """List upload jobs for a user."""
     try:
-        user_id = request.args.get('user_id')
+        user_id = request.args.get('user_id')  # This should be user_email
         status = request.args.get('status')
         limit = int(request.args.get('limit', 50))
         offset = int(request.args.get('offset', 0))
         
         if not user_id:
-            return jsonify({'error': 'user_id is required'}), 400
+            return jsonify({'error': 'user_id (user_email) is required'}), 400
         
         # Query jobs from database
         from SC_MongoConnection import execute_collection_query
         
-        query = {'user_id': user_id, 'job_type': 'upload'}
+        query = {'user_email': user_id, 'job_type': 'upload'}
         if status:
             query['status'] = status
         
@@ -311,20 +364,22 @@ def estimate_upload_time():
 def get_supported_sources():
     """Get list of supported upload sources and their requirements."""
     return jsonify({
-        'sources': [
+            'sources': [
             {
                 'type': 'local',
                 'name': 'Local File Upload',
                 'description': 'Upload files from your local computer',
-                'requirements': ['file'],
+                'requirements': ['file', 'user_email', 'dataset_name', 'sensor', 'convert', 'is_public'],
+                'optional': ['folder', 'team_uuid'],
                 'max_size': '16GB',
-                'supported_formats': ['zip', 'tar', 'gz', 'bz2', '7z', 'rar']
+                'supported_formats': ['zip', 'tar', 'gz', 'bz2', '7z', 'rar', 'any']
             },
             {
                 'type': 'google_drive',
                 'name': 'Google Drive',
                 'description': 'Import files from Google Drive',
-                'requirements': ['file_id', 'service_account_file'],
+                'requirements': ['file_id', 'service_account_file', 'user_email', 'dataset_name', 'sensor', 'convert', 'is_public'],
+                'optional': ['folder', 'team_uuid'],
                 'max_size': '5TB',
                 'supported_formats': ['any']
             },
@@ -332,7 +387,8 @@ def get_supported_sources():
                 'type': 's3',
                 'name': 'Amazon S3',
                 'description': 'Import files from Amazon S3',
-                'requirements': ['bucket_name', 'object_key', 'access_key_id', 'secret_access_key'],
+                'requirements': ['bucket_name', 'object_key', 'access_key_id', 'secret_access_key', 'user_email', 'dataset_name', 'sensor', 'convert', 'is_public'],
+                'optional': ['folder', 'team_uuid'],
                 'max_size': '5TB',
                 'supported_formats': ['any']
             },
@@ -340,11 +396,24 @@ def get_supported_sources():
                 'type': 'url',
                 'name': 'URL Download',
                 'description': 'Download files from a URL',
-                'requirements': ['url'],
+                'requirements': ['url', 'user_email', 'dataset_name', 'sensor', 'convert', 'is_public'],
+                'optional': ['folder', 'team_uuid'],
                 'max_size': 'Unlimited',
                 'supported_formats': ['any']
             }
-        ]
+        ],
+        'sensor_types': [s.value for s in SensorType],
+        'required_parameters': {
+            'user_email': 'User email address',
+            'dataset_name': 'Name of the dataset',
+            'sensor': 'Sensor type (IDX, TIFF, TIFF RGB, NETCDF, HDF5, 4D_NEXUS, RGB, MAPIR, OTHER)',
+            'convert': 'Whether to convert the data (true/false)',
+            'is_public': 'Whether dataset is public (true/false)'
+        },
+        'optional_parameters': {
+            'folder': 'Optional folder name',
+            'team_uuid': 'Optional team UUID'
+        }
     })
 
 

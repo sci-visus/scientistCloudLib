@@ -28,11 +28,11 @@ class TestSC_JobMigration(unittest.TestCase):
         self.mock_datasets = Mock()
         
         # Setup mock database structure
-        self.mock_mongo_client.__getitem__.return_value = self.mock_db
-        self.mock_db.__getitem__.side_effect = lambda name: {
+        self.mock_mongo_client.__getitem__ = Mock(return_value=self.mock_db)
+        self.mock_db.__getitem__ = Mock(side_effect=lambda name: {
             'jobs': self.mock_jobs,
             'visstoredatas': self.mock_datasets
-        }[name]
+        }[name])
         
         with patch('SC_JobMigration.SC_JobQueueManager') as mock_job_queue_class:
             mock_job_queue_class.return_value = self.mock_job_queue

@@ -8,9 +8,11 @@ The SC_JobProcessing system provides:
 
 - **Robust Job Queue Management**: MongoDB-based job queue with retry logic and error handling
 - **Enhanced Background Service**: Improved reliability with PID monitoring and automatic recovery
+- **Asynchronous Upload System**: Complete upload solution supporting local files, Google Drive, S3, and URL sources
 - **Comprehensive Monitoring**: Real-time job monitoring, statistics, and health checks
 - **Migration Tools**: Utilities to migrate from the old system to the new job queue
 - **Type Safety**: Well-defined job types and status transitions
+- **Configuration Management**: Centralized environment variable and collection name management
 
 ## Architecture
 
@@ -21,9 +23,15 @@ The SC_JobProcessing system provides:
 3. **SC_JobTypes**: Defines all job types, statuses, and transitions
 4. **SC_JobMonitor**: Provides monitoring, statistics, and administrative functions
 5. **SC_JobMigration**: Handles migration from the old system
+6. **SC_Config**: Centralized configuration management for environment variables and collection names
+7. **SC_MongoConnection**: Enhanced MongoDB connection manager with pooling and health monitoring
+8. **SC_UploadJobTypes**: Defines upload job types, sensor types, and configurations
+9. **SC_UploadProcessor**: Processes asynchronous upload jobs using rclone, rsync, and other tools
+10. **SC_UploadAPI**: RESTful API for upload operations with immediate response and background processing
 
 ### Job Types
 
+#### Traditional Job Types
 - `google_sync`: Synchronize data from Google Drive
 - `dataset_conversion`: Convert dataset to streamable format
 - `file_upload`: Upload files to storage
@@ -32,6 +40,24 @@ The SC_JobProcessing system provides:
 - `rsync_transfer`: Transfer data via rsync
 - `backup_creation`: Create data backups
 - `data_validation`: Validate dataset integrity
+
+#### Upload Job Types
+- `upload`: Asynchronous upload jobs supporting multiple sources
+  - **Local files**: Direct file upload with progress tracking
+  - **Google Drive**: Import from Google Drive using service accounts
+  - **S3/Cloud Storage**: Import from Amazon S3 and other cloud providers
+  - **URL**: Download files from URLs with resume support
+
+#### Sensor Types
+- `IDX`: IDX format datasets
+- `TIFF`: TIFF image datasets
+- `TIFF RGB`: RGB TIFF datasets
+- `NETCDF`: NetCDF scientific data
+- `HDF5`: HDF5 hierarchical data
+- `4D_NEXUS`: 4D Nexus format
+- `RGB`: RGB image data
+- `MAPIR`: MAPIR sensor data
+- `OTHER`: Other data formats
 
 ### Dataset Statuses
 
@@ -42,6 +68,163 @@ The system maintains backward compatibility with existing statuses:
 - `submitted` → `unzipping` → `conversion queued` → `converting` → `done`
 - Error states: `sync error`, `conversion error`, `upload error`, etc.
 
+## Asynchronous Upload System
+
+The SC_JobProcessing system includes a comprehensive asynchronous upload solution that replaces synchronous upload tools like Uppy with a robust, scalable job-based approach.
+
+### Key Features
+
+- **Immediate Response**: Users get instant feedback and can navigate away from the upload page
+- **Background Processing**: Uploads continue processing in the background
+- **Multiple Sources**: Support for local files, Google Drive, S3, and URL downloads
+- **Progress Tracking**: Real-time progress monitoring with detailed statistics
+- **Resume Support**: Automatic resume for interrupted uploads
+- **Error Recovery**: Automatic retry with exponential backoff
+- **Tool Flexibility**: Uses the best tool for each source type (rclone, rsync, AWS CLI, wget, curl)
+
+### Upload Sources
+
+#### 1. Local File Upload
+```python
+# Upload a local file
+POST /api/upload/local/upload
+Content-Type: multipart/form-data
+
+file: [binary data]
+user_email: "user@example.com"
+dataset_name: "My Dataset"
+sensor: "TIFF"
+convert: "true"
+is_public: "false"
+folder: "research_data"  # optional
+team_uuid: "team_123"    # optional
+```
+
+#### 2. Google Drive Import
+```python
+# Import from Google Drive
+POST /api/upload/initiate
+{
+    "source_type": "google_drive",
+    "source_config": {
+        "file_id": "1ABC123DEF456",
+        "service_account_file": "/path/to/service.json"
+    },
+    "user_email": "user@example.com",
+    "dataset_name": "Google Drive Dataset",
+    "sensor": "NETCDF",
+    "convert": true,
+    "is_public": false,
+    "folder": "cloud_data",
+    "team_uuid": "team_456"
+}
+```
+
+#### 3. S3 Import
+```python
+# Import from S3
+POST /api/upload/initiate
+{
+    "source_type": "s3",
+    "source_config": {
+        "bucket_name": "my-bucket",
+        "object_key": "data/dataset.zip",
+        "access_key_id": "AKIA...",
+        "secret_access_key": "secret..."
+    },
+    "user_email": "user@example.com",
+    "dataset_name": "S3 Dataset",
+    "sensor": "HDF5",
+    "convert": true,
+    "is_public": false,
+    "folder": "s3_imports"
+}
+```
+
+#### 4. URL Download
+```python
+# Download from URL
+POST /api/upload/initiate
+{
+    "source_type": "url",
+    "source_config": {
+        "url": "https://example.com/dataset.zip"
+    },
+    "user_email": "user@example.com",
+    "dataset_name": "URL Dataset",
+    "sensor": "OTHER",
+    "convert": true,
+    "is_public": false
+}
+```
+
+### Required Parameters
+
+All upload jobs require these parameters:
+
+- **`user_email`**: User email address
+- **`dataset_name`**: Name of the dataset
+- **`sensor`**: Sensor type (IDX, TIFF, TIFF RGB, NETCDF, HDF5, 4D_NEXUS, RGB, MAPIR, OTHER)
+- **`convert`**: Whether to convert the data (true/false)
+- **`is_public`**: Whether dataset is public (true/false)
+
+### Optional Parameters
+
+- **`folder`**: Optional folder name
+- **`team_uuid`**: Optional team UUID
+
+### Progress Monitoring
+
+```python
+# Check upload progress
+GET /api/upload/status/{job_id}
+
+# Response
+{
+    "job_id": "upload_12345",
+    "status": "uploading",
+    "progress_percentage": 45.2,
+    "bytes_uploaded": 1024000,
+    "bytes_total": 2264000,
+    "speed_mbps": 12.5,
+    "eta_seconds": 120,
+    "current_file": "dataset.zip"
+}
+```
+
+### Job Management
+
+```python
+# Cancel upload
+POST /api/upload/cancel/{job_id}
+
+# List user's upload jobs
+GET /api/upload/jobs?user_id=user@example.com&status=completed
+
+# Get supported sources and parameters
+GET /api/upload/supported-sources
+```
+
+### Tool Requirements
+
+The upload system uses various tools for optimal performance:
+
+- **rclone**: Primary tool for most operations (Google Drive, S3, local)
+- **rsync**: Fallback for local-to-local transfers
+- **AWS CLI**: For S3 operations with multipart upload
+- **wget/curl**: For URL downloads with resume support
+
+Install required tools:
+```bash
+# Install rclone
+curl https://rclone.org/install.sh | sudo bash
+
+# Install AWS CLI
+pip install awscli
+
+# wget and curl are usually pre-installed
+```
+
 ## Installation
 
 ### Prerequisites
@@ -49,24 +232,135 @@ The system maintains backward compatibility with existing statuses:
 - Python 3.8+
 - MongoDB
 - Required Python packages (see requirements.txt)
+- Upload tools: rclone, AWS CLI, wget, curl (for upload functionality)
 
 ### Setup
 
 1. **Environment Variables**:
+   The system automatically detects and loads environment files from:
+   - `/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.scientistcloud.com`
+   - `/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.all`
+   
+   Or set manually:
    ```bash
    export MONGO_URL="mongodb://localhost:27017"
    export DB_NAME="scientistcloud"
+   export DEPLOY_SERVER="https://scientistcloud.com"
+   export DOMAIN_NAME="scientistcloud.com"
    ```
 
 2. **Install Dependencies**:
    ```bash
-   pip install pymongo psutil
+   pip install -r requirements.txt
    ```
 
-3. **Database Setup**:
+3. **Install Upload Tools** (for upload functionality):
+   ```bash
+   # Install rclone
+   curl https://rclone.org/install.sh | sudo bash
+   
+   # Install AWS CLI
+   pip install awscli
+   
+   # wget and curl are usually pre-installed
+   ```
+
+4. **Database Setup**:
    The system will automatically create necessary indexes on first run.
 
+5. **Configuration Validation**:
+   ```bash
+   python SC_Config.py  # Test configuration loading
+   python example_usage.py  # Test MongoDB connection
+   ```
+
 ## Usage
+
+### Starting the Upload API Server
+
+```bash
+# Start the upload API server
+python SC_UploadAPI.py
+
+# The server will start on http://localhost:5000
+# Upload processor will start automatically
+```
+
+### Using the Upload System
+
+#### Python Client Example
+
+```python
+from upload_examples import ScientistCloudUploadClient
+
+# Initialize client
+client = ScientistCloudUploadClient("http://localhost:5000")
+
+# Upload a local file
+result = client.upload_local_file(
+    file_path="/path/to/dataset.zip",
+    user_email="user@example.com",
+    dataset_name="My Dataset",
+    sensor="TIFF",
+    convert=True,
+    is_public=False,
+    folder="research_data",
+    team_uuid="team_123"
+)
+
+job_id = result['job_id']
+print(f"Upload started: {job_id}")
+
+# Monitor progress
+final_status = client.wait_for_completion(job_id, timeout=1800)
+print(f"Upload completed: {final_status['status']}")
+```
+
+#### Frontend Integration
+
+```javascript
+// Replace Uppy with API calls
+const formData = new FormData();
+formData.append('file', file);
+formData.append('user_email', 'user@example.com');
+formData.append('dataset_name', 'My Dataset');
+formData.append('sensor', 'TIFF');
+formData.append('convert', 'true');
+formData.append('is_public', 'false');
+formData.append('folder', 'research_data');
+formData.append('team_uuid', 'team_123');
+
+const response = await fetch('/api/upload/local/upload', {
+    method: 'POST',
+    body: formData
+});
+
+const result = await response.json();
+const jobId = result.job_id;
+
+// User gets immediate response and can navigate away
+showSuccess(`Upload started! Job ID: ${jobId}`);
+
+// Optional: Poll for progress
+const pollProgress = async () => {
+    const status = await fetch(`/api/upload/status/${jobId}`);
+    const progress = await status.json();
+    
+    if (progress.status === 'completed') {
+        showSuccess('Upload completed!');
+    } else if (progress.status === 'failed') {
+        showError(progress.error_message);
+    } else {
+        updateProgressBar(progress.progress_percentage);
+        setTimeout(pollProgress, 2000);
+    }
+};
+
+// Only poll if user wants to see progress
+if (userWantsProgress) {
+    pollProgress();
+}
+```
 
 ### Starting the Background Service
 

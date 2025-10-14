@@ -52,11 +52,9 @@ class UploadJobConfig:
     # Source configuration
     source_type: UploadSourceType
     source_path: str
-    source_config: Dict[str, Any] = field(default_factory=dict)
-    
-    # Destination configuration
     destination_path: str
     dataset_uuid: str
+    source_config: Dict[str, Any] = field(default_factory=dict)
     
     # Upload settings
     chunk_size_mb: int = 64
@@ -292,7 +290,13 @@ def create_upload_job_config(
 def create_local_upload_job(
     file_path: str,
     dataset_uuid: str,
-    user_id: str,
+    user_email: str,
+    dataset_name: str,
+    sensor: SensorType,
+    convert: bool = True,
+    is_public: bool = False,
+    folder: Optional[str] = None,
+    team_uuid: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
     """Create a local file upload job."""
@@ -301,7 +305,13 @@ def create_local_upload_job(
         source_path=file_path,
         destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
-        user_id=user_id,
+        user_email=user_email,
+        dataset_name=dataset_name,
+        sensor=sensor,
+        convert=convert,
+        is_public=is_public,
+        folder=folder,
+        team_uuid=team_uuid,
         **kwargs
     )
 
@@ -309,8 +319,14 @@ def create_local_upload_job(
 def create_google_drive_upload_job(
     file_id: str,
     dataset_uuid: str,
-    user_id: str,
+    user_email: str,
+    dataset_name: str,
+    sensor: SensorType,
     service_account_file: str,
+    convert: bool = True,
+    is_public: bool = False,
+    folder: Optional[str] = None,
+    team_uuid: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
     """Create a Google Drive upload job."""
@@ -319,7 +335,13 @@ def create_google_drive_upload_job(
         source_path=file_id,
         destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
-        user_id=user_id,
+        user_email=user_email,
+        dataset_name=dataset_name,
+        sensor=sensor,
+        convert=convert,
+        is_public=is_public,
+        folder=folder,
+        team_uuid=team_uuid,
         source_config={
             "service_account_file": service_account_file,
             "file_id": file_id
@@ -332,9 +354,15 @@ def create_s3_upload_job(
     bucket_name: str,
     object_key: str,
     dataset_uuid: str,
-    user_id: str,
+    user_email: str,
+    dataset_name: str,
+    sensor: SensorType,
     access_key_id: str,
     secret_access_key: str,
+    convert: bool = True,
+    is_public: bool = False,
+    folder: Optional[str] = None,
+    team_uuid: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
     """Create an S3 upload job."""
@@ -343,7 +371,13 @@ def create_s3_upload_job(
         source_path=f"s3://{bucket_name}/{object_key}",
         destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
-        user_id=user_id,
+        user_email=user_email,
+        dataset_name=dataset_name,
+        sensor=sensor,
+        convert=convert,
+        is_public=is_public,
+        folder=folder,
+        team_uuid=team_uuid,
         source_config={
             "bucket_name": bucket_name,
             "object_key": object_key,
@@ -357,7 +391,13 @@ def create_s3_upload_job(
 def create_url_upload_job(
     url: str,
     dataset_uuid: str,
-    user_id: str,
+    user_email: str,
+    dataset_name: str,
+    sensor: SensorType,
+    convert: bool = True,
+    is_public: bool = False,
+    folder: Optional[str] = None,
+    team_uuid: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
     """Create a URL-based upload job."""
@@ -366,7 +406,13 @@ def create_url_upload_job(
         source_path=url,
         destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
-        user_id=user_id,
+        user_email=user_email,
+        dataset_name=dataset_name,
+        sensor=sensor,
+        convert=convert,
+        is_public=is_public,
+        folder=folder,
+        team_uuid=team_uuid,
         source_config={"url": url},
         **kwargs
     )
@@ -381,29 +427,48 @@ if __name__ == '__main__':
     local_job = create_local_upload_job(
         file_path="/tmp/my_dataset.zip",
         dataset_uuid="dataset_123",
-        user_id="user_456"
+        user_email="user@example.com",
+        dataset_name="My Local Dataset",
+        sensor=SensorType.TIFF,
+        convert=True,
+        is_public=False,
+        folder="research_data",
+        team_uuid="team_456"
     )
     
     gdrive_job = create_google_drive_upload_job(
         file_id="1ABC123DEF456",
         dataset_uuid="dataset_789",
-        user_id="user_456",
-        service_account_file="/path/to/service.json"
+        user_email="user@example.com",
+        dataset_name="Google Drive Dataset",
+        sensor=SensorType.NETCDF,
+        service_account_file="/path/to/service.json",
+        convert=False,
+        is_public=True
     )
     
     s3_job = create_s3_upload_job(
         bucket_name="my-bucket",
         object_key="data/dataset.zip",
         dataset_uuid="dataset_101",
-        user_id="user_456",
+        user_email="user@example.com",
+        dataset_name="S3 Dataset",
+        sensor=SensorType.HDF5,
         access_key_id="AKIA...",
-        secret_access_key="secret..."
+        secret_access_key="secret...",
+        convert=True,
+        is_public=False,
+        folder="cloud_data"
     )
     
     url_job = create_url_upload_job(
         url="https://example.com/dataset.zip",
         dataset_uuid="dataset_202",
-        user_id="user_456"
+        user_email="user@example.com",
+        dataset_name="URL Dataset",
+        sensor=SensorType.OTHER,
+        convert=True,
+        is_public=False
     )
     
     print(f"Local upload job: {local_job.source_type.value}")

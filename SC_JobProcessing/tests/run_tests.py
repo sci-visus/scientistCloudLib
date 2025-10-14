@@ -19,6 +19,9 @@ from test_SC_BackgroundService import TestSC_BackgroundService
 from test_SC_JobTypes import TestSC_JobTypes
 from test_SC_JobMonitor import TestSC_JobMonitor
 from test_SC_JobMigration import TestSC_JobMigration
+from test_SC_UploadJobTypes import TestSC_UploadJobTypes
+from test_SC_UploadProcessor import TestSC_UploadProcessor
+from test_SC_UploadAPI import TestSC_UploadAPI
 from test_integration import TestSC_JobProcessingIntegration
 
 
@@ -59,12 +62,14 @@ def run_test_suite(test_class, suite_name):
     if result.failures:
         print(f"\nFailures:")
         for test, traceback in result.failures:
-            print(f"  - {test}: {traceback.split('AssertionError: ')[-1].split('\\n')[0]}")
+            error_msg = traceback.split('AssertionError: ')[-1].split('\n')[0]
+            print(f"  - {test}: {error_msg}")
     
     if result.errors:
         print(f"\nErrors:")
         for test, traceback in result.errors:
-            print(f"  - {test}: {traceback.split('\\n')[-2]}")
+            error_msg = traceback.split('\n')[-2]
+            print(f"  - {test}: {error_msg}")
     
     return result
 
@@ -81,6 +86,9 @@ def run_all_tests():
         (TestSC_BackgroundService, "SC_BackgroundService Tests"),
         (TestSC_JobMonitor, "SC_JobMonitor Tests"),
         (TestSC_JobMigration, "SC_JobMigration Tests"),
+        (TestSC_UploadJobTypes, "SC_UploadJobTypes Tests"),
+        (TestSC_UploadProcessor, "SC_UploadProcessor Tests"),
+        (TestSC_UploadAPI, "SC_UploadAPI Tests"),
         (TestSC_JobProcessingIntegration, "Integration Tests")
     ]
     
@@ -126,6 +134,9 @@ def run_specific_tests(test_names):
         'service': (TestSC_BackgroundService, "SC_BackgroundService Tests"),
         'monitor': (TestSC_JobMonitor, "SC_JobMonitor Tests"),
         'migration': (TestSC_JobMigration, "SC_JobMigration Tests"),
+        'upload_types': (TestSC_UploadJobTypes, "SC_UploadJobTypes Tests"),
+        'upload_processor': (TestSC_UploadProcessor, "SC_UploadProcessor Tests"),
+        'upload_api': (TestSC_UploadAPI, "SC_UploadAPI Tests"),
         'integration': (TestSC_JobProcessingIntegration, "Integration Tests")
     }
     

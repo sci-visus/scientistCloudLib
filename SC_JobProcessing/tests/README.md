@@ -11,6 +11,9 @@ This directory contains comprehensive test cases for the SC_JobProcessing system
 - **`test_SC_JobTypes.py`** - Tests job type definitions and status transitions
 - **`test_SC_JobMonitor.py`** - Tests monitoring and administrative functions
 - **`test_SC_JobMigration.py`** - Tests migration utilities and rollback operations
+- **`test_SC_UploadJobTypes.py`** - Tests upload job type definitions, sensor types, and configurations
+- **`test_SC_UploadProcessor.py`** - Tests upload job processing functionality
+- **`test_SC_UploadAPI.py`** - Tests RESTful API endpoints for upload operations
 
 ### Integration Tests
 
@@ -50,11 +53,14 @@ python run_tests.py monitor
 # Run only migration tests
 python run_tests.py migration
 
+# Run only upload tests
+python run_tests.py upload_types upload_processor upload_api
+
 # Run only integration tests
 python run_tests.py integration
 
 # Run multiple suites
-python run_tests.py types queue service
+python run_tests.py types queue service upload_types
 ```
 
 ### Run Individual Test Files
@@ -117,6 +123,43 @@ python -m unittest tests.test_SC_JobQueueManager.TestSC_JobQueueManager.test_cre
 - ✅ Rollback operations
 - ✅ Error handling and recovery
 - ✅ File system operations
+
+### SC_UploadJobTypes Tests
+
+- ✅ Upload source type enum definitions
+- ✅ Upload status enum definitions
+- ✅ Sensor type enum definitions
+- ✅ Upload job configuration creation
+- ✅ Upload progress tracking
+- ✅ Upload job manager functionality
+- ✅ Tool configuration for different sources
+- ✅ Upload job creation helper functions
+
+### SC_UploadProcessor Tests
+
+- ✅ Processor initialization and configuration
+- ✅ Job submission and management
+- ✅ Local file upload processing
+- ✅ Google Drive upload processing
+- ✅ S3 upload processing
+- ✅ URL download processing
+- ✅ Tool availability checking
+- ✅ Progress tracking and status updates
+- ✅ Error handling and recovery
+- ✅ Database operations
+
+### SC_UploadAPI Tests
+
+- ✅ Health check endpoint
+- ✅ Supported sources endpoint
+- ✅ Upload initiation for all source types
+- ✅ Local file upload endpoint
+- ✅ Job status monitoring
+- ✅ Job cancellation
+- ✅ Job listing
+- ✅ Upload time estimation
+- ✅ Error handling and validation
+- ✅ Parameter validation
 
 ### Integration Tests
 

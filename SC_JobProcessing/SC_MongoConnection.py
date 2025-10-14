@@ -130,8 +130,8 @@ class SC_MongoConnectionManager:
             return False
         
         # Check if enough time has passed since last health check
-        last_check = self.connection_stats.get('last_health_check', 0)
-        if time.time() - last_check < 30:  # Check every 30 seconds max
+        last_check = self.connection_stats.get('last_health_check')
+        if last_check is not None and time.time() - last_check < 30:  # Check every 30 seconds max
             return self.connection_stats.get('health_status') == 'healthy'
         
         # Perform health check
