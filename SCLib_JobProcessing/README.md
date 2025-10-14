@@ -2,7 +2,257 @@
 
 This directory contains the enhanced job processing system for ScientistCloud 2.0, designed to replace the existing background service with a more robust, scalable, and maintainable solution.
 
+## 🚀 FastAPI Migration Complete
+
+**We've completely migrated from Flask to FastAPI!** This provides:
+- **Better Performance**: Async support and automatic validation
+- **Modern API**: Auto-generated OpenAPI documentation
+- **Type Safety**: Pydantic models with automatic validation
+- **TB-Scale Support**: Chunked uploads for enormous datasets (up to 10TB)
+- **Resumable Uploads**: Handle network interruptions gracefully
+- **Parallel Processing**: Multiple concurrent upload streams
+
+### API Versions Available
+
+1. **Standard FastAPI** (`SCLib_UploadAPI_FastAPI.py`) - For regular uploads
+2. **Large Files FastAPI** (`SCLib_UploadAPI_LargeFiles.py`) - For TB-scale datasets
+3. **Legacy Flask** (`SCLib_UploadAPI.py`) - Deprecated, use FastAPI instead
+
+## Prerequisites and Setup
+
+### Required Services
+
+Before using the upload client, you need to set up several services:
+
+1. **MongoDB Database**
+   - MongoDB instance running and accessible
+   - Database with proper collections and indexes
+   - Connection credentials configured
+
+2. **Upload API Server**
+   - Flask server running on a specific port
+   - Upload processor service running
+   - Proper file system permissions
+
+3. **External Tools** (for upload functionality)
+   - `rclone` - for Google Drive and cloud storage
+   - `aws` CLI - for S3 uploads
+   - `wget` or `curl` - for URL downloads
+   - `rsync` - for file transfers
+
+### Environment Configuration
+
+The system requires extensive environment configuration. Create an environment file with these variables:
+
+```bash
+# Database Configuration
+MONGO_URL=mongodb://localhost:27017
+DB_NAME=scientistcloud
+DB_HOST=localhost
+DB_PASS=your_password
+
+# Server Configuration
+DEPLOY_SERVER=your-server.com
+DOMAIN_NAME=scientistcloud.com
+HOME_DIR=/home/scientistcloud
+VISUS_CODE=/path/to/visus/code
+VISUS_DOCKER=/path/to/docker
+VISUS_SERVER=/path/to/server
+VISUS_DB=/path/to/database
+VISUS_DATASETS=/mnt/visus_datasets
+VISUS_TEMP=/tmp/visus
+
+# Authentication (Auth0)
+AUTH0_DOMAIN=your-domain.auth0.com
+AUTH0_CLIENT_ID=your_client_id
+AUTH0_CLIENT_SECRET=your_client_secret
+AUTH0_MANAGEMENT_CLIENT_ID=your_mgmt_client_id
+AUTH0_MANAGEMENT_CLIENT_SECRET=your_mgmt_client_secret
+
+# Google OAuth
+GOOGLE_CLIENT_ID=your_google_client_id
+GOOGLE_CLIENT_SECRET=your_google_client_secret
+AUTH_GOOGLE_CLIENT_ID=your_auth_google_client_id
+AUTH_GOOGLE_CLIENT_SECRET=your_auth_google_client_secret
+
+# Security
+SECRET_KEY=your_secret_key
+SECRET_IV=your_secret_iv
+SSL_EMAIL=your_ssl_email
+
+# Git Configuration
+GIT_BRANCH_VISSTORE=main
+GIT_BRANCH_JS=main
+GIT_TOKEN=your_git_token
+
+# Job Processing Directories
+IN_DATA_DIR=/mnt/visus_datasets/upload
+OUT_DATA_DIR=/mnt/visus_datasets/converted
+SYNC_DATA_DIR=/mnt/visus_datasets/sync
+AUTH_DIR=/mnt/visus_datasets/auth
+```
+
+### Setup Steps
+
+1. **Install Dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure Environment**:
+   - Create environment file with variables above
+   - Place in `/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.scientistcloud.com`
+   - Or set environment variables directly
+
+3. **Start MongoDB**:
+   ```bash
+   # Start MongoDB service
+   sudo systemctl start mongod
+   # Or using Docker
+   docker run -d -p 27017:27017 --name mongodb mongo:latest
+   ```
+
+4. **Start Upload API Server**:
+   ```bash
+   cd /path/to/SCLib_JobProcessing
+   python SCLib_UploadAPI.py
+   ```
+
+5. **Verify Setup**:
+   ```bash
+   # Test configuration
+   python -c "from SCLib_JobProcessing import get_config; print('Config loaded:', get_config())"
+   
+   # Test MongoDB connection
+   python -c "from SCLib_JobProcessing import get_mongo_connection; print('MongoDB connected:', get_mongo_connection())"
+   ```
+
+### File System Permissions
+
+Ensure proper permissions for data directories:
+```bash
+sudo mkdir -p /mnt/visus_datasets/{upload,converted,sync,auth}
+sudo chown -R $USER:$USER /mnt/visus_datasets
+sudo chmod -R 755 /mnt/visus_datasets
+```
+
+### Server Configuration for Large Files
+
+For TB-scale uploads, additional server configuration is required:
+
+#### 1. Reverse Proxy Configuration (Nginx)
+
+```nginx
+# /etc/nginx/sites-available/scientistcloud
+server {
+    listen 80;
+    server_name your-domain.com;
+    
+    # Large file upload settings
+    client_max_body_size 10T;  # 10TB max file size
+    client_body_timeout 300s;
+    client_header_timeout 300s;
+    
+    # Proxy settings for large files
+    proxy_connect_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_read_timeout 300s;
+    proxy_buffering off;
+    proxy_request_buffering off;
+    
+    location / {
+        proxy_pass http://localhost:5001;  # Large file API
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+```
+
+#### 2. Uvicorn Configuration
+
+```bash
+# Run the large file API with optimized settings
+uvicorn SCLib_UploadAPI_LargeFiles:app \
+    --host 0.0.0.0 \
+    --port 5001 \
+    --workers 1 \
+    --timeout-keep-alive 300 \
+    --limit-max-requests 100 \
+    --log-level info
+```
+
+#### 3. System Limits
+
+```bash
+# Increase system limits for large files
+echo "* soft nofile 65536" >> /etc/security/limits.conf
+echo "* hard nofile 65536" >> /etc/security/limits.conf
+echo "fs.file-max = 2097152" >> /etc/sysctl.conf
+sysctl -p
+```
+
+#### 4. Temporary Directory Setup
+
+```bash
+# Create dedicated temp directory for large uploads
+sudo mkdir -p /mnt/large_uploads
+sudo chown -R $USER:$USER /mnt/large_uploads
+sudo chmod -R 755 /mnt/large_uploads
+
+# Set environment variable
+export TEMP_DIR="/mnt/large_uploads"
+```
+
+## 🗂️ TB-Scale File Handling
+
+For enormous datasets (TB-scale), we provide specialized APIs and clients:
+
+### File Size Limits
+
+| API Version | Max File Size | Chunk Size | Use Case |
+|-------------|---------------|------------|----------|
+| Standard FastAPI | 1GB | N/A | Regular uploads |
+| Large Files FastAPI | **10TB** | 100MB | TB-scale datasets |
+| Legacy Flask | 100MB | N/A | Deprecated |
+
+### Large File Features
+
+- **Chunked Uploads**: Files are split into 100MB chunks for reliable transfer
+- **Resumable Transfers**: Resume interrupted uploads from where they left off
+- **Parallel Processing**: Upload multiple chunks simultaneously for speed
+- **Progress Tracking**: Real-time progress monitoring
+- **Hash Validation**: SHA-256 verification for data integrity
+- **Cloud Integration**: Direct S3/Google Drive support for large files
+
+### Quick Start for Large Files
+
+```python
+from SCLib_UploadClient_LargeFiles import LargeFileUploadClient
+
+# Initialize client for large files
+client = LargeFileUploadClient(
+    base_url="http://localhost:5001",  # Large file API
+    chunk_size=100 * 1024 * 1024,     # 100MB chunks
+    max_workers=4                      # 4 parallel uploads
+)
+
+# Upload a TB-scale file
+upload_id = client.upload_file_parallel(
+    file_path="/path/to/your/5TB/dataset.idx",
+    user_email="scientist@example.com",
+    dataset_name="Massive Imaging Dataset",
+    sensor="IDX",
+    progress_callback=lambda p: print(f"Progress: {p*100:.1f}%")
+)
+
+# Wait for completion
+final_status = client.wait_for_completion(upload_id)
+print(f"Upload complete: {final_status.is_complete}")
+```
+
 ## Quick Start
+
+> **⚠️ Important**: Before using the examples below, make sure you have completed all the setup steps in the "Prerequisites and Setup" section above. The upload client requires MongoDB, the API server, and proper environment configuration to be running.
 
 ### Upload API Client (Recommended)
 
@@ -66,6 +316,38 @@ result = client.initiate_url_upload(
 ### Complete Example
 
 See `example_usage_new_api.py` for a complete example showing all the main features of the library.
+
+### More Usage Examples
+
+**Simple Upload:**
+```python
+from SCLib_JobProcessing import ScientistCloudUploadClient
+
+client = ScientistCloudUploadClient()
+result = client.upload_local_file(
+    file_path="/path/to/dataset.zip",
+    user_email="user@example.com",
+    dataset_name="My Dataset",
+    sensor="TIFF"
+)
+```
+
+**Google Drive Import:**
+```python
+result = client.initiate_google_drive_upload(
+    file_id="1ABC123DEF456",
+    service_account_file="/path/to/service.json",
+    user_email="user@example.com",
+    dataset_name="Google Drive Dataset",
+    sensor="NETCDF"
+)
+```
+
+**Monitor Progress:**
+```python
+status = client.wait_for_completion(result['job_id'])
+print(f"Upload completed: {status['status']}")
+```
 
 ## Overview
 
