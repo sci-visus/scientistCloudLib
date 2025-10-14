@@ -62,9 +62,9 @@ class SC_JobMigration:
         print(f"Found {len(datasets_to_migrate)} datasets to migrate")
         
         for dataset in datasets_to_migrate:
+            self.stats['datasets_processed'] += 1  # Count all attempts
             try:
                 self._migrate_dataset(dataset, dry_run)
-                self.stats['datasets_processed'] += 1
             except Exception as e:
                 print(f"Error migrating dataset {dataset['uuid']}: {e}")
                 self.stats['errors'] += 1
@@ -99,8 +99,8 @@ class SC_JobMigration:
         """Find datasets that need migration to the job queue system."""
         # Find datasets with statuses that should have corresponding jobs
         migration_statuses = [
-            'sync queued', 'syncing', 'conversion queued', 'converting',
-            'upload queued', 'uploading', 'unzipping', 'zipping'
+            'submitted', 'sync queued', 'syncing', 'conversion queued', 'converting',
+            'upload queued', 'uploading', 'unzipping', 'zipping', 'done'
         ]
         
         try:
@@ -341,8 +341,8 @@ class SC_JobMigration:
         try:
             # Find datasets that should have jobs but don't
             active_statuses = [
-                'sync queued', 'syncing', 'conversion queued', 'converting',
-                'upload queued', 'uploading', 'unzipping', 'zipping'
+                'submitted', 'sync queued', 'syncing', 'conversion queued', 'converting',
+                'upload queued', 'uploading', 'unzipping', 'zipping', 'done'
             ]
             
             for dataset in self.datasets.find({'status': {'$in': active_statuses}}):

@@ -41,11 +41,11 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
         self.mock_datasets = Mock()
         
         # Setup mock database structure
-        self.mock_mongo_client.__getitem__.return_value = self.mock_db
-        self.mock_db.__getitem__.side_effect = lambda name: {
+        self.mock_mongo_client.__getitem__ = Mock(return_value=self.mock_db)
+        self.mock_db.__getitem__ = Mock(side_effect=lambda name: {
             'jobs': self.mock_jobs,
             'visstoredatas': self.mock_datasets
-        }[name]
+        }[name])
     
     def tearDown(self):
         """Clean up test fixtures."""

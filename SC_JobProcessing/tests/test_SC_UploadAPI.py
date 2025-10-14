@@ -404,11 +404,11 @@ class TestSC_UploadAPI(unittest.TestCase):
         response_data = json.loads(response.data)
         self.assertIn('Job not found or already completed', response_data['error'])
     
-    @patch('SC_UploadAPI.execute_collection_query')
-    def test_list_upload_jobs(self, mock_query):
+    @patch('SC_UploadAPI.upload_processor.get_jobs_by_user')
+    def test_list_upload_jobs(self, mock_get_jobs):
         """Test listing upload jobs."""
         # Mock database query result
-        mock_query.return_value = [
+        mock_get_jobs.return_value = [
             {
                 'job_id': 'upload_1',
                 'dataset_uuid': 'dataset_1',

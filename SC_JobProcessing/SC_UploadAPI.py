@@ -61,11 +61,17 @@ def initiate_upload():
             valid_sensors = [s.value for s in SensorType]
             return jsonify({'error': f'Invalid sensor type. Must be one of: {valid_sensors}'}), 400
         
+        # Validate source type
+        try:
+            source_type = UploadSourceType(data['source_type'])
+        except ValueError:
+            valid_sources = [s.value for s in UploadSourceType]
+            return jsonify({'error': f'Invalid source type. Must be one of: {valid_sources}'}), 400
+        
         # Generate dataset UUID
         dataset_uuid = str(uuid.uuid4())
         
         # Create upload job based on source type
-        source_type = UploadSourceType(data['source_type'])
         source_config = data['source_config']
         user_email = data['user_email']
         dataset_name = data['dataset_name']
@@ -195,8 +201,8 @@ def upload_local_file():
         try:
             convert = convert_str.lower() in ['true', '1', 'yes', 'on']
             is_public = is_public_str.lower() in ['true', '1', 'yes', 'on']
-        except:
-            return jsonify({'error': 'convert and is_public must be boolean values'}), 400
+        except AttributeError:
+            return jsonify({'error': 'Invalid boolean values for convert or is_public'}), 400
         
         # Get optional parameters
         folder = request.form.get('folder')

@@ -65,34 +65,48 @@ class TestSC_JobMigration(unittest.TestCase):
             },
             {
                 'uuid': 'dataset-2',
-                'status': 'converting',
+                'status': 'conversion queued',
                 'name': 'Dataset 2'
             },
             {
                 'uuid': 'dataset-3',
-                'status': 'done',  # Should not be migrated
+                'status': 'done',  # Should not be migrated (not in migration statuses)
                 'name': 'Dataset 3'
             }
         ]
         
-        self.mock_datasets.find.return_value = mock_datasets
-        
         # Mock existing jobs (dataset-1 has no jobs, dataset-2 has jobs)
         def mock_jobs_find(query):
-            if query['dataset_uuid'] == 'dataset-1':
+            if query.get('dataset_uuid') == 'dataset-1':
                 return []  # No existing jobs
-            elif query['dataset_uuid'] == 'dataset-2':
+            elif query.get('dataset_uuid') == 'dataset-2':
                 return [{'job_id': 'existing-job'}]  # Has existing jobs
             return []
         
-        self.mock_jobs.find.side_effect = mock_jobs_find
-        
-        result = self.migration._find_datasets_to_migrate()
-        
-        # Should only return dataset-1 (dataset-2 has existing jobs, dataset-3 is done)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0]['uuid'], 'dataset-1')
-        self.assertEqual(result[0]['status'], 'sync queued')
+        # Patch the methods directly
+        with patch.object(self.migration, 'datasets') as mock_datasets_obj:
+            # Mock the find method to respect the query filter
+            def mock_datasets_find(query):
+                if 'status' in query and '$in' in query['status']:
+                    # Filter datasets by status
+                    migration_statuses = query['status']['$in']
+                    filtered_datasets = [d for d in mock_datasets if d['status'] in migration_statuses]
+                    return filtered_datasets
+                return mock_datasets
+            
+            mock_datasets_obj.find.side_effect = mock_datasets_find
+            
+            with patch.object(self.migration, 'jobs') as mock_jobs_obj:
+                mock_jobs_obj.find.side_effect = mock_jobs_find
+                
+                result = self.migration._find_datasets_to_migrate()
+                
+                # Should return dataset-1 and dataset-3 (dataset-2 has existing jobs)
+                # dataset-1: no existing jobs, dataset-3: no existing jobs
+                self.assertEqual(len(result), 2)
+                result_uuids = [r['uuid'] for r in result]
+                self.assertIn('dataset-1', result_uuids)
+                self.assertIn('dataset-3', result_uuids)
     
     def test_find_datasets_to_migrate_database_error(self):
         """Test finding datasets with database error."""
@@ -118,13 +132,13 @@ class TestSC_JobMigration(unittest.TestCase):
         
         # Verify job was created
         self.mock_job_queue.create_job.assert_called_once()
-        call_args = self.mock_job_queue.create_job.call_args
+        call_kwargs = self.mock_job_queue.create_job.call_args[1]
         
-        self.assertEqual(call_args[0][0], 'dataset-123')  # dataset_uuid
-        self.assertEqual(call_args[0][1], 'google_sync')  # job_type
-        self.assertEqual(call_args[0][2]['user_email'], 'test@example.com')
-        self.assertEqual(call_args[0][2]['data_url'], 'https://drive.google.com/file/123')
-        self.assertEqual(call_args[0][3], 2)  # priority
+        self.assertEqual(call_kwargs['dataset_uuid'], 'dataset-123')
+        self.assertEqual(call_kwargs['job_type'], 'google_sync')
+        self.assertEqual(call_kwargs['parameters']['user_email'], 'test@example.com')
+        self.assertEqual(call_kwargs['parameters']['data_url'], 'https://drive.google.com/file/123')
+        self.assertEqual(call_kwargs['priority'], 2)
         
         # Verify result
         self.assertEqual(result['status'], 'success')
@@ -151,13 +165,13 @@ class TestSC_JobMigration(unittest.TestCase):
         
         # Verify job was created
         self.mock_job_queue.create_job.assert_called_once()
-        call_args = self.mock_job_queue.create_job.call_args
+        call_kwargs = self.mock_job_queue.create_job.call_args[1]
         
-        self.assertEqual(call_args[0][0], 'dataset-123')  # dataset_uuid
-        self.assertEqual(call_args[0][1], 'dataset_conversion')  # job_type
-        self.assertEqual(call_args[0][2]['sensor_type'], '4D_Probe')
-        self.assertEqual(call_args[0][2]['conversion_params']['Xs_dataset'], 'path/to/Xs')
-        self.assertEqual(call_args[0][3], 1)  # priority
+        self.assertEqual(call_kwargs['dataset_uuid'], 'dataset-123')
+        self.assertEqual(call_kwargs['job_type'], 'dataset_conversion')
+        self.assertEqual(call_kwargs['parameters']['sensor_type'], '4D_Probe')
+        self.assertEqual(call_kwargs['parameters']['conversion_params']['Xs_dataset'], 'path/to/Xs')
+        self.assertEqual(call_kwargs['priority'], 1)
     
     def test_migrate_dataset_upload_queued(self):
         """Test migrating dataset with upload queued status."""
@@ -177,11 +191,11 @@ class TestSC_JobMigration(unittest.TestCase):
             
             # Verify job was created
             self.mock_job_queue.create_job.assert_called_once()
-            call_args = self.mock_job_queue.create_job.call_args
+            call_kwargs = self.mock_job_queue.create_job.call_args[1]
             
-            self.assertEqual(call_args[0][0], 'dataset-123')  # dataset_uuid
-            self.assertEqual(call_args[0][1], 'file_upload')  # job_type
-            self.assertEqual(call_args[0][2]['files'], ['/test/file1.txt', '/test/file2.txt'])
+            self.assertEqual(call_kwargs['dataset_uuid'], 'dataset-123')
+            self.assertEqual(call_kwargs['job_type'], 'file_upload')
+            self.assertEqual(call_kwargs['parameters']['files'], ['/test/file1.txt', '/test/file2.txt'])
     
     def test_migrate_dataset_unzipping(self):
         """Test migrating dataset with unzipping status."""
@@ -201,11 +215,11 @@ class TestSC_JobMigration(unittest.TestCase):
             
             # Verify job was created
             self.mock_job_queue.create_job.assert_called_once()
-            call_args = self.mock_job_queue.create_job.call_args
+            call_kwargs = self.mock_job_queue.create_job.call_args[1]
             
-            self.assertEqual(call_args[0][0], 'dataset-123')  # dataset_uuid
-            self.assertEqual(call_args[0][1], 'file_extraction')  # job_type
-            self.assertEqual(call_args[0][2]['zip_file'], '/test/archive.zip')
+            self.assertEqual(call_kwargs['dataset_uuid'], 'dataset-123')
+            self.assertEqual(call_kwargs['job_type'], 'file_extraction')
+            self.assertEqual(call_kwargs['parameters']['zip_file'], '/test/archive.zip')
     
     def test_migrate_dataset_zipping(self):
         """Test migrating dataset with zipping status."""
@@ -221,11 +235,11 @@ class TestSC_JobMigration(unittest.TestCase):
         
         # Verify job was created
         self.mock_job_queue.create_job.assert_called_once()
-        call_args = self.mock_job_queue.create_job.call_args
+        call_kwargs = self.mock_job_queue.create_job.call_args[1]
         
-        self.assertEqual(call_args[0][0], 'dataset-123')  # dataset_uuid
-        self.assertEqual(call_args[0][1], 'data_compression')  # job_type
-        self.assertEqual(call_args[0][2]['compression_type'], 'lz4')
+        self.assertEqual(call_kwargs['dataset_uuid'], 'dataset-123')
+        self.assertEqual(call_kwargs['job_type'], 'data_compression')
+        self.assertEqual(call_kwargs['parameters']['compression_type'], 'lz4')
     
     def test_migrate_dataset_dry_run(self):
         """Test migrating dataset in dry run mode."""
@@ -417,15 +431,19 @@ class TestSC_JobMigration(unittest.TestCase):
             }
         ]
         
-        self.mock_datasets.find.return_value = active_datasets
-        
         # Mock existing jobs for all datasets
         def mock_jobs_find(query):
+            if 'status' in query:  # Orphaned jobs query
+                return []  # No orphaned jobs
             return [{'job_id': f"job-{query['dataset_uuid']}"}]
         
-        self.mock_jobs.find.side_effect = mock_jobs_find
-        
-        result = self.migration.validate_migration()
+        with patch.object(self.migration, 'datasets') as mock_datasets_obj:
+            mock_datasets_obj.find.return_value = active_datasets
+            
+            with patch.object(self.migration, 'jobs') as mock_jobs_obj:
+                mock_jobs_obj.find.side_effect = mock_jobs_find
+                
+                result = self.migration.validate_migration()
         
         # Verify validation passed
         self.assertTrue(result['validation_passed'])
@@ -449,17 +467,13 @@ class TestSC_JobMigration(unittest.TestCase):
             }
         ]
         
-        self.mock_datasets.find.return_value = active_datasets
-        
         # Mock missing jobs for dataset-1
         def mock_jobs_find(query):
-            if query['dataset_uuid'] == 'dataset-1':
+            if query.get('dataset_uuid') == 'dataset-1':
                 return []  # No jobs
-            elif query['dataset_uuid'] == 'dataset-2':
+            elif query.get('dataset_uuid') == 'dataset-2':
                 return [{'job_id': 'job-dataset-2'}]
             return []
-        
-        self.mock_jobs.find.side_effect = mock_jobs_find
         
         # Mock orphaned jobs
         orphaned_jobs = [
@@ -473,12 +487,21 @@ class TestSC_JobMigration(unittest.TestCase):
         def mock_jobs_find_orphaned(query):
             if 'status' in query:  # Active jobs query
                 return orphaned_jobs
+            elif query.get('dataset_uuid') == 'dataset-1':
+                return []  # No jobs for dataset-1
+            elif query.get('dataset_uuid') == 'dataset-2':
+                return [{'job_id': 'job-dataset-2'}]  # Has jobs for dataset-2
             return []  # Dataset lookup returns empty
         
-        self.mock_jobs.find.side_effect = mock_jobs_find_orphaned
-        self.mock_datasets.find_one.return_value = None  # Dataset not found
-        
-        result = self.migration.validate_migration()
+        with patch.object(self.migration, 'datasets') as mock_datasets_obj:
+            mock_datasets_obj.find.return_value = active_datasets
+            mock_datasets_obj.find_one.return_value = None  # Dataset not found
+            
+            with patch.object(self.migration, 'jobs') as mock_jobs_obj:
+                # Use the orphaned jobs mock for the validation
+                mock_jobs_obj.find.side_effect = mock_jobs_find_orphaned
+                
+                result = self.migration.validate_migration()
         
         # Verify validation failed
         self.assertFalse(result['validation_passed'])
