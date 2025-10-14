@@ -400,11 +400,12 @@ class TestSCLib_UploadProcessor(unittest.TestCase):
             # Process the job
             self.processor._process_upload_job(job_id)
             
-            # Verify status was updated to UPLOADING and then COMPLETED
+            # Verify status was updated to INITIALIZING, then UPLOADING, then COMPLETED
             # URL uploads now just store the URL without downloading
-            assert mock_update_status.call_count >= 2
+            assert mock_update_status.call_count >= 3
             calls = mock_update_status.call_args_list
-            assert calls[0][0][1] == UploadStatus.UPLOADING
+            assert calls[0][0][1] == UploadStatus.INITIALIZING
+            assert calls[1][0][1] == UploadStatus.UPLOADING
             assert calls[-1][0][1] == UploadStatus.COMPLETED
     
     def test_is_tool_available(self):

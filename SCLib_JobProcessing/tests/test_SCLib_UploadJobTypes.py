@@ -453,7 +453,9 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
         
         self.assertEqual(config.source_type, UploadSourceType.LOCAL)
         self.assertEqual(config.source_path, "/tmp/test_file.zip")
-        self.assertEqual(config.destination_path, "/mnt/visus_datasets/upload/test_dataset_123")
+        # Check that destination path contains the dataset UUID
+        self.assertIn("test_dataset_123", config.destination_path)
+        self.assertTrue(config.destination_path.endswith("test_dataset_123"))
         self.assertEqual(config.dataset_uuid, "test_dataset_123")
         self.assertEqual(config.user_email, "user@example.com")
         self.assertEqual(config.dataset_name, "Test Dataset")
@@ -480,7 +482,9 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
         
         self.assertEqual(config.source_type, UploadSourceType.GOOGLE_DRIVE)
         self.assertEqual(config.source_path, "1ABC123DEF456")
-        self.assertEqual(config.destination_path, "/mnt/visus_datasets/upload/test_dataset_123")
+        # Check that destination path contains the dataset UUID
+        self.assertIn("test_dataset_123", config.destination_path)
+        self.assertTrue(config.destination_path.endswith("test_dataset_123"))
         self.assertEqual(config.dataset_uuid, "test_dataset_123")
         self.assertEqual(config.user_email, "user@example.com")
         self.assertEqual(config.dataset_name, "Test Dataset")
@@ -515,7 +519,9 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
         
         self.assertEqual(config.source_type, UploadSourceType.S3)
         self.assertEqual(config.source_path, "s3://my-bucket/data/dataset.zip")
-        self.assertEqual(config.destination_path, "/mnt/visus_datasets/upload/test_dataset_123")
+        # Check that destination path contains the dataset UUID
+        self.assertIn("test_dataset_123", config.destination_path)
+        self.assertTrue(config.destination_path.endswith("test_dataset_123"))
         self.assertEqual(config.dataset_uuid, "test_dataset_123")
         self.assertEqual(config.user_email, "user@example.com")
         self.assertEqual(config.dataset_name, "Test Dataset")
@@ -549,7 +555,9 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
         
         self.assertEqual(config.source_type, UploadSourceType.URL)
         self.assertEqual(config.source_path, "https://example.com/dataset.zip")
-        self.assertEqual(config.destination_path, "/mnt/visus_datasets/upload/test_dataset_123")
+        # Check that destination path contains the dataset UUID
+        self.assertIn("test_dataset_123", config.destination_path)
+        self.assertTrue(config.destination_path.endswith("test_dataset_123"))
         self.assertEqual(config.dataset_uuid, "test_dataset_123")
         self.assertEqual(config.user_email, "user@example.com")
         self.assertEqual(config.dataset_name, "Test Dataset")

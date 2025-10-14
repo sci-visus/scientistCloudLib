@@ -417,8 +417,12 @@ class TestSCLib_UploadAPI_LargeFiles(unittest.TestCase):
         self.assertIn('Upload session not found', response_data['detail'])
     
     @patch('SCLib_UploadAPI_LargeFiles.shutil.rmtree')
-    def test_cancel_large_upload_success(self, mock_rmtree):
+    @patch('SCLib_UploadAPI_LargeFiles.os.path.exists')
+    def test_cancel_large_upload_success(self, mock_exists, mock_rmtree):
         """Test successful large upload cancellation."""
+        # Mock that the upload directory exists so rmtree gets called
+        mock_exists.return_value = True
+        
         # Create a test upload session
         upload_id = "test_upload_123"
         create_upload_session(upload_id, {
