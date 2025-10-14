@@ -4,6 +4,7 @@ ScientistCloud Upload Job Types
 Defines upload job types and configurations for asynchronous upload handling.
 """
 
+import os
 from enum import Enum
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
@@ -303,7 +304,7 @@ def create_local_upload_job(
     return create_upload_job_config(
         source_type=UploadSourceType.LOCAL,
         source_path=file_path,
-        destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
+        destination_path=f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
         user_email=user_email,
         dataset_name=dataset_name,
@@ -333,7 +334,7 @@ def create_google_drive_upload_job(
     return create_upload_job_config(
         source_type=UploadSourceType.GOOGLE_DRIVE,
         source_path=file_id,
-        destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
+        destination_path=f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
         user_email=user_email,
         dataset_name=dataset_name,
@@ -369,7 +370,7 @@ def create_s3_upload_job(
     return create_upload_job_config(
         source_type=UploadSourceType.S3,
         source_path=f"s3://{bucket_name}/{object_key}",
-        destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
+        destination_path=f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
         user_email=user_email,
         dataset_name=dataset_name,
@@ -404,7 +405,7 @@ def create_url_upload_job(
     return create_upload_job_config(
         source_type=UploadSourceType.URL,
         source_path=url,
-        destination_path=f"/mnt/visus_datasets/upload/{dataset_uuid}",
+        destination_path=f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
         user_email=user_email,
         dataset_name=dataset_name,

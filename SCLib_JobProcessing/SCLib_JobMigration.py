@@ -183,9 +183,8 @@ class SCLib_JobMigration:
         sensor = dataset.get('sensor', '')
         
         # Define directory paths
-        base_data_dir = '/mnt/visus_datasets'
-        input_dir = os.path.join(base_data_dir, 'upload', dataset_uuid)
-        output_dir = os.path.join(base_data_dir, 'converted', dataset_uuid)
+        input_dir = os.path.join(os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload'), dataset_uuid)
+        output_dir = os.path.join(os.getenv('JOB_OUT_DATA_DIR', '/mnt/visus_datasets/converted'), dataset_uuid)
         
         # Create jobs based on current status
         if dataset_status == SCLib_DatasetStatus.SYNC_QUEUED:

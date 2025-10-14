@@ -72,7 +72,7 @@ VISUS_CODE=/path/to/visus/code
 VISUS_DOCKER=/path/to/docker
 VISUS_SERVER=/path/to/server
 VISUS_DB=/path/to/database
-VISUS_DATASETS=/mnt/visus_datasets
+VISUS_DATASETS=/path/to/datasets
 VISUS_TEMP=/tmp/visus
 
 # Authentication (Auth0)
@@ -99,10 +99,10 @@ GIT_BRANCH_JS=main
 GIT_TOKEN=your_git_token
 
 # Job Processing Directories
-IN_DATA_DIR=/mnt/visus_datasets/upload
-OUT_DATA_DIR=/mnt/visus_datasets/converted
-SYNC_DATA_DIR=/mnt/visus_datasets/sync
-AUTH_DIR=/mnt/visus_datasets/auth
+JOB_IN_DATA_DIR=${VISUS_DATASETS}/upload
+JOB_OUT_DATA_DIR=${VISUS_DATASETS}/converted
+JOB_SYNC_DATA_DIR=${VISUS_DATASETS}/sync
+JOB_AUTH_DATA_DIR=${VISUS_DATASETS}/auth
 ```
 
 ### Setup Steps
@@ -143,11 +143,21 @@ AUTH_DIR=/mnt/visus_datasets/auth
 ### File System Permissions
 
 Ensure proper permissions for data directories:
+
+**For Production/Server:**
 ```bash
-sudo mkdir -p /mnt/visus_datasets/{upload,converted,sync,auth}
+sudo mkdir -p /mnt/visus_datasets/{upload,converted,sync,auth,tmp,large_uploads}
 sudo chown -R $USER:$USER /mnt/visus_datasets
 sudo chmod -R 755 /mnt/visus_datasets
 ```
+
+**For Localhost Development:**
+```bash
+mkdir -p ${VISUS_DATASETS}/{upload,converted,sync,auth,tmp,large_uploads}
+chmod -R 755 ${VISUS_DATASETS}
+```
+
+**Note:** For localhost development, set `VISUS_DATASETS` to a local directory (e.g., `/Users/username/GIT/VisStoreDataTemp`) and the system will automatically use your local paths instead of `/mnt/visus_datasets`.
 
 ### Server Configuration for Large Files
 
@@ -763,10 +773,10 @@ if (userWantsProgress) {
 cat > settings.json << EOF
 {
   "db_name": "scientistcloud",
-  "in_data_dir": "/mnt/visus_datasets/upload",
-  "out_data_dir": "/mnt/visus_datasets/converted",
-  "sync_data_dir": "/mnt/visus_datasets/sync",
-  "auth_dir": "/mnt/visus_datasets/auth"
+  "in_data_dir": "${VISUS_DATASETS}/upload",
+  "out_data_dir": "${VISUS_DATASETS}/converted",
+  "sync_data_dir": "${VISUS_DATASETS}/sync",
+  "auth_dir": "${VISUS_DATASETS}/auth"
 }
 EOF
 
