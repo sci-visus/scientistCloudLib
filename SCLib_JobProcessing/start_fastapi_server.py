@@ -30,8 +30,8 @@ def check_environment():
         'MONGO_URL',
         'DB_NAME',
         'AUTH0_DOMAIN',
-        'AUTH0_CLIENT_ID',
-        'AUTH0_CLIENT_SECRET'
+        'AUTHO_CLIENT_ID',
+        'AUTHO_CLIENT_SECRET'
     ]
     
     missing_vars = []
@@ -63,10 +63,12 @@ def check_dependencies():
 
 def create_temp_directories():
     """Create necessary temporary directories."""
+    # Use environment variables for paths, fallback to /tmp for localhost
+    visus_datasets = os.getenv('VISUS_DATASETS', '/tmp')
     temp_dirs = [
         "/tmp/scientistcloud_uploads",
-        "/mnt/large_uploads",
-        "/tmp/visus"
+        f"{visus_datasets}/large_uploads",
+        f"{visus_datasets}/tmp"
     ]
     
     for temp_dir in temp_dirs:

@@ -43,7 +43,7 @@ from .SCLib_MongoConnection import SCLib_MongoConnectionManager, get_mongo_conne
 
 # Upload system classes
 from .SCLib_UploadClient import ScientistCloudUploadClient
-from .SCLib_UploadAPI import app as upload_api_app
+from .SCLib_UploadAPI_Unified import app as upload_api_app
 from .SCLib_UploadProcessor import SCLib_UploadProcessor, get_upload_processor
 from .SCLib_UploadJobTypes import (
     UploadJobConfig, UploadSourceType, SensorType, UploadStatus,

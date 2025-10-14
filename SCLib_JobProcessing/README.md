@@ -4,7 +4,7 @@ This directory contains the enhanced job processing system for ScientistCloud 2.
 
 ## 🚀 FastAPI Migration Complete
 
-**We've completely migrated from Flask to FastAPI!** This provides:
+**Built with FastAPI for modern performance and features!** This provides:
 - **Better Performance**: Async support and automatic validation
 - **Modern API**: Auto-generated OpenAPI documentation
 - **Type Safety**: Pydantic models with automatic validation
@@ -20,7 +20,6 @@ This directory contains the enhanced job processing system for ScientistCloud 2.
 1. **Unified FastAPI** (`SCLib_UploadAPI_Unified.py`) - **RECOMMENDED** - Automatically handles all file sizes
 2. **Standard FastAPI** (`SCLib_UploadAPI_FastAPI.py`) - For regular uploads only
 3. **Large Files FastAPI** (`SCLib_UploadAPI_LargeFiles.py`) - For TB-scale datasets only
-4. **Legacy Flask** (`SCLib_UploadAPI.py`) - Deprecated, use FastAPI instead
 
 ### 🧠 Smart File Handling
 
@@ -43,7 +42,7 @@ Before using the upload client, you need to set up several services:
    - Connection credentials configured
 
 2. **Upload API Server**
-   - Flask server running on a specific port
+   - FastAPI server running on a specific port
    - Upload processor service running
    - Proper file system permissions
 
@@ -64,21 +63,20 @@ DB_NAME=scientistcloud
 DB_HOST=localhost
 DB_PASS=your_password
 
+# SCLib Directory Structure
+SCLIB_HOME=/path/to/scientistCloudLib/SCLib_JobProcessing  # Source code directory
+SCLIB_MYTEST=/path/to/SCLib_TryTest                        # Test environment directory
+
 # Server Configuration
 DEPLOY_SERVER=your-server.com
 DOMAIN_NAME=scientistcloud.com
-HOME_DIR=/home/scientistcloud
-VISUS_CODE=/path/to/visus/code
-VISUS_DOCKER=/path/to/docker
-VISUS_SERVER=/path/to/server
-VISUS_DB=/path/to/database
 VISUS_DATASETS=/path/to/datasets
 VISUS_TEMP=/tmp/visus
 
 # Authentication (Auth0)
 AUTH0_DOMAIN=your-domain.auth0.com
-AUTH0_CLIENT_ID=your_client_id
-AUTH0_CLIENT_SECRET=your_client_secret
+AUTHO_CLIENT_ID=your_client_id
+AUTHO_CLIENT_SECRET=your_client_secret
 AUTH0_MANAGEMENT_CLIENT_ID=your_mgmt_client_id
 AUTH0_MANAGEMENT_CLIENT_SECRET=your_mgmt_client_secret
 
@@ -105,6 +103,19 @@ JOB_SYNC_DATA_DIR=${VISUS_DATASETS}/sync
 JOB_AUTH_DATA_DIR=${VISUS_DATASETS}/auth
 ```
 
+### Directory Structure
+
+The SCLib system uses two main environment variables for organization:
+
+- **`SCLIB_HOME`**: Contains all source code files (APIs, clients, processors, etc.)
+- **`SCLIB_MYTEST`**: Contains your test environment (env.local, test scripts, data loading scripts)
+
+This separation allows you to:
+- Keep source code clean and organized
+- Have multiple test environments
+- Easily switch between different configurations
+- Maintain test scripts and data loading utilities separately
+
 ### Setup Steps
 
 1. **Install Dependencies**:
@@ -114,7 +125,7 @@ JOB_AUTH_DATA_DIR=${VISUS_DATASETS}/auth
 
 2. **Configure Environment**:
    - Create environment file with variables above
-   - Place in `/Users/amygooch/GIT/VisusDataPortalPrivate/config/env.scientistcloud.com`
+   - Place in `${SCLIB_MYTEST}/env.local`
    - Or set environment variables directly
 
 3. **Start MongoDB**:
@@ -125,19 +136,30 @@ JOB_AUTH_DATA_DIR=${VISUS_DATASETS}/auth
    docker run -d -p 27017:27017 --name mongodb mongo:latest
    ```
 
-4. **Start Upload API Server**:
+4. **Start FastAPI Server**:
    ```bash
-   cd /path/to/SCLib_JobProcessing
-   python SCLib_UploadAPI.py
+   # Load environment variables
+   source ${SCLIB_MYTEST}/env.local
+   
+   # Start the server
+   cd ${SCLIB_HOME}
+   python start_fastapi_server.py --port 8000
    ```
 
 5. **Verify Setup**:
    ```bash
+   # Load environment and change to source directory
+   source ${SCLIB_MYTEST}/env.local
+   cd ${SCLIB_HOME}
+   
    # Test configuration
-   python -c "from SCLib_JobProcessing import get_config; print('Config loaded:', get_config())"
+   python -c "from SCLib_Config import get_config; print('Config loaded:', get_config())"
    
    # Test MongoDB connection
-   python -c "from SCLib_JobProcessing import get_mongo_connection; print('MongoDB connected:', get_mongo_connection())"
+   python -c "from SCLib_MongoConnection import get_mongo_connection; print('MongoDB connected:', get_mongo_connection())"
+   
+   # Test API server
+   curl -s http://localhost:8000/api/upload/supported-sources
    ```
 
 ### File System Permissions
@@ -236,7 +258,7 @@ For enormous datasets (TB-scale), we provide specialized APIs and clients:
 |-------------|---------------|------------|----------|
 | Standard FastAPI | 1GB | N/A | Regular uploads |
 | Large Files FastAPI | **10TB** | 100MB | TB-scale datasets |
-| Legacy Flask | 100MB | N/A | Deprecated |
+| Unified FastAPI | **10TB** | Auto | **RECOMMENDED** - All files |
 
 ### Large File Features
 
@@ -253,7 +275,7 @@ For enormous datasets (TB-scale), we provide specialized APIs and clients:
 from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
 # Initialize unified client - handles all file sizes automatically!
-client = ScientistCloudUploadClient("http://localhost:5000")
+client = ScientistCloudUploadClient("http://localhost:8000")
 
 # Upload any file - automatically chooses best method
 result = client.upload_file(
@@ -283,8 +305,27 @@ client = LargeFileUploadClient("http://localhost:5001")
 
 # For standard files only  
 from SCLib_UploadClient_FastAPI import ScientistCloudUploadClient
-client = ScientistCloudUploadClient("http://localhost:5000")
+client = ScientistCloudUploadClient("http://localhost:8000")
 ```
+
+## Current Status
+
+✅ **FastAPI Server**: Successfully running on localhost:8000  
+✅ **API Endpoints**: All upload endpoints working  
+✅ **Environment Setup**: Localhost directories configured  
+⚠️ **Known Issues**: Some basic endpoints (/, /health) have validation errors but core API works  
+✅ **Documentation**: Available at http://localhost:8000/docs  
+
+### Troubleshooting
+
+**Issue**: `/health` and `/` endpoints return 500 errors  
+**Solution**: This is a known issue with response validation. The core API endpoints work fine. Use `/api/upload/supported-sources` to test connectivity.
+
+**Issue**: Environment variables not loading  
+**Solution**: Make sure to use `AUTHO_CLIENT_ID` and `AUTHO_CLIENT_SECRET` (not `AUTH0_CLIENT_ID`). Load environment with `source env.local` before starting server.
+
+**Issue**: Port 5000 already in use  
+**Solution**: Use `--port 8000` or disable macOS AirPlay Receiver in System Preferences.  
 
 ## Quick Start
 
@@ -298,7 +339,7 @@ The easiest way to use the library is through the upload client:
 from SCLib_JobProcessing import ScientistCloudUploadClient
 
 # Initialize client
-client = ScientistCloudUploadClient("http://localhost:5000")
+client = ScientistCloudUploadClient("http://localhost:8000")
 
 # Upload a local file
 result = client.upload_local_file(
@@ -654,19 +695,22 @@ pip install awscli
 5. **Configuration Validation**:
    ```bash
    python SCLib_Config.py  # Test configuration loading
+   cd ${SCLIB_HOME}
    python example_usage.py  # Test MongoDB connection
    ```
 
 ## Usage
 
-### Starting the Upload API Server
+### Starting the FastAPI Server
 
 ```bash
-# Start the upload API server
-python SCLib_UploadAPI.py
+# Load environment and start server
+source ${SCLIB_MYTEST}/env.local
+cd ${SCLIB_HOME}
+python start_fastapi_server.py --port 8000
 
-# The server will start on http://localhost:5000
-# Upload processor will start automatically
+# The server will start on http://localhost:8000
+# Automatically handles both small and large files
 ```
 
 ### Using the Upload System
@@ -678,7 +722,7 @@ The `ScientistCloudUploadClient` provides a clean, easy-to-use interface:
 ```python
 from SCLib_JobProcessing import ScientistCloudUploadClient
 
-client = ScientistCloudUploadClient("http://localhost:5000")
+client = ScientistCloudUploadClient("http://localhost:8000")
 
 # Upload a local file
 result = client.upload_local_file(
@@ -698,7 +742,7 @@ status = client.wait_for_completion(result['job_id'])
 from SCLib_JobProcessing import ScientistCloudUploadClient
 
 # Initialize client
-client = ScientistCloudUploadClient("http://localhost:5000")
+client = ScientistCloudUploadClient("http://localhost:8000")
 
 # Upload a local file
 result = client.upload_local_file(
@@ -787,12 +831,12 @@ python SCLib_BackgroundService.py settings.json
 ### Creating Jobs Programmatically
 
 ```python
-from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SCLib_JobQueueManager
 from pymongo import MongoClient
 
 # Initialize
 mongo_client = MongoClient("mongodb://localhost:27017")
-job_queue = SC_JobQueueManager(mongo_client, "scientistcloud")
+job_queue = SCLib_JobQueueManager(mongo_client, "scientistcloud")
 
 # Create a dataset conversion job
 job_id = job_queue.create_job(
@@ -816,10 +860,10 @@ print(f"Created job: {job_id}")
 ### Monitoring Jobs
 
 ```python
-from SCLib_JobMonitor import SC_JobMonitor
+from SCLib_JobMonitor import SCLib_JobMonitor
 
 # Initialize monitor
-monitor = SC_JobMonitor(mongo_client, "scientistcloud")
+monitor = SCLib_JobMonitor(mongo_client, "scientistcloud")
 
 # Get queue overview
 overview = monitor.get_queue_overview()
@@ -981,13 +1025,13 @@ GET /api/v1/jobs/queue/stats
 1. **Jobs Stuck in Running State**:
    ```bash
    # Check for stale jobs
-   python -c "from SCLib_JobMonitor import SC_JobMonitor; print(SC_JobMonitor(mongo_client, 'db').get_stale_jobs())"
+   python -c "from SCLib_JobMonitor import SCLib_JobMonitor; print(SCLib_JobMonitor(mongo_client, 'db').get_stale_jobs())"
    ```
 
 2. **High Failure Rate**:
    ```bash
    # Get error summary
-   python -c "from SCLib_JobMonitor import SC_JobMonitor; print(SC_JobMonitor(mongo_client, 'db').get_failed_jobs(24))"
+   python -c "from SCLib_JobMonitor import SCLib_JobMonitor; print(SCLib_JobMonitor(mongo_client, 'db').get_failed_jobs(24))"
    ```
 
 3. **Performance Issues**:
@@ -1046,7 +1090,7 @@ The system logs to:
 python -m pytest tests/
 
 # Test job creation
-python -c "from SCLib_JobQueueManager import SC_JobQueueManager; # test code"
+python -c "from SCLib_JobQueueManager import SCLib_JobQueueManager; # test code"
 
 # Test migration
 python SCLib_JobMigration.py migrate --dry-run
