@@ -14,14 +14,14 @@ from io import StringIO
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Import all test modules
-from test_SC_JobQueueManager import TestSC_JobQueueManager
-from test_SC_BackgroundService import TestSC_BackgroundService
-from test_SC_JobTypes import TestSC_JobTypes
-from test_SC_JobMonitor import TestSC_JobMonitor
-from test_SC_JobMigration import TestSC_JobMigration
-from test_SC_UploadJobTypes import TestSC_UploadJobTypes
-from test_SC_UploadProcessor import TestSC_UploadProcessor
-from test_SC_UploadAPI import TestSC_UploadAPI
+from test_SCLib_JobQueueManager import TestSC_JobQueueManager
+from test_SCLib_BackgroundService import TestSC_BackgroundService
+from test_SCLib_JobTypes import TestSC_JobTypes
+from test_SCLib_JobMonitor import TestSC_JobMonitor
+from test_SCLib_JobMigration import TestSC_JobMigration
+from test_SCLib_UploadJobTypes import TestSC_UploadJobTypes
+from test_SCLib_UploadProcessor import TestSC_UploadProcessor
+from test_SCLib_UploadAPI import TestSC_UploadAPI
 from test_integration import TestSC_JobProcessingIntegration
 
 

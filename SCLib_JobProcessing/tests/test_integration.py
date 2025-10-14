@@ -11,11 +11,11 @@ import json
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 
-from SC_JobQueueManager import SC_JobQueueManager
-from SC_BackgroundService import SC_BackgroundService
-from SC_JobMonitor import SC_JobMonitor
-from SC_JobMigration import SC_JobMigration
-from SC_JobTypes import SC_JobType, SC_DatasetStatus
+from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_BackgroundService import SC_BackgroundService
+from SCLib_JobMonitor import SC_JobMonitor
+from SCLib_JobMigration import SC_JobMigration
+from SCLib_JobTypes import SC_JobType, SC_DatasetStatus
 
 
 class TestSC_JobProcessingIntegration(unittest.TestCase):
@@ -231,7 +231,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     
     def test_job_type_configuration_integration(self):
         """Test job type configuration integration."""
-        from SC_JobTypes import SC_JOB_TYPE_CONFIGS, SC_JobType
+        from SCLib_JobTypes import SC_JOB_TYPE_CONFIGS, SC_JobType
         
         # Test dataset conversion configuration
         config = SC_JOB_TYPE_CONFIGS[SC_JobType.DATASET_CONVERSION]
@@ -255,7 +255,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     
     def test_dataset_status_transitions(self):
         """Test dataset status transition logic."""
-        from SC_JobTypes import (
+        from SCLib_JobTypes import (
             SC_DATASET_STATUS_TRANSITIONS, SC_DatasetStatus,
             is_valid_transition, get_next_possible_states
         )
@@ -293,7 +293,7 @@ class TestSC_JobProcessingIntegration(unittest.TestCase):
     
     def test_legacy_status_compatibility(self):
         """Test legacy status compatibility."""
-        from SC_JobTypes import (
+        from SCLib_JobTypes import (
             LEGACY_STATUS_MAPPING, convert_legacy_status, convert_to_legacy_status
         )
         

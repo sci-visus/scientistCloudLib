@@ -15,8 +15,8 @@ from io import BytesIO
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from SC_UploadAPI import app
-from SC_UploadJobTypes import UploadSourceType, SensorType
+from SCLib_UploadAPI import app
+from SCLib_UploadJobTypes import UploadSourceType, SensorType
 
 
 class TestSC_UploadAPI(unittest.TestCase):
@@ -337,7 +337,7 @@ class TestSC_UploadAPI(unittest.TestCase):
     @patch('SC_UploadAPI.upload_processor')
     def test_get_upload_status(self, mock_processor):
         """Test getting upload status."""
-        from SC_UploadJobTypes import UploadProgress, UploadStatus
+        from SCLib_UploadJobTypes import UploadProgress, UploadStatus
         
         # Mock progress object
         mock_progress = UploadProgress(

@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch, MagicMock
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SC_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SC_JobQueueManager
 
 
 class TestSC_JobQueueManager(unittest.TestCase):

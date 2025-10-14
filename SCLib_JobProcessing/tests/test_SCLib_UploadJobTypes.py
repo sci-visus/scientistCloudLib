@@ -14,7 +14,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from SC_UploadJobTypes import (
+from SCLib_UploadJobTypes import (
     UploadSourceType, UploadStatus, SensorType, UploadJobConfig,
     UploadProgress, UploadJobManager, get_tool_config,
     create_upload_job_config, create_local_upload_job,

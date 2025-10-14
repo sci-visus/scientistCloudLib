@@ -11,8 +11,8 @@ from typing import Dict, Any, List, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SC_JobQueueManager import SC_JobQueueManager
-from SC_JobTypes import (
+from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobTypes import (
     SC_JobType, SC_DatasetStatus, LEGACY_STATUS_MAPPING, 
     convert_legacy_status, convert_to_legacy_status
 )
@@ -444,7 +444,7 @@ class SC_JobMigration:
 def main():
     """Main entry point for migration utility."""
     if len(sys.argv) < 2:
-        print("Usage: SC_JobMigration.py <command> [options]")
+        print("Usage: SCLib_JobMigration.py <command> [options]")
         print("Commands:")
         print("  migrate [--dry-run] [--dataset-uuid=<uuid>]")
         print("  validate")

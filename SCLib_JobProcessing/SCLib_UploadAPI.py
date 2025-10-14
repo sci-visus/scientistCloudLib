@@ -12,9 +12,9 @@ import tempfile
 from datetime import datetime
 import threading
 
-from SC_Config import get_config
-from SC_UploadProcessor import get_upload_processor
-from SC_UploadJobTypes import (
+from SCLib_Config import get_config
+from SCLib_UploadProcessor import get_upload_processor
+from SCLib_UploadJobTypes import (
     UploadJobConfig, UploadSourceType, SensorType, create_local_upload_job,
     create_google_drive_upload_job, create_s3_upload_job, create_url_upload_job
 )
@@ -310,7 +310,7 @@ def list_upload_jobs():
             return jsonify({'error': 'user_id (user_email) is required'}), 400
         
         # Query jobs from database
-        from SC_MongoConnection import execute_collection_query
+        from SCLib_MongoConnection import execute_collection_query
         
         query = {'user_email': user_id, 'job_type': 'upload'}
         if status:

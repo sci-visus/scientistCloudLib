@@ -17,8 +17,8 @@ from datetime import datetime
 import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from SC_UploadProcessor import SC_UploadProcessor
-from SC_UploadJobTypes import (
+from SCLib_UploadProcessor import SC_UploadProcessor
+from SCLib_UploadJobTypes import (
     UploadJobConfig, UploadSourceType, UploadStatus, SensorType
 )
 

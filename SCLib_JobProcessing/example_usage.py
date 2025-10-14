@@ -11,8 +11,8 @@ from datetime import datetime
 # Add the current directory to the path so we can import our modules
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from SC_Config import get_config, get_collection_name, get_database_name, get_mongo_url
-from SC_MongoConnection import (
+from SCLib_Config import get_config, get_collection_name, get_database_name, get_mongo_url
+from SCLib_MongoConnection import (
     get_mongo_connection, get_collection_by_type, 
     mongo_collection_by_type_context, execute_collection_query,
     check_mongo_health, monitor_mongo_performance
@@ -177,7 +177,7 @@ def main():
     finally:
         # Clean up connections
         try:
-            from SC_MongoConnection import close_all_connections
+            from SCLib_MongoConnection import close_all_connections
             close_all_connections()
             print("✅ Connections closed")
         except:

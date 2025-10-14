@@ -11,8 +11,8 @@ from typing import Dict, Any, List, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SC_JobQueueManager import SC_JobQueueManager
-from SC_JobTypes import SC_JobType, SC_JobStatus, SC_DatasetStatus, SC_JOB_PRIORITY
+from SCLib_JobQueueManager import SC_JobQueueManager
+from SCLib_JobTypes import SC_JobType, SC_JobStatus, SC_DatasetStatus, SC_JOB_PRIORITY
 
 
 class SC_JobMonitor:

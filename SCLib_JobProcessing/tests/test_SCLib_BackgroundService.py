@@ -11,8 +11,8 @@ from datetime import datetime
 from unittest.mock import Mock, patch, MagicMock, call
 import subprocess
 
-from SC_BackgroundService import SC_BackgroundService
-from SC_JobQueueManager import SC_JobQueueManager
+from SCLib_BackgroundService import SC_BackgroundService
+from SCLib_JobQueueManager import SC_JobQueueManager
 
 
 class TestSC_BackgroundService(unittest.TestCase):

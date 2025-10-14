@@ -15,7 +15,7 @@ from typing import Dict, Any, Optional, List
 from pymongo import MongoClient
 
 # Import our job queue manager
-from SC_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SC_JobQueueManager
 
 
 class SC_BackgroundService:
@@ -52,7 +52,7 @@ class SC_BackgroundService:
     def _get_mongo_connection(self) -> MongoClient:
         """Get MongoDB connection."""
         try:
-            from SC_MongoConnection import get_mongo_connection
+            from SCLib_MongoConnection import get_mongo_connection
             return get_mongo_connection()
         except ImportError:
             # Fallback for direct connection
@@ -430,7 +430,7 @@ class SC_BackgroundService:
 def main():
     """Main entry point for the background service."""
     if len(sys.argv) != 2:
-        print("Usage: SC_BackgroundService.py <settings.json>")
+        print("Usage: SCLib_BackgroundService.py <settings.json>")
         sys.exit(1)
     
     try:

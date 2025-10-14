@@ -6,14 +6,14 @@ This directory contains comprehensive test cases for the SC_JobProcessing system
 
 ### Unit Tests
 
-- **`test_SC_JobQueueManager.py`** - Tests job queue management functionality
-- **`test_SC_BackgroundService.py`** - Tests background service job processing
-- **`test_SC_JobTypes.py`** - Tests job type definitions and status transitions
-- **`test_SC_JobMonitor.py`** - Tests monitoring and administrative functions
-- **`test_SC_JobMigration.py`** - Tests migration utilities and rollback operations
-- **`test_SC_UploadJobTypes.py`** - Tests upload job type definitions, sensor types, and configurations
-- **`test_SC_UploadProcessor.py`** - Tests upload job processing functionality
-- **`test_SC_UploadAPI.py`** - Tests RESTful API endpoints for upload operations
+- **`test_SCLib_JobQueueManager.py`** - Tests job queue management functionality
+- **`test_SCLib_BackgroundService.py`** - Tests background service job processing
+- **`test_SCLib_JobTypes.py`** - Tests job type definitions and status transitions
+- **`test_SCLib_JobMonitor.py`** - Tests monitoring and administrative functions
+- **`test_SCLib_JobMigration.py`** - Tests migration utilities and rollback operations
+- **`test_SCLib_UploadJobTypes.py`** - Tests upload job type definitions, sensor types, and configurations
+- **`test_SCLib_UploadProcessor.py`** - Tests upload job processing functionality
+- **`test_SCLib_UploadAPI.py`** - Tests RESTful API endpoints for upload operations
 
 ### Integration Tests
 
@@ -67,13 +67,13 @@ python run_tests.py types queue service upload_types
 
 ```bash
 # Run specific test file
-python -m unittest tests.test_SC_JobQueueManager
+python -m unittest tests.test_SCLib_JobQueueManager
 
 # Run specific test class
-python -m unittest tests.test_SC_JobQueueManager.TestSC_JobQueueManager
+python -m unittest tests.test_SCLib_JobQueueManager.TestSC_JobQueueManager
 
 # Run specific test method
-python -m unittest tests.test_SC_JobQueueManager.TestSC_JobQueueManager.test_create_job_success
+python -m unittest tests.test_SCLib_JobQueueManager.TestSC_JobQueueManager.test_create_job_success
 ```
 
 ## Test Coverage
@@ -327,12 +327,12 @@ Success Rate: 100.0%
 
 ```bash
 # Run tests with verbose output
-python -m unittest tests.test_SC_JobQueueManager -v
+python -m unittest tests.test_SCLib_JobQueueManager -v
 
 # Run specific test with debug output
 python -c "
 import unittest
-from tests.test_SC_JobQueueManager import TestSC_JobQueueManager
+from tests.test_SCLib_JobQueueManager import TestSC_JobQueueManager
 suite = unittest.TestLoader().loadTestsFromTestCase(TestSC_JobQueueManager)
 runner = unittest.TextTestRunner(verbosity=2)
 runner.run(suite)

@@ -4,7 +4,7 @@ This directory contains the enhanced job processing system for ScientistCloud 2.
 
 ## Overview
 
-The SC_JobProcessing system provides:
+The SCLib_JobProcessing system provides:
 
 - **Robust Job Queue Management**: MongoDB-based job queue with retry logic and error handling
 - **Enhanced Background Service**: Improved reliability with PID monitoring and automatic recovery
@@ -18,16 +18,16 @@ The SC_JobProcessing system provides:
 
 ### Core Components
 
-1. **SC_JobQueueManager**: Manages job creation, retrieval, and status updates
-2. **SC_BackgroundService**: Enhanced background service with job processing capabilities
-3. **SC_JobTypes**: Defines all job types, statuses, and transitions
-4. **SC_JobMonitor**: Provides monitoring, statistics, and administrative functions
-5. **SC_JobMigration**: Handles migration from the old system
-6. **SC_Config**: Centralized configuration management for environment variables and collection names
-7. **SC_MongoConnection**: Enhanced MongoDB connection manager with pooling and health monitoring
-8. **SC_UploadJobTypes**: Defines upload job types, sensor types, and configurations
-9. **SC_UploadProcessor**: Processes asynchronous upload jobs using rclone, rsync, and other tools
-10. **SC_UploadAPI**: RESTful API for upload operations with immediate response and background processing
+1. **SCLib_JobQueueManager**: Manages job creation, retrieval, and status updates
+2. **SCLib_BackgroundService**: Enhanced background service with job processing capabilities
+3. **SCLib_JobTypes**: Defines all job types, statuses, and transitions
+4. **SCLib_JobMonitor**: Provides monitoring, statistics, and administrative functions
+5. **SCLib_JobMigration**: Handles migration from the old system
+6. **SCLib_Config**: Centralized configuration management for environment variables and collection names
+7. **SCLib_MongoConnection**: Enhanced MongoDB connection manager with pooling and health monitoring
+8. **SCLib_UploadJobTypes**: Defines upload job types, sensor types, and configurations
+9. **SCLib_UploadProcessor**: Processes asynchronous upload jobs using rclone, rsync, and other tools
+10. **SCLib_UploadAPI**: RESTful API for upload operations with immediate response and background processing
 
 ### Job Types
 
@@ -70,7 +70,7 @@ The system maintains backward compatibility with existing statuses:
 
 ## Asynchronous Upload System
 
-The SC_JobProcessing system includes a comprehensive asynchronous upload solution that replaces synchronous upload tools like Uppy with a robust, scalable job-based approach.
+The SCLib_JobProcessing system includes a comprehensive asynchronous upload solution that replaces synchronous upload tools like Uppy with a robust, scalable job-based approach.
 
 ### Key Features
 
@@ -270,7 +270,7 @@ pip install awscli
 
 5. **Configuration Validation**:
    ```bash
-   python SC_Config.py  # Test configuration loading
+   python SCLib_Config.py  # Test configuration loading
    python example_usage.py  # Test MongoDB connection
    ```
 
@@ -280,7 +280,7 @@ pip install awscli
 
 ```bash
 # Start the upload API server
-python SC_UploadAPI.py
+python SCLib_UploadAPI.py
 
 # The server will start on http://localhost:5000
 # Upload processor will start automatically
@@ -377,13 +377,13 @@ cat > settings.json << EOF
 EOF
 
 # Start the service
-python SC_BackgroundService.py settings.json
+python SCLib_BackgroundService.py settings.json
 ```
 
 ### Creating Jobs Programmatically
 
 ```python
-from SC_JobQueueManager import SC_JobQueueManager
+from SCLib_JobQueueManager import SC_JobQueueManager
 from pymongo import MongoClient
 
 # Initialize
@@ -412,7 +412,7 @@ print(f"Created job: {job_id}")
 ### Monitoring Jobs
 
 ```python
-from SC_JobMonitor import SC_JobMonitor
+from SCLib_JobMonitor import SC_JobMonitor
 
 # Initialize monitor
 monitor = SC_JobMonitor(mongo_client, "scientistcloud")
@@ -436,42 +436,42 @@ print(f"Success rate: {report['summary']['success_rate']:.1%}")
 
 ```bash
 # Check what datasets need migration
-python SC_JobMigration.py migrate --dry-run
+python SCLib_JobMigration.py migrate --dry-run
 ```
 
 ### 2. Perform Migration
 
 ```bash
 # Migrate all datasets (dry run first)
-python SC_JobMigration.py migrate --dry-run
-python SC_JobMigration.py migrate
+python SCLib_JobMigration.py migrate --dry-run
+python SCLib_JobMigration.py migrate
 
 # Or migrate specific dataset
-python SC_JobMigration.py migrate --dataset-uuid=550e8400-e29b-41d4-a716-446655440000
+python SCLib_JobMigration.py migrate --dataset-uuid=550e8400-e29b-41d4-a716-446655440000
 ```
 
 ### 3. Validate Migration
 
 ```bash
 # Validate migration was successful
-python SC_JobMigration.py validate
+python SCLib_JobMigration.py validate
 ```
 
 ### 4. Rollback if Needed
 
 ```bash
 # Rollback all migrations
-python SC_JobMigration.py rollback
+python SCLib_JobMigration.py rollback
 
 # Or rollback specific dataset
-python SC_JobMigration.py rollback --dataset-uuid=550e8400-e29b-41d4-a716-446655440000
+python SCLib_JobMigration.py rollback --dataset-uuid=550e8400-e29b-41d4-a716-446655440000
 ```
 
 ## Configuration
 
 ### Job Type Configuration
 
-Each job type has configurable parameters in `SC_JobTypes.py`:
+Each job type has configurable parameters in `SCLib_JobTypes.py`:
 
 ```python
 SC_JOB_TYPE_CONFIGS = {
@@ -577,19 +577,19 @@ GET /api/v1/jobs/queue/stats
 1. **Jobs Stuck in Running State**:
    ```bash
    # Check for stale jobs
-   python -c "from SC_JobMonitor import SC_JobMonitor; print(SC_JobMonitor(mongo_client, 'db').get_stale_jobs())"
+   python -c "from SCLib_JobMonitor import SC_JobMonitor; print(SC_JobMonitor(mongo_client, 'db').get_stale_jobs())"
    ```
 
 2. **High Failure Rate**:
    ```bash
    # Get error summary
-   python -c "from SC_JobMonitor import SC_JobMonitor; print(SC_JobMonitor(mongo_client, 'db').get_failed_jobs(24))"
+   python -c "from SCLib_JobMonitor import SC_JobMonitor; print(SC_JobMonitor(mongo_client, 'db').get_failed_jobs(24))"
    ```
 
 3. **Performance Issues**:
    ```bash
    # Get performance report
-   python SC_JobMonitor.py --performance-report --days=7
+   python SCLib_JobMonitor.py --performance-report --days=7
    ```
 
 ### Logs
@@ -603,7 +603,7 @@ The system logs to:
 
 ### Adding New Job Types
 
-1. **Define Job Type** in `SC_JobTypes.py`:
+1. **Define Job Type** in `SCLib_JobTypes.py`:
    ```python
    class SC_JobType(Enum):
        NEW_JOB_TYPE = "new_job_type"
@@ -620,7 +620,7 @@ The system logs to:
    }
    ```
 
-3. **Implement Handler** in `SC_BackgroundService.py`:
+3. **Implement Handler** in `SCLib_BackgroundService.py`:
    ```python
    def _handle_new_job_type(self, job):
        # Implementation here
@@ -642,10 +642,10 @@ The system logs to:
 python -m pytest tests/
 
 # Test job creation
-python -c "from SC_JobQueueManager import SC_JobQueueManager; # test code"
+python -c "from SCLib_JobQueueManager import SC_JobQueueManager; # test code"
 
 # Test migration
-python SC_JobMigration.py migrate --dry-run
+python SCLib_JobMigration.py migrate --dry-run
 ```
 
 ## Contributing

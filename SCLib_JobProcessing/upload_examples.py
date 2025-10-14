@@ -326,7 +326,7 @@ def main():
         print("\n" + "=" * 50)
         print("✅ Examples completed successfully!")
         print("\nTo test with real data:")
-        print("1. Start the upload API server: python SC_UploadAPI.py")
+        print("1. Start the upload API server: python SCLib_UploadAPI.py")
         print("2. Use the client methods above with real file paths and parameters")
         print("3. Monitor job progress using the status endpoints")
         

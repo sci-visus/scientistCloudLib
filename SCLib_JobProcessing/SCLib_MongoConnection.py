@@ -19,7 +19,7 @@ from pymongo.database import Database
 from pymongo.collection import Collection
 
 # Import configuration
-from SC_Config import get_config, get_database_name, get_collection_name
+from SCLib_Config import get_config, get_database_name, get_collection_name
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

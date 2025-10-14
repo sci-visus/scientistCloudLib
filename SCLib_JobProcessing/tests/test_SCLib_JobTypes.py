@@ -6,7 +6,7 @@ Tests job type definitions, status transitions, and helper functions.
 import unittest
 from datetime import datetime
 
-from SC_JobTypes import (
+from SCLib_JobTypes import (
     SC_JobType, SC_JobStatus, SC_DatasetStatus, SC_JOB_PRIORITY,
     SC_JOB_TYPE_CONFIGS, SC_DATASET_STATUS_TRANSITIONS,
     get_job_type_config, get_dataset_status_config,

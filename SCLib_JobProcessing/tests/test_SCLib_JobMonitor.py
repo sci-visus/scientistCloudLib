@@ -7,8 +7,8 @@ import unittest
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, MagicMock
 
-from SC_JobMonitor import SC_JobMonitor
-from SC_JobQueueManager import SC_JobQueueManager
+from SCLib_JobMonitor import SC_JobMonitor
+from SCLib_JobQueueManager import SC_JobQueueManager
 
 
 class TestSC_JobMonitor(unittest.TestCase):

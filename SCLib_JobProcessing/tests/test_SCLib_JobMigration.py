@@ -12,8 +12,8 @@ from unittest.mock import Mock, patch, MagicMock
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SC_JobMigration import SC_JobMigration
-from SC_JobQueueManager import SC_JobQueueManager
+from SCLib_JobMigration import SC_JobMigration
+from SCLib_JobQueueManager import SC_JobQueueManager
 
 
 class TestSC_JobMigration(unittest.TestCase):
