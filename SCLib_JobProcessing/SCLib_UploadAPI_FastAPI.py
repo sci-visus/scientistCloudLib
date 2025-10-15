@@ -307,7 +307,8 @@ async def upload_file_by_path(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
-    dataset_uuid: Optional[str] = Form(None, description="Optional dataset UUID for directory uploads"),
+    dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
+    add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -332,13 +333,21 @@ async def upload_file_by_path(
         file_size = os.path.getsize(file_path)
         filename = os.path.basename(file_path)
         
-        # Use provided UUID for directory uploads, or generate new one for single files
-        upload_uuid = dataset_uuid if dataset_uuid else str(uuid.uuid4())
+        # Resolve dataset identifier to UUID if provided
+        upload_uuid = None
+        if dataset_identifier:
+            try:
+                upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
+                logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+        else:
+            upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
         
         # For single file uploads, don't use folder for file system structure
         # The folder parameter is for UI organization only
-        # Only use folder structure for directory uploads (when dataset_uuid is provided)
-        file_system_folder = folder if dataset_uuid else None
+        # Only use folder structure for directory uploads (when dataset_identifier is provided)
+        file_system_folder = folder if dataset_identifier else None
         
         # Create local upload job with the original file path (no /tmp copying!)
         job_config = create_local_upload_job(

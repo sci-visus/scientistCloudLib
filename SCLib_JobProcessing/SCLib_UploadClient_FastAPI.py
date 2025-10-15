@@ -137,7 +137,8 @@ class ScientistCloudUploadClient:
     
     def upload_file_by_path(self, file_path: str, user_email: str, dataset_name: str,
                            sensor: str, convert: bool = True, is_public: bool = False,
-                           folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
+                           folder: str = None, team_uuid: str = None, dataset_identifier: str = None,
+                           add_to_existing: bool = False,
                            progress_callback: Callable[[float], None] = None) -> UploadResult:
         """
         Upload a file by providing its path instead of uploading the file content.
@@ -164,8 +165,10 @@ class ScientistCloudUploadClient:
             form_data['folder'] = folder
         if team_uuid:
             form_data['team_uuid'] = team_uuid
-        if dataset_uuid:
-            form_data['dataset_uuid'] = dataset_uuid
+        if dataset_identifier:
+            form_data['dataset_identifier'] = dataset_identifier
+        if add_to_existing:
+            form_data['add_to_existing'] = str(add_to_existing).lower()
         
         # For path-based uploads, we don't need to send file content
         response = self.session.post(url, data=form_data, timeout=self.timeout)

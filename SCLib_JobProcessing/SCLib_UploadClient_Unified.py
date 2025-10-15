@@ -53,8 +53,8 @@ class ScientistCloudUploadClient:
     
     def upload_file(self, file_path: str, user_email: str, dataset_name: str, 
                    sensor: str, convert: bool = True, is_public: bool = False,
-                   folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
-                   progress_callback: Callable[[float], None] = None) -> UploadResult:
+                   folder: str = None, team_uuid: str = None, dataset_identifier: str = None,
+                   add_to_existing: bool = False, progress_callback: Callable[[float], None] = None) -> UploadResult:
         """
         Upload a file with automatic handling of standard vs chunked uploads.
         
@@ -70,6 +70,8 @@ class ScientistCloudUploadClient:
             is_public: Whether dataset is public
             folder: Optional folder name
             team_uuid: Optional team UUID
+            dataset_identifier: Optional dataset identifier (UUID, name, slug, or numeric ID) to add files to
+            add_to_existing: Whether to add to existing dataset (requires dataset_identifier)
             progress_callback: Callback for progress tracking
         
         Returns:
@@ -94,15 +96,17 @@ class ScientistCloudUploadClient:
             'dataset_name': dataset_name,
             'sensor': sensor,
             'convert': str(convert).lower(),
-            'is_public': str(is_public).lower()
+            'is_public': str(is_public).lower(),
+            'original_file_path': file_path,  # Store original file path for retry purposes
+            'add_to_existing': str(add_to_existing).lower()
         }
         
         if folder:
             form_data['folder'] = folder
         if team_uuid:
             form_data['team_uuid'] = team_uuid
-        if dataset_uuid:
-            form_data['dataset_uuid'] = dataset_uuid
+        if dataset_identifier:
+            form_data['dataset_identifier'] = dataset_identifier
         
         # Prepare file
         with open(file_path, 'rb') as f:
@@ -499,7 +503,7 @@ class ScientistCloudUploadClient:
                     is_public=is_public,
                     folder=file_folder,
                     team_uuid=team_uuid,
-                    dataset_uuid=directory_uuid,  # Use shared UUID for directory upload
+                    dataset_identifier=directory_uuid,  # Use shared UUID for directory upload
                     progress_callback=file_progress_callback
                 )
                 
@@ -675,8 +679,8 @@ class AsyncScientistCloudUploadClient:
     
     async def upload_file(self, file_path: str, user_email: str, dataset_name: str,
                          sensor: str, convert: bool = True, is_public: bool = False,
-                         folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
-                         progress_callback: Callable[[float], None] = None) -> UploadResult:
+                         folder: str = None, team_uuid: str = None, dataset_identifier: str = None,
+                         add_to_existing: bool = False, progress_callback: Callable[[float], None] = None) -> UploadResult:
         """Async version of upload_file."""
         file_path_obj = Path(file_path)
         if not file_path_obj.exists():
@@ -702,8 +706,10 @@ class AsyncScientistCloudUploadClient:
             form_data.add_field('folder', folder)
         if team_uuid:
             form_data.add_field('team_uuid', team_uuid)
-        if dataset_uuid:
-            form_data.add_field('dataset_uuid', dataset_uuid)
+        if dataset_identifier:
+            form_data.add_field('dataset_identifier', dataset_identifier)
+        if add_to_existing:
+            form_data.add_field('add_to_existing', str(add_to_existing).lower())
         
         # Add file
         form_data.add_field('file', open(file_path, 'rb'), filename=file_path_obj.name)
@@ -822,7 +828,7 @@ class AsyncScientistCloudUploadClient:
                     is_public=is_public,
                     folder=file_folder,
                     team_uuid=team_uuid,
-                    dataset_uuid=directory_uuid,  # Use shared UUID for directory upload
+                    dataset_identifier=directory_uuid,  # Use shared UUID for directory upload
                     progress_callback=file_progress_callback
                 )
                 

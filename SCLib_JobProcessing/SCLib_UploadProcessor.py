@@ -693,9 +693,15 @@ scope = drive
                 # Check if dataset already exists
                 existing_dataset = collection.find_one({"uuid": job_config.dataset_uuid})
                 
+                # Generate additional identifiers
+                dataset_slug = self._generate_dataset_slug(job_config.dataset_name, job_config.user_id)
+                dataset_id = self._generate_dataset_id()
+                
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
                     "name": job_config.dataset_name,
+                    "slug": dataset_slug,
+                    "id": dataset_id,
                     "user_email": job_config.user_id,
                     "sensor": job_config.sensor.value,
                     "convert": job_config.convert,
@@ -712,34 +718,97 @@ scope = drive
                 }
                 
                 if existing_dataset:
-                    # Update existing dataset
+                    # Update existing dataset - add new file information
                     collection.update_one(
                         {"uuid": job_config.dataset_uuid},
                         {
                             "$set": {
-                                "name": job_config.dataset_name,
-                                "sensor": job_config.sensor.value,
-                                "convert": job_config.convert,
-                                "is_public": job_config.is_public,
-                                "folder": job_config.folder,
-                                "team_uuid": job_config.team_uuid,
-                                "source_type": job_config.source_type.value,
-                                "source_path": job_config.source_path,
-                                "destination_path": job_config.destination_path,
-                                "total_size_bytes": job_config.total_size_bytes,
                                 "status": "uploading",
                                 "updated_at": datetime.utcnow()
+                            },
+                            "$push": {
+                                "files": {
+                                    "source_path": job_config.source_path,
+                                    "destination_path": job_config.destination_path,
+                                    "source_type": job_config.source_type.value,
+                                    "total_size_bytes": job_config.total_size_bytes,
+                                    "created_at": job_config.created_at
+                                }
                             }
                         }
                     )
-                    logger.info(f"Updated dataset entry: {job_config.dataset_uuid}")
+                    logger.info(f"Added file to existing dataset: {job_config.dataset_uuid}")
                 else:
                     # Create new dataset entry
+                    dataset_doc["files"] = [{
+                        "source_path": job_config.source_path,
+                        "destination_path": job_config.destination_path,
+                        "source_type": job_config.source_type.value,
+                        "total_size_bytes": job_config.total_size_bytes,
+                        "created_at": job_config.created_at
+                    }]
                     collection.insert_one(dataset_doc)
                     logger.info(f"Created dataset entry: {job_config.dataset_uuid}")
                     
         except Exception as e:
             logger.error(f"Error creating/updating dataset entry: {e}")
+    
+    def _generate_dataset_slug(self, dataset_name: str, user_email: str) -> str:
+        """Generate a human-readable slug for the dataset."""
+        import re
+        from datetime import datetime
+        
+        # Clean the dataset name
+        slug = re.sub(r'[^a-zA-Z0-9\s-]', '', dataset_name.lower())
+        slug = re.sub(r'\s+', '-', slug.strip())
+        
+        # Add year for uniqueness
+        year = datetime.now().year
+        slug = f"{slug}-{year}"
+        
+        # Add user prefix for uniqueness
+        user_prefix = user_email.split('@')[0].lower()
+        slug = f"{user_prefix}-{slug}"
+        
+        return slug
+    
+    def _generate_dataset_id(self) -> int:
+        """Generate a short numeric ID for the dataset."""
+        import time
+        # Use timestamp-based ID for uniqueness
+        return int(time.time() * 1000) % 100000  # 5-digit ID
+    
+    def _resolve_dataset_identifier(self, identifier: str) -> str:
+        """Resolve various identifier types to a dataset UUID."""
+        try:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                # Try different identifier types
+                dataset = None
+                
+                # Check if it's a UUID (36 characters with hyphens)
+                if len(identifier) == 36 and identifier.count('-') == 4:
+                    dataset = collection.find_one({"uuid": identifier})
+                
+                # Check if it's a numeric ID
+                elif identifier.isdigit():
+                    dataset = collection.find_one({"id": int(identifier)})
+                
+                # Check if it's a slug
+                elif '-' in identifier:
+                    dataset = collection.find_one({"slug": identifier})
+                
+                # Check if it's a name (exact match)
+                else:
+                    dataset = collection.find_one({"name": identifier})
+                
+                if dataset:
+                    return dataset["uuid"]
+                else:
+                    raise ValueError(f"Dataset not found: {identifier}")
+                    
+        except Exception as e:
+            logger.error(f"Error resolving dataset identifier '{identifier}': {e}")
+            raise ValueError(f"Dataset not found: {identifier}")
     
     def _update_dataset_status(self, dataset_uuid: str, status: str, error_message: str = ""):
         """Update dataset status in visstoredatas collection."""

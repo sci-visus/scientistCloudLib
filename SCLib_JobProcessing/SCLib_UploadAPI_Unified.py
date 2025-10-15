@@ -306,7 +306,8 @@ async def upload_file(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
-    dataset_uuid: Optional[str] = Form(None, description="Optional dataset UUID for directory uploads"),
+    dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
+    add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -331,13 +332,13 @@ async def upload_file(
             # Use chunked upload for large files
             return await _handle_chunked_upload(
                 content, file.filename, file_size, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, dataset_uuid, background_tasks, processor
+                sensor, convert, is_public, folder, team_uuid, dataset_identifier, add_to_existing, background_tasks, processor
             )
         else:
             # Use standard upload for smaller files
             return await _handle_standard_upload(
                 content, file.filename, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, dataset_uuid, background_tasks, processor
+                sensor, convert, is_public, folder, team_uuid, dataset_identifier, add_to_existing, background_tasks, processor
             )
         
     except Exception as e:
@@ -355,7 +356,8 @@ async def upload_file_by_path(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
-    dataset_uuid: Optional[str] = Form(None, description="Optional dataset UUID for directory uploads"),
+    dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
+    add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -380,13 +382,21 @@ async def upload_file_by_path(
         file_size = os.path.getsize(file_path)
         filename = os.path.basename(file_path)
         
-        # Use provided UUID for directory uploads, or generate new one for single files
-        upload_uuid = dataset_uuid if dataset_uuid else str(uuid.uuid4())
+        # Resolve dataset identifier to UUID if provided
+        upload_uuid = None
+        if dataset_identifier:
+            try:
+                upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
+                logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+        else:
+            upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
         
         # For single file uploads, don't use folder for file system structure
         # The folder parameter is for UI organization only
-        # Only use folder structure for directory uploads (when dataset_uuid is provided)
-        file_system_folder = folder if dataset_uuid else None
+        # Only use folder structure for directory uploads (when dataset_identifier is provided)
+        file_system_folder = folder if dataset_identifier else None
         
         # Create local upload job with the original file path (no /tmp copying!)
         job_config = create_local_upload_job(
@@ -425,7 +435,7 @@ async def upload_file_by_path(
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
+    team_uuid: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
     # For large files, we should work directly with the original file path
@@ -443,13 +453,29 @@ async def _handle_standard_upload(
         buffer.write(content)
     
     # Create local upload job
-    # Use provided UUID for directory uploads, or generate new one for single files
-    upload_uuid = dataset_uuid if dataset_uuid else str(uuid.uuid4())
+    # Resolve dataset identifier to UUID if provided
+    upload_uuid = None
+    if dataset_identifier:
+        try:
+            upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
+            logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
+        except ValueError as e:
+            raise HTTPException(status_code=404, detail=str(e))
+    
+    # Use resolved UUID for directory uploads or adding to existing dataset, or generate new one for single files
+    if add_to_existing and upload_uuid:
+        # Add to existing dataset
+        pass  # upload_uuid is already set
+    elif upload_uuid:
+        # Directory upload
+        pass  # upload_uuid is already set
+    else:
+        upload_uuid = str(uuid.uuid4())  # New single file upload
     
     # For single file uploads, don't use folder for file system structure
     # The folder parameter is for UI organization only
-    # Only use folder structure for directory uploads (when dataset_uuid is provided)
-    file_system_folder = folder if dataset_uuid else None
+    # Only use folder structure for directory uploads (when dataset_identifier is provided)
+    file_system_folder = folder if dataset_identifier else None
     
     job_config = create_local_upload_job(
         file_path=temp_file_path,
@@ -460,7 +486,8 @@ async def _handle_standard_upload(
         convert=convert,
         is_public=is_public,
         folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
-        team_uuid=team_uuid
+        team_uuid=team_uuid,
+        original_source_path=filename  # Store original filename for retry purposes
     )
     
     # Submit job to processor and get the actual job ID
@@ -575,6 +602,44 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
     except Exception as e:
         logger.error(f"Error processing chunks for {upload_id}: {e}")
         raise
+
+@app.get("/api/v1/datasets/{identifier}", response_model=dict)
+async def get_dataset_info(identifier: str, processor: Any = Depends(get_processor)):
+    """
+    Get dataset information using flexible identifier.
+    
+    Supports multiple identifier types:
+    - UUID: 550e8400-e29b-41d4-a716-446655440000
+    - Name: my-dataset-name (if unique)
+    - Slug: my-dataset-name-2024 (human-readable, unique)
+    - ID: 12345 (short numeric ID)
+    """
+    try:
+        # Resolve identifier to UUID
+        dataset_uuid = processor._resolve_dataset_identifier(identifier)
+        
+        # Get dataset information from database
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            dataset = collection.find_one({"uuid": dataset_uuid})
+            
+            if not dataset:
+                raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+            
+            # Convert ObjectId to string for JSON serialization
+            if '_id' in dataset:
+                dataset['_id'] = str(dataset['_id'])
+            
+            return {
+                "identifier": identifier,
+                "resolved_uuid": dataset_uuid,
+                "dataset": dataset
+            }
+            
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error getting dataset info: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/upload/status/{job_id}", response_model=JobStatusResponse)
 async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)):

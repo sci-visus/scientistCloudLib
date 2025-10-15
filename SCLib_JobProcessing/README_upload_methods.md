@@ -254,6 +254,127 @@ result = client.upload_large_file(
 - Use chunked uploads for better reliability
 - Check network stability
 
+## Adding Files to Existing Datasets
+
+You can add more files to an existing dataset by providing the dataset UUID and setting `add_to_existing=True`:
+
+```python
+# First upload creates a dataset
+result1 = client.upload_file(
+    file_path='initial_file.tif',
+    user_email='user@example.com',
+    dataset_name='My Dataset',
+    sensor='TIFF RGB'
+)
+
+# Add more files to the same dataset
+result2 = client.upload_file(
+    file_path='additional_file.tif',
+    user_email='user@example.com',
+    dataset_name='My Dataset',  # Can be different name
+    sensor='TIFF RGB',
+    dataset_identifier='My Dataset',  # Use flexible identifier
+    add_to_existing=True  # Key parameter
+)
+```
+
+### Benefits of Add to Existing:
+- **Incremental building**: Add files over time
+- **Single dataset UUID**: All files share the same identifier
+- **Collaborative**: Multiple users can add to the same dataset
+- **Flexible**: Add files as they become available
+
+### Database Structure:
+When using `add_to_existing=True`, the `visstoredatas` collection stores:
+- Single document per dataset UUID
+- `files` array containing all file information
+- Updated timestamps for each addition
+
+### Use Cases:
+- **Incremental data collection**: Add new images to a dataset
+- **Collaborative datasets**: Multiple researchers adding data
+- **Processing results**: Add processed files to original dataset
+- **Long-term projects**: Build datasets over time
+
+## Flexible Dataset Identification
+
+Instead of forcing users to know UUIDs, the system supports multiple ways to identify datasets:
+
+### Supported Identifier Types:
+
+1. **UUID**: `550e8400-e29b-41d4-a716-446655440000`
+   - Standard format, unique across all datasets
+   - Used internally for database operations
+
+2. **Name**: `My Research Dataset`
+   - Human-readable, user-provided
+   - Must be unique per user
+
+3. **Slug**: `amygooch-my-research-dataset-2024`
+   - URL-friendly, auto-generated from name
+   - Format: `{user_prefix}-{cleaned_name}-{year}`
+
+4. **Numeric ID**: `12345`
+   - Short 5-digit number, easy to remember
+   - Auto-generated, unique across all datasets
+
+### Usage Examples:
+
+```python
+# All of these reference the same dataset:
+
+# Using UUID
+client.upload_file(
+    file_path='file.tif',
+    dataset_identifier='550e8400-e29b-41d4-a716-446655440000',
+    add_to_existing=True,
+    ...
+)
+
+# Using Name
+client.upload_file(
+    file_path='file.tif',
+    dataset_identifier='My Research Dataset',
+    add_to_existing=True,
+    ...
+)
+
+# Using Slug
+client.upload_file(
+    file_path='file.tif',
+    dataset_identifier='amygooch-my-research-dataset-2024',
+    add_to_existing=True,
+    ...
+)
+
+# Using Numeric ID
+client.upload_file(
+    file_path='file.tif',
+    dataset_identifier='12345',
+    add_to_existing=True,
+    ...
+)
+```
+
+### API Endpoint:
+
+```
+GET /api/v1/datasets/{identifier}
+```
+
+Supports all identifier types:
+- `GET /api/v1/datasets/550e8400-e29b-41d4-a716-446655440000`
+- `GET /api/v1/datasets/My Research Dataset`
+- `GET /api/v1/datasets/amygooch-my-research-dataset-2024`
+- `GET /api/v1/datasets/12345`
+
+### Benefits:
+- **User-friendly**: No need to remember UUIDs
+- **Human-readable**: Use meaningful names
+- **URL-friendly**: Use slugs in web applications
+- **Quick access**: Use short numeric IDs
+- **Backward compatible**: UUIDs still work
+
 ## Future Improvements
 
 1. **Streaming uploads** - process files as they arrive
