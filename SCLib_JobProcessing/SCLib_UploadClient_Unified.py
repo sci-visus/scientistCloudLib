@@ -468,7 +468,7 @@ class ScientistCloudUploadClient:
         
         # Upload each file
         results = []
-        # Use a single UUID for the entire directory upload
+        # Generate a single UUID for the entire directory upload
         directory_uuid = str(uuid.uuid4())
         
         for i, file_path in enumerate(files_to_upload, 1):
@@ -494,18 +494,38 @@ class ScientistCloudUploadClient:
                         progress_callback(overall_progress)
                     print(f"   Progress: {progress*100:.1f}%", end='\r')
                 
-                result = self.upload_file(
-                    file_path=str(file_path),
-                    user_email=user_email,
-                    dataset_name=dataset_name,  # Use the original dataset name
-                    sensor=sensor,
-                    convert=convert,
-                    is_public=is_public,
-                    folder=file_folder,
-                    team_uuid=team_uuid,
-                    dataset_identifier=directory_uuid,  # Use shared UUID for directory upload
-                    progress_callback=file_progress_callback
-                )
+                # For the first file, create new dataset with the directory UUID
+                # For subsequent files, add to the existing dataset using the same UUID
+                if i == 1:
+                    # First file - create new dataset with the directory UUID
+                    result = self.upload_file(
+                        file_path=str(file_path),
+                        user_email=user_email,
+                        dataset_name=dataset_name,  # Use the original dataset name
+                        sensor=sensor,
+                        convert=convert,
+                        is_public=is_public,
+                        folder=file_folder,
+                        team_uuid=team_uuid,
+                        dataset_identifier=directory_uuid,  # Use the directory UUID
+                        add_to_existing=False,  # Create new dataset
+                        progress_callback=file_progress_callback
+                    )
+                else:
+                    # Subsequent files - add to existing dataset
+                    result = self.upload_file(
+                        file_path=str(file_path),
+                        user_email=user_email,
+                        dataset_name=dataset_name,  # Use the original dataset name
+                        sensor=sensor,
+                        convert=convert,
+                        is_public=is_public,
+                        folder=file_folder,
+                        team_uuid=team_uuid,
+                        dataset_identifier=directory_uuid,  # Use shared UUID for directory upload
+                        add_to_existing=True,  # Add to existing dataset
+                        progress_callback=file_progress_callback
+                    )
                 
                 print(f"   ✅ Uploaded: {result.job_id}")
                 results.append(result)
@@ -793,7 +813,7 @@ class AsyncScientistCloudUploadClient:
         
         # Upload each file
         results = []
-        # Use a single UUID for the entire directory upload
+        # Generate a single UUID for the entire directory upload
         directory_uuid = str(uuid.uuid4())
         
         for i, file_path in enumerate(files_to_upload, 1):
@@ -819,18 +839,38 @@ class AsyncScientistCloudUploadClient:
                         progress_callback(overall_progress)
                     print(f"   Progress: {progress*100:.1f}%", end='\r')
                 
-                result = await self.upload_file_async(
-                    file_path=str(file_path),
-                    user_email=user_email,
-                    dataset_name=dataset_name,  # Use the original dataset name
-                    sensor=sensor,
-                    convert=convert,
-                    is_public=is_public,
-                    folder=file_folder,
-                    team_uuid=team_uuid,
-                    dataset_identifier=directory_uuid,  # Use shared UUID for directory upload
-                    progress_callback=file_progress_callback
-                )
+                # For the first file, create new dataset with the directory UUID
+                # For subsequent files, add to the existing dataset using the same UUID
+                if i == 1:
+                    # First file - create new dataset with the directory UUID
+                    result = await self.upload_file_async(
+                        file_path=str(file_path),
+                        user_email=user_email,
+                        dataset_name=dataset_name,  # Use the original dataset name
+                        sensor=sensor,
+                        convert=convert,
+                        is_public=is_public,
+                        folder=file_folder,
+                        team_uuid=team_uuid,
+                        dataset_identifier=directory_uuid,  # Use the directory UUID
+                        add_to_existing=False,  # Create new dataset
+                        progress_callback=file_progress_callback
+                    )
+                else:
+                    # Subsequent files - add to existing dataset
+                    result = await self.upload_file_async(
+                        file_path=str(file_path),
+                        user_email=user_email,
+                        dataset_name=dataset_name,  # Use the original dataset name
+                        sensor=sensor,
+                        convert=convert,
+                        is_public=is_public,
+                        folder=file_folder,
+                        team_uuid=team_uuid,
+                        dataset_identifier=directory_uuid,  # Use shared UUID for directory upload
+                        add_to_existing=True,  # Add to existing dataset
+                        progress_callback=file_progress_callback
+                    )
                 
                 print(f"   ✅ Uploaded: {result.job_id}")
                 results.append(result)

@@ -893,13 +893,18 @@ if __name__ == '__main__':
         local_job = create_local_upload_job(
             file_path="/tmp/test_file.zip",
             dataset_uuid="test_dataset_123",
-            user_id="test_user"
+            user_email="test_user@example.com",
+            dataset_name="Test Dataset",
+            sensor=SensorType.TIFF,
+            original_source_path="/tmp/test_file.zip"
         )
         
         url_job = create_url_upload_job(
             url="https://example.com/test_data.zip",
             dataset_uuid="test_dataset_456",
-            user_id="test_user"
+            user_email="test_user@example.com",
+            dataset_name="Test URL Dataset",
+            sensor=SensorType.TIFF
         )
         
         # Submit jobs

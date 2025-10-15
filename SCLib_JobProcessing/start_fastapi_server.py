@@ -15,6 +15,11 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 def load_env_file(env_path: str = None):
     """Load environment variables from env.local file."""
+    # If we're running in Docker and have environment variables, skip file loading
+    if os.getenv('MONGO_URL') and os.getenv('DB_NAME'):
+        print("🐳 Running in Docker with environment variables - skipping env file loading")
+        return
+        
     if env_path is None:
         # Check for explicit environment file variable first
         env_file_from_env = os.getenv('SCLIB_ENV_FILE')
@@ -55,6 +60,11 @@ def load_env_file(env_path: str = None):
                 if exists:
                     env_path = str(path)
                     break
+            
+            # If no env.local found, check if we're running in Docker with environment variables
+            if not env_path and os.getenv('MONGO_URL'):
+                print("🐳 Running in Docker with environment variables - skipping env file loading")
+                return
     
     if env_path and Path(env_path).exists():
         print(f"📁 Loading environment from: {env_path}")

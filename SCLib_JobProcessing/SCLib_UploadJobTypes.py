@@ -53,9 +53,9 @@ class UploadJobConfig:
     # Source configuration
     source_type: UploadSourceType
     source_path: str  # Current working path (may be temp file)
-    original_source_path: Optional[str] = None  # Original file path for retries
     destination_path: str
     dataset_uuid: str
+    original_source_path: Optional[str] = None  # Original file path for retries
     source_config: Dict[str, Any] = field(default_factory=dict)
     
     # Upload settings
@@ -265,20 +265,20 @@ def create_upload_job_config(
     user_email: str,
     dataset_name: str,
     sensor: SensorType,
+    original_source_path: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
-    original_source_path: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
     """Create an upload job configuration with ScientistCloud parameters."""
     return UploadJobConfig(
         source_type=source_type,
         source_path=source_path,
-        original_source_path=original_source_path,
         destination_path=destination_path,
         dataset_uuid=dataset_uuid,
+        original_source_path=original_source_path,
         user_email=user_email,
         dataset_name=dataset_name,
         sensor=sensor,
@@ -297,6 +297,7 @@ def create_local_upload_job(
     user_email: str,
     dataset_name: str,
     sensor: SensorType,
+    original_source_path: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
     folder: Optional[str] = None,
@@ -319,6 +320,7 @@ def create_local_upload_job(
         user_email=user_email,
         dataset_name=dataset_name,
         sensor=sensor,
+        original_source_path=original_source_path,
         convert=convert,
         is_public=is_public,
         folder=folder,
@@ -349,6 +351,7 @@ def create_google_drive_upload_job(
         user_email=user_email,
         dataset_name=dataset_name,
         sensor=sensor,
+        original_source_path=None,
         convert=convert,
         is_public=is_public,
         folder=folder,
@@ -385,6 +388,7 @@ def create_s3_upload_job(
         user_email=user_email,
         dataset_name=dataset_name,
         sensor=sensor,
+        original_source_path=None,
         convert=convert,
         is_public=is_public,
         folder=folder,
@@ -420,6 +424,7 @@ def create_url_upload_job(
         user_email=user_email,
         dataset_name=dataset_name,
         sensor=sensor,
+        original_source_path=None,
         convert=convert,
         is_public=is_public,
         folder=folder,
@@ -441,6 +446,7 @@ if __name__ == '__main__':
         user_email="user@example.com",
         dataset_name="My Local Dataset",
         sensor=SensorType.TIFF,
+        original_source_path="/tmp/my_dataset.zip",
         convert=True,
         is_public=False,
         folder="research_data",

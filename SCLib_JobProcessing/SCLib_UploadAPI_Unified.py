@@ -385,11 +385,17 @@ async def upload_file_by_path(
         # Resolve dataset identifier to UUID if provided
         upload_uuid = None
         if dataset_identifier:
-            try:
-                upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
-                logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
-            except ValueError as e:
-                raise HTTPException(status_code=404, detail=str(e))
+            if add_to_existing:
+                # For adding to existing dataset, resolve the identifier
+                try:
+                    upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
+                    logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
+                except ValueError as e:
+                    raise HTTPException(status_code=404, detail=str(e))
+            else:
+                # For creating new dataset, use the identifier directly as UUID
+                upload_uuid = dataset_identifier
+                logger.info(f"Using provided dataset identifier as UUID: {upload_uuid}")
         else:
             upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
         
@@ -405,6 +411,7 @@ async def upload_file_by_path(
             user_email=user_email,
             dataset_name=dataset_name or filename,
             sensor=sensor,
+            original_source_path=file_path,  # Store original path for retry purposes
             convert=convert,
             is_public=is_public,
             folder=file_system_folder,
@@ -456,21 +463,19 @@ async def _handle_standard_upload(
     # Resolve dataset identifier to UUID if provided
     upload_uuid = None
     if dataset_identifier:
-        try:
-            upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
-            logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
-        except ValueError as e:
-            raise HTTPException(status_code=404, detail=str(e))
-    
-    # Use resolved UUID for directory uploads or adding to existing dataset, or generate new one for single files
-    if add_to_existing and upload_uuid:
-        # Add to existing dataset
-        pass  # upload_uuid is already set
-    elif upload_uuid:
-        # Directory upload
-        pass  # upload_uuid is already set
+        if add_to_existing:
+            # For adding to existing dataset, resolve the identifier
+            try:
+                upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
+                logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+        else:
+            # For creating new dataset, use the identifier directly as UUID
+            upload_uuid = dataset_identifier
+            logger.info(f"Using provided dataset identifier as UUID: {upload_uuid}")
     else:
-        upload_uuid = str(uuid.uuid4())  # New single file upload
+        upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
     
     # For single file uploads, don't use folder for file system structure
     # The folder parameter is for UI organization only
@@ -483,11 +488,11 @@ async def _handle_standard_upload(
         user_email=user_email,
         dataset_name=dataset_name or filename,
         sensor=sensor,
+        original_source_path=filename,  # Store original filename for retry purposes
         convert=convert,
         is_public=is_public,
         folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
-        team_uuid=team_uuid,
-        original_source_path=filename  # Store original filename for retry purposes
+        team_uuid=team_uuid
     )
     
     # Submit job to processor and get the actual job ID
@@ -584,6 +589,7 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
             user_email=session['user_email'],
             dataset_name=session['dataset_name'],
             sensor=session['sensor'],
+            original_source_path=None,  # No original path for chunked uploads
             convert=session['convert'],
             is_public=session['is_public'],
             folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal

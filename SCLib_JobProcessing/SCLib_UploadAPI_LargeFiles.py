@@ -349,9 +349,10 @@ async def complete_large_upload(
         job_config = create_local_upload_job(
             file_path=final_file_path,
             dataset_uuid=str(uuid.uuid4()),
-            user_id=session['user_email'],
+            user_email=session['user_email'],
             dataset_name=session['dataset_name'],
-            sensor_type=session['sensor'],
+            sensor=session['sensor'],
+            original_source_path=None,
             convert=session['convert'],
             is_public=session['is_public'],
             folder=session['folder'],
