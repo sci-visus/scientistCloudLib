@@ -344,13 +344,98 @@ async def upload_file(
         logger.error(f"Error uploading file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/upload/upload-path", response_model=UploadResponse)
+async def upload_file_by_path(
+    background_tasks: BackgroundTasks,
+    file_path: str = Form(..., description="Path to the file to upload"),
+    user_email: EmailStr = Form(..., description="User email address"),
+    dataset_name: str = Form(..., min_length=1, max_length=255, description="Name of the dataset"),
+    sensor: SensorType = Form(..., description="Sensor type"),
+    convert: bool = Form(True, description="Whether to convert the data"),
+    is_public: bool = Form(False, description="Whether dataset is public"),
+    folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
+    team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    dataset_uuid: Optional[str] = Form(None, description="Optional dataset UUID for directory uploads"),
+    processor: Any = Depends(get_processor)
+):
+    """
+    Upload a file by providing its path instead of uploading the file content.
+    This is more efficient for large files as it avoids copying to /tmp.
+    
+    ⚠️  IMPORTANT: This endpoint requires the file to be accessible from the server.
+    It's primarily intended for development use where files are mounted in Docker.
+    For production use, prefer the /api/upload/upload endpoint which works across all environments.
+    
+    See README_upload_methods.md for detailed documentation.
+    """
+    try:
+        # Validate file path exists
+        if not os.path.exists(file_path):
+            raise HTTPException(status_code=400, detail=f"File not found: {file_path}")
+        
+        if not os.path.isfile(file_path):
+            raise HTTPException(status_code=400, detail=f"Path is not a file: {file_path}")
+        
+        # Get file info
+        file_size = os.path.getsize(file_path)
+        filename = os.path.basename(file_path)
+        
+        # Use provided UUID for directory uploads, or generate new one for single files
+        upload_uuid = dataset_uuid if dataset_uuid else str(uuid.uuid4())
+        
+        # For single file uploads, don't use folder for file system structure
+        # The folder parameter is for UI organization only
+        # Only use folder structure for directory uploads (when dataset_uuid is provided)
+        file_system_folder = folder if dataset_uuid else None
+        
+        # Create local upload job with the original file path (no /tmp copying!)
+        job_config = create_local_upload_job(
+            file_path=file_path,  # Use original file path directly
+            dataset_uuid=upload_uuid,
+            user_email=user_email,
+            dataset_name=dataset_name or filename,
+            sensor=sensor,
+            convert=convert,
+            is_public=is_public,
+            folder=file_system_folder,
+            team_uuid=team_uuid
+        )
+        
+        # Submit job to processor and get the actual job ID
+        actual_job_id = processor.submit_upload_job(job_config)
+        
+        # Estimate duration based on file size
+        file_size_mb = file_size / (1024 * 1024)
+        estimated_duration = max(60, int(file_size_mb * 2))  # 2 seconds per MB, minimum 1 minute
+        
+        return UploadResponse(
+            job_id=actual_job_id,
+            status="queued",
+            message=f"File path upload initiated: {filename}",
+            estimated_duration=estimated_duration,
+            upload_type="path"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading file by path: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
     team_uuid: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
-    # Save uploaded file to temporary location
+    # For large files, we should work directly with the original file path
+    # instead of copying to /tmp. However, since we're receiving file content
+    # from the API, we need to save it somewhere temporarily.
+    # 
+    # TODO: Consider modifying the client to send file paths instead of content
+    # for local files, which would eliminate the need for /tmp copying.
+    
+    # Save uploaded file to temporary location (unavoidable with current API design)
     temp_dir = tempfile.mkdtemp()
     temp_file_path = os.path.join(temp_dir, filename)
     

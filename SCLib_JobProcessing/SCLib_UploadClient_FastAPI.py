@@ -135,6 +135,55 @@ class ScientistCloudUploadClient:
             estimated_duration=result.get('estimated_duration')
         )
     
+    def upload_file_by_path(self, file_path: str, user_email: str, dataset_name: str,
+                           sensor: str, convert: bool = True, is_public: bool = False,
+                           folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
+                           progress_callback: Callable[[float], None] = None) -> UploadResult:
+        """
+        Upload a file by providing its path instead of uploading the file content.
+        This is more efficient for large files as it avoids copying to /tmp.
+        
+        ⚠️  IMPORTANT: This method requires the file to be accessible from the server.
+        It's primarily intended for development use where files are mounted in Docker.
+        For production use, prefer upload_file() which works across all environments.
+        
+        See README_upload_methods.md for detailed documentation.
+        """
+        url = f"{self.base_url}/api/upload/upload-path"
+        
+        form_data = {
+            'file_path': file_path,
+            'user_email': user_email,
+            'dataset_name': dataset_name,
+            'sensor': sensor,
+            'convert': convert,
+            'is_public': is_public
+        }
+        
+        if folder:
+            form_data['folder'] = folder
+        if team_uuid:
+            form_data['team_uuid'] = team_uuid
+        if dataset_uuid:
+            form_data['dataset_uuid'] = dataset_uuid
+        
+        # For path-based uploads, we don't need to send file content
+        response = self.session.post(url, data=form_data, timeout=self.timeout)
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        if progress_callback:
+            progress_callback(1.0)
+        
+        return UploadResult(
+            job_id=data['job_id'],
+            status=data['status'],
+            message=data['message'],
+            upload_type=data['upload_type'],
+            estimated_duration=data.get('estimated_duration')
+        )
+    
     def initiate_s3_upload(self, bucket_name: str, object_key: str, access_key_id: str,
                           secret_access_key: str, user_email: str, dataset_name: str,
                           sensor: str, convert: bool = True, is_public: bool = False,

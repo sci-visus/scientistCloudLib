@@ -13,6 +13,11 @@ This directory contains the enhanced job processing system for ScientistCloud 2.
 - **Parallel Processing**: Multiple concurrent upload streams
 - **Automatic Handling**: No need to choose between standard and large file APIs!
 
+### 📚 Upload Methods Documentation
+
+For detailed information about different upload methods and when to use them, see:
+- **[README_upload_methods.md](README_upload_methods.md)** - Complete guide to upload methods
+
 ### 🎯 Unified API - No More Choices!
 
 **Use the Unified API** - it automatically handles both regular and TB-scale uploads:

@@ -123,6 +123,98 @@ class ScientistCloudUploadClient:
             estimated_duration=data.get('estimated_duration')
         )
     
+    def upload_file_by_path(self, file_path: str, user_email: str, dataset_name: str,
+                           sensor: str, convert: bool = True, is_public: bool = False,
+                           folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
+                           progress_callback: Callable[[float], None] = None) -> UploadResult:
+        """
+        Upload a file by providing its path instead of uploading the file content.
+        This is more efficient for large files as it avoids copying to /tmp.
+        
+        ⚠️  IMPORTANT: This method requires the file to be accessible from the server.
+        It's primarily intended for development use where files are mounted in Docker.
+        For production use, prefer upload_file() which works across all environments.
+        
+        See README_upload_methods.md for detailed documentation.
+        """
+        url = f"{self.base_url}/api/upload/upload-path"
+        
+        form_data = {
+            'file_path': file_path,
+            'user_email': user_email,
+            'dataset_name': dataset_name,
+            'sensor': sensor,
+            'convert': convert,
+            'is_public': is_public
+        }
+        
+        if folder:
+            form_data['folder'] = folder
+        if team_uuid:
+            form_data['team_uuid'] = team_uuid
+        if dataset_uuid:
+            form_data['dataset_uuid'] = dataset_uuid
+        
+        # For path-based uploads, we don't need to send file content
+        response = self.session.post(url, data=form_data, timeout=self.timeout)
+        
+        response.raise_for_status()
+        data = response.json()
+        
+        if progress_callback:
+            progress_callback(1.0)
+        
+        return UploadResult(
+            job_id=data['job_id'],
+            status=data['status'],
+            message=data['message'],
+            upload_type=data['upload_type'],
+            estimated_duration=data.get('estimated_duration')
+        )
+    
+    async def upload_file_by_path_async(self, file_path: str, user_email: str, dataset_name: str,
+                                      sensor: str, convert: bool = True, is_public: bool = False,
+                                      folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
+                                      progress_callback: Callable[[float], None] = None) -> UploadResult:
+        """
+        Async version of upload_file_by_path.
+        Upload a file by providing its path instead of uploading the file content.
+        This is more efficient for large files as it avoids copying to /tmp.
+        """
+        url = f"{self.base_url}/api/upload/upload-path"
+        
+        form_data = {
+            'file_path': file_path,
+            'user_email': user_email,
+            'dataset_name': dataset_name,
+            'sensor': sensor,
+            'convert': convert,
+            'is_public': is_public
+        }
+        
+        if folder:
+            form_data['folder'] = folder
+        if team_uuid:
+            form_data['team_uuid'] = team_uuid
+        if dataset_uuid:
+            form_data['dataset_uuid'] = dataset_uuid
+        
+        # For path-based uploads, we don't need to send file content
+        async with self.session.post(url, data=form_data, timeout=self.timeout) as response:
+            response.raise_for_status()
+            data = await response.json()
+        
+        if progress_callback:
+            progress_callback(1.0)
+        
+        return UploadResult(
+            job_id=data['job_id'],
+            status=data['status'],
+            message=data['message'],
+            upload_type=data['upload_type'],
+            estimated_duration=data.get('estimated_duration')
+        )
+    
     def initiate_google_drive_upload(self, file_id: str, service_account_file: str,
                                    user_email: str, dataset_name: str, sensor: str,
                                    convert: bool = True, is_public: bool = False,
@@ -721,7 +813,7 @@ class AsyncScientistCloudUploadClient:
                         progress_callback(overall_progress)
                     print(f"   Progress: {progress*100:.1f}%", end='\r')
                 
-                result = await self.upload_file(
+                result = await self.upload_file_async(
                     file_path=str(file_path),
                     user_email=user_email,
                     dataset_name=dataset_name,  # Use the original dataset name
