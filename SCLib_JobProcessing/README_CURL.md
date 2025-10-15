@@ -6,28 +6,33 @@ This guide provides curl commands for interacting with the ScientistCloud Upload
 
 1. **FastAPI Server Running**: Make sure the server is started
    ```bash
+   # Using Docker (recommended)
+   cd /path/to/scientistCloudLib/Docker
+   ./start.sh up --env-file ../../SCLib_TryTest/env.local
+   
+   # Or directly with Python
    source ${SCLIB_MYTEST}/env.local
    cd ${SCLIB_HOME}
-   python start_fastapi_server.py --port 8000
+   python start_fastapi_server.py --port 5001 --api-type unified
    ```
 
-2. **Server URL**: All examples use `http://localhost:8000` - adjust if different
+2. **Server URL**: All examples use `http://localhost:5001` (Docker) or `http://localhost:8000` (direct) - adjust if different
 
 ## 🔍 **API Discovery & Status**
 
 ### Check Server Health
 ```bash
-curl -s http://localhost:8000/health
+curl -s http://localhost:5001/health
 ```
 
 ### Get Supported Sources
 ```bash
-curl -s http://localhost:8000/api/upload/supported-sources
+curl -s http://localhost:5001/api/upload/supported-sources
 ```
 
 ### Get Upload Limits
 ```bash
-curl -s http://localhost:8000/api/upload/limits
+curl -s http://localhost:5001/api/upload/limits
 ```
 
 ## 📁 **File Upload Methods**
@@ -37,7 +42,7 @@ curl -s http://localhost:8000/api/upload/limits
 Upload a file directly from your local filesystem:
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/upload" \
+curl -X POST "http://localhost:5001/api/upload/upload" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@/path/to/your/file.tiff" \
   -F "user_email=user@example.com" \
@@ -47,6 +52,52 @@ curl -X POST "http://localhost:8000/api/upload/upload" \
   -F "is_public=false" \
   -F "folder=my_folder" \
   -F "team_uuid=optional-team-uuid"
+```
+
+#### 🆕 Adding Files to Existing Datasets
+
+You can add files to existing datasets using flexible identifiers:
+
+```bash
+# Using UUID
+curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/your/file.tiff" \
+  -F "user_email=user@example.com" \
+  -F "dataset_name=Additional File" \
+  -F "sensor=TIFF" \
+  -F "dataset_identifier=550e8400-e29b-41d4-a716-446655440000" \
+  -F "add_to_existing=true"
+
+# Using dataset name
+curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/your/file.tiff" \
+  -F "user_email=user@example.com" \
+  -F "dataset_name=Additional File" \
+  -F "sensor=TIFF" \
+  -F "dataset_identifier=My Dataset" \
+  -F "add_to_existing=true"
+
+# Using slug
+curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/your/file.tiff" \
+  -F "user_email=user@example.com" \
+  -F "dataset_name=Additional File" \
+  -F "sensor=TIFF" \
+  -F "dataset_identifier=my-dataset-2024" \
+  -F "add_to_existing=true"
+
+# Using numeric ID
+curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/your/file.tiff" \
+  -F "user_email=user@example.com" \
+  -F "dataset_name=Additional File" \
+  -F "sensor=TIFF" \
+  -F "dataset_identifier=12345" \
+  -F "add_to_existing=true"
 ```
 
 **Response Example:**
@@ -60,12 +111,42 @@ curl -X POST "http://localhost:8000/api/upload/upload" \
 }
 ```
 
-### 2. URL Upload (Download from URL)
+### 2. Directory Upload (Multiple Files)
+
+Upload all files in a directory to a single dataset:
+
+```bash
+# Note: Directory uploads are handled by the client, but you can upload individual files
+# with the same dataset_identifier to achieve the same result
+
+# First file - creates new dataset
+curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/directory/file1.tiff" \
+  -F "user_email=user@example.com" \
+  -F "dataset_name=Directory Dataset" \
+  -F "sensor=TIFF" \
+  -F "dataset_identifier=unique-uuid-for-directory" \
+  -F "add_to_existing=false"
+
+# Subsequent files - add to existing dataset
+curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Content-Type: multipart/form-data" \
+  -F "file=@/path/to/directory/file2.tiff" \
+  -F "user_email=user@example.com" \
+  -F "dataset_name=Directory Dataset" \
+  -F "sensor=TIFF" \
+  -F "dataset_identifier=unique-uuid-for-directory" \
+  -F "add_to_existing=true" \
+  -F "folder=subdirectory_name"
+```
+
+### 3. URL Upload (Download from URL)
 
 Download and process a file from a URL:
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/initiate" \
+curl -X POST "http://localhost:5001/api/upload/initiate" \
   -H "Content-Type: application/json" \
   -d '{
     "source_type": "url",
@@ -82,12 +163,12 @@ curl -X POST "http://localhost:8000/api/upload/initiate" \
   }'
 ```
 
-### 3. Google Drive Upload
+### 4. Google Drive Upload
 
 Upload from Google Drive using file ID and service account:
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/initiate" \
+curl -X POST "http://localhost:5001/api/upload/initiate" \
   -H "Content-Type: application/json" \
   -d '{
     "source_type": "google_drive",
@@ -105,12 +186,12 @@ curl -X POST "http://localhost:8000/api/upload/initiate" \
   }'
 ```
 
-### 4. S3 Upload
+### 5. S3 Upload
 
 Upload from Amazon S3:
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/initiate" \
+curl -X POST "http://localhost:5001/api/upload/initiate" \
   -H "Content-Type: application/json" \
   -d '{
     "source_type": "s3",
@@ -136,7 +217,7 @@ curl -X POST "http://localhost:8000/api/upload/initiate" \
 
 ```bash
 # Replace JOB_ID with actual job ID from upload response
-curl -s "http://localhost:8000/api/upload/status/JOB_ID"
+curl -s "http://localhost:5001/api/upload/status/JOB_ID"
 ```
 
 **Response Example:**
@@ -157,7 +238,58 @@ curl -s "http://localhost:8000/api/upload/status/JOB_ID"
 ### Cancel Upload
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/cancel/JOB_ID"
+curl -X POST "http://localhost:5001/api/upload/cancel/JOB_ID"
+```
+
+## 🔍 **Dataset Management**
+
+### Get Dataset Information
+
+Retrieve dataset information using flexible identifiers:
+
+```bash
+# Using UUID
+curl -s "http://localhost:5001/api/v1/datasets/550e8400-e29b-41d4-a716-446655440000"
+
+# Using dataset name
+curl -s "http://localhost:5001/api/v1/datasets/My%20Dataset"
+
+# Using slug
+curl -s "http://localhost:5001/api/v1/datasets/my-dataset-2024"
+
+# Using numeric ID
+curl -s "http://localhost:5001/api/v1/datasets/12345"
+```
+
+**Response Example:**
+```json
+{
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "name": "My Dataset",
+  "slug": "my-dataset-2024",
+  "id": 12345,
+  "user_email": "user@example.com",
+  "sensor": "TIFF",
+  "convert": true,
+  "is_public": false,
+  "folder": "my_folder",
+  "team_uuid": "optional-team-uuid",
+  "status": "completed",
+  "files": [
+    {
+      "filename": "file1.tiff",
+      "size": 1048576,
+      "uploaded_at": "2024-01-01T12:00:00Z"
+    },
+    {
+      "filename": "file2.tiff",
+      "size": 2097152,
+      "uploaded_at": "2024-01-01T12:05:00Z"
+    }
+  ],
+  "created_at": "2024-01-01T12:00:00Z",
+  "updated_at": "2024-01-01T12:05:00Z"
+}
 ```
 
 ## 🔄 **Large File Upload (Chunked)**
@@ -167,7 +299,7 @@ For files larger than 100MB, the API automatically uses chunked uploads:
 ### Step 1: Initiate Chunked Upload
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/initiate-chunked" \
+curl -X POST "http://localhost:5001/api/upload/initiate-chunked" \
   -H "Content-Type: application/json" \
   -d '{
     "filename": "large_file.tiff",
@@ -196,7 +328,7 @@ curl -X POST "http://localhost:8000/api/upload/initiate-chunked" \
 
 ```bash
 # Upload each chunk (repeat for each chunk)
-curl -X POST "http://localhost:8000/api/upload/chunk" \
+curl -X POST "http://localhost:5001/api/upload/chunk" \
   -H "Content-Type: multipart/form-data" \
   -F "upload_id=UPLOAD_ID_FROM_STEP_1" \
   -F "chunk_number=1" \
@@ -206,7 +338,7 @@ curl -X POST "http://localhost:8000/api/upload/chunk" \
 ### Step 3: Complete Upload
 
 ```bash
-curl -X POST "http://localhost:8000/api/upload/complete-chunked" \
+curl -X POST "http://localhost:5001/api/upload/complete-chunked" \
   -H "Content-Type: application/json" \
   -d '{
     "upload_id": "UPLOAD_ID_FROM_STEP_1"
@@ -222,7 +354,7 @@ Here's a complete example that uploads a file and monitors its progress:
 
 # Upload a file and capture the job ID
 echo "Uploading file..."
-RESPONSE=$(curl -s -X POST "http://localhost:8000/api/upload/upload" \
+RESPONSE=$(curl -s -X POST "http://localhost:5001/api/upload/upload" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@/path/to/your/file.tiff" \
   -F "user_email=user@example.com" \
@@ -237,7 +369,7 @@ echo "Job ID: $JOB_ID"
 
 # Monitor progress
 while true; do
-  STATUS_RESPONSE=$(curl -s "http://localhost:8000/api/upload/status/$JOB_ID")
+  STATUS_RESPONSE=$(curl -s "http://localhost:5001/api/upload/status/$JOB_ID")
   STATUS=$(echo $STATUS_RESPONSE | jq -r '.status')
   PROGRESS=$(echo $STATUS_RESPONSE | jq -r '.progress_percentage')
   
@@ -275,10 +407,12 @@ echo "Final status: $STATUS_RESPONSE"
 - `onedrive` - OneDrive
 
 ### Optional Parameters
-- `folder` - Organize files in folders
+- `folder` - Organize files in folders (UI organization only, not file system structure)
 - `team_uuid` - Associate with team
 - `convert` - Whether to convert data (default: true)
 - `is_public` - Make dataset public (default: false)
+- `dataset_identifier` - UUID, name, slug, or numeric ID for existing datasets
+- `add_to_existing` - Whether to add to existing dataset (requires dataset_identifier)
 
 ## 🔧 **Troubleshooting**
 
@@ -287,7 +421,7 @@ echo "Final status: $STATUS_RESPONSE"
 1. **Connection Refused**
    ```bash
    # Check if server is running
-   curl -s http://localhost:8000/health
+   curl -s http://localhost:5001/health
    ```
 
 2. **File Not Found**
@@ -314,7 +448,7 @@ echo "Final status: $STATUS_RESPONSE"
 Add `-v` flag to curl for verbose output:
 
 ```bash
-curl -v -X POST "http://localhost:8000/api/upload/upload" \
+curl -v -X POST "http://localhost:5001/api/upload/upload" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@/path/to/your/file.tiff" \
   -F "user_email=user@example.com" \
@@ -325,32 +459,77 @@ curl -v -X POST "http://localhost:8000/api/upload/upload" \
 ## 📚 **Additional Resources**
 
 - **Main README**: See `README.md` for Python client examples
-- **API Documentation**: Visit `http://localhost:8000/docs` for interactive API docs
-- **ReDoc Documentation**: Visit `http://localhost:8000/redoc` for detailed API reference
+- **API Documentation**: Visit `http://localhost:5001/docs` for interactive API docs
+- **ReDoc Documentation**: Visit `http://localhost:5001/redoc` for detailed API reference
+- **Upload Methods Guide**: See `README_upload_methods.md` for detailed upload strategies
 
 ## 🚀 **Quick Start**
 
 1. Start the server:
    ```bash
+   # Using Docker (recommended)
+   cd /path/to/scientistCloudLib/Docker
+   ./start.sh up --env-file ../../SCLib_TryTest/env.local
+   
+   # Or directly with Python
    source ${SCLIB_MYTEST}/env.local
    cd ${SCLIB_HOME}
-   python start_fastapi_server.py --port 8000
+   python start_fastapi_server.py --port 5001 --api-type unified
    ```
 
 2. Test the API:
    ```bash
-   curl -s http://localhost:8000/api/upload/supported-sources
+   curl -s http://localhost:5001/api/upload/supported-sources
    ```
 
 3. Upload a file:
    ```bash
-   curl -X POST "http://localhost:8000/api/upload/upload" \
+   curl -X POST "http://localhost:5001/api/upload/upload" \
      -H "Content-Type: multipart/form-data" \
      -F "file=@/path/to/your/file.tiff" \
      -F "user_email=user@example.com" \
      -F "dataset_name=Test Dataset" \
      -F "sensor=TIFF"
    ```
+
+4. Add files to existing dataset:
+   ```bash
+   curl -X POST "http://localhost:5001/api/upload/upload" \
+     -H "Content-Type: multipart/form-data" \
+     -F "file=@/path/to/your/file2.tiff" \
+     -F "user_email=user@example.com" \
+     -F "dataset_name=Additional File" \
+     -F "sensor=TIFF" \
+     -F "dataset_identifier=Test Dataset" \
+     -F "add_to_existing=true"
+   ```
+
+## 🆕 **New Features**
+
+### Flexible Dataset Identification
+The API now supports multiple ways to identify datasets:
+- **UUID**: `550e8400-e29b-41d4-a716-446655440000`
+- **Name**: `My Dataset`
+- **Slug**: `my-dataset-2024` (human-readable, URL-friendly)
+- **Numeric ID**: `12345` (short, auto-generated)
+
+### Directory Uploads
+Upload multiple files to a single dataset while preserving directory structure:
+- All files in a directory upload share the same UUID
+- Directory structure is preserved within the UUID directory
+- Use `dataset_identifier` and `add_to_existing=true` for subsequent files
+
+### Enhanced Dataset Management
+- View dataset information using any identifier type
+- Track multiple files within a single dataset
+- Monitor upload progress and status
+- Automatic cleanup of old jobs
+
+### Docker Support
+- Full Docker Compose setup with environment management
+- Automatic service orchestration
+- Volume mounting for data persistence
+- Health checks and monitoring
 
 Happy uploading! 🎉
 
