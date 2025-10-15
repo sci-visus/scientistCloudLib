@@ -1,5 +1,5 @@
 """
-Test cases for SCLib_JobTypes
+Test cases for SC_JobTypes
 Tests job type definitions, status transitions, and helper functions.
 """
 
@@ -7,7 +7,7 @@ import unittest
 from datetime import datetime
 
 from SCLib_JobTypes import (
-    SCLib_JobType, SCLib_JobStatus, SCLib_DatasetStatus, SC_JOB_PRIORITY,
+    SC_JobType, SC_JobStatus, SC_DatasetStatus, SC_JOB_PRIORITY,
     SC_JOB_TYPE_CONFIGS, SC_DATASET_STATUS_TRANSITIONS,
     get_job_type_config, get_dataset_status_config,
     get_next_possible_states, is_valid_transition,
@@ -17,8 +17,8 @@ from SCLib_JobTypes import (
 )
 
 
-class TestSCLib_JobTypes(unittest.TestCase):
-    """Test cases for SCLib_JobTypes."""
+class TestSC_JobTypes(unittest.TestCase):
+    """Test cases for SC_JobTypes."""
     
     def test_job_type_enum_values(self):
         """Test that job type enum has expected values."""
@@ -29,8 +29,8 @@ class TestSCLib_JobTypes(unittest.TestCase):
         ]
         
         for job_type in expected_types:
-            self.assertTrue(hasattr(SCLib_JobType, job_type.upper()))
-            self.assertEqual(getattr(SCLib_JobType, job_type.upper()).value, job_type)
+            self.assertTrue(hasattr(SC_JobType, job_type.upper()))
+            self.assertEqual(getattr(SC_JobType, job_type.upper()).value, job_type)
     
     def test_job_status_enum_values(self):
         """Test that job status enum has expected values."""
@@ -39,8 +39,8 @@ class TestSCLib_JobTypes(unittest.TestCase):
         ]
         
         for status in expected_statuses:
-            self.assertTrue(hasattr(SCLib_JobStatus, status.upper()))
-            self.assertEqual(getattr(SCLib_JobStatus, status.upper()).value, status)
+            self.assertTrue(hasattr(SC_JobStatus, status.upper()))
+            self.assertEqual(getattr(SC_JobStatus, status.upper()).value, status)
     
     def test_dataset_status_enum_values(self):
         """Test that dataset status enum has expected values."""
@@ -55,8 +55,8 @@ class TestSCLib_JobTypes(unittest.TestCase):
         for status in expected_statuses:
             # Convert spaces to underscores for enum attribute names
             attr_name = status.upper().replace(' ', '_')
-            self.assertTrue(hasattr(SCLib_DatasetStatus, attr_name))
-            self.assertEqual(getattr(SCLib_DatasetStatus, attr_name).value, status)
+            self.assertTrue(hasattr(SC_DatasetStatus, attr_name))
+            self.assertEqual(getattr(SC_DatasetStatus, attr_name).value, status)
     
     def test_job_priority_values(self):
         """Test job priority values."""
@@ -66,7 +66,7 @@ class TestSCLib_JobTypes(unittest.TestCase):
     
     def test_job_type_configs_completeness(self):
         """Test that all job types have configurations."""
-        for job_type in SCLib_JobType:
+        for job_type in SC_JobType:
             self.assertIn(job_type, SC_JOB_TYPE_CONFIGS)
             
             config = SC_JOB_TYPE_CONFIGS[job_type]
@@ -80,7 +80,7 @@ class TestSCLib_JobTypes(unittest.TestCase):
     
     def test_dataset_status_transitions_completeness(self):
         """Test that all dataset statuses have transition configurations."""
-        for status in SCLib_DatasetStatus:
+        for status in SC_DatasetStatus:
             self.assertIn(status, SC_DATASET_STATUS_TRANSITIONS)
             
             config = SC_DATASET_STATUS_TRANSITIONS[status]
@@ -93,7 +93,7 @@ class TestSCLib_JobTypes(unittest.TestCase):
     
     def test_get_job_type_config(self):
         """Test getting job type configuration."""
-        config = get_job_type_config(SCLib_JobType.DATASET_CONVERSION)
+        config = get_job_type_config(SC_JobType.DATASET_CONVERSION)
         
         self.assertIsInstance(config, dict)
         self.assertIn('description', config)
@@ -118,7 +118,7 @@ class TestSCLib_JobTypes(unittest.TestCase):
     
     def test_get_dataset_status_config(self):
         """Test getting dataset status configuration."""
-        config = get_dataset_status_config(SCLib_DatasetStatus.CONVERTING)
+        config = get_dataset_status_config(SC_DatasetStatus.CONVERTING)
         
         self.assertIsInstance(config, dict)
         self.assertIn('description', config)
@@ -128,120 +128,120 @@ class TestSCLib_JobTypes(unittest.TestCase):
         
         # Test specific values
         self.assertEqual(config['description'], 'Currently converting data')
-        self.assertIn(SCLib_DatasetStatus.DONE, config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.CONVERSION_ERROR, config['next_states'])
-        self.assertEqual(config['job_type'], SCLib_JobType.DATASET_CONVERSION)
+        self.assertIn(SC_DatasetStatus.DONE, config['next_states'])
+        self.assertIn(SC_DatasetStatus.CONVERSION_ERROR, config['next_states'])
+        self.assertEqual(config['job_type'], SC_JobType.DATASET_CONVERSION)
         self.assertFalse(config['is_terminal'])
     
     def test_get_next_possible_states(self):
         """Test getting next possible states."""
         # Test submitted status
-        next_states = get_next_possible_states(SCLib_DatasetStatus.SUBMITTED)
+        next_states = get_next_possible_states(SC_DatasetStatus.SUBMITTED)
         expected_states = [
-            SCLib_DatasetStatus.SYNC_QUEUED,
-            SCLib_DatasetStatus.CONVERSION_QUEUED,
-            SCLib_DatasetStatus.UPLOAD_QUEUED
+            SC_DatasetStatus.SYNC_QUEUED,
+            SC_DatasetStatus.CONVERSION_QUEUED,
+            SC_DatasetStatus.UPLOAD_QUEUED
         ]
         
         for state in expected_states:
             self.assertIn(state, next_states)
         
         # Test terminal status
-        next_states = get_next_possible_states(SCLib_DatasetStatus.DONE)
+        next_states = get_next_possible_states(SC_DatasetStatus.DONE)
         self.assertEqual(len(next_states), 0)
     
     def test_is_valid_transition(self):
         """Test transition validation."""
         # Valid transitions
         self.assertTrue(is_valid_transition(
-            SCLib_DatasetStatus.SUBMITTED, SCLib_DatasetStatus.SYNC_QUEUED
+            SC_DatasetStatus.SUBMITTED, SC_DatasetStatus.SYNC_QUEUED
         ))
         self.assertTrue(is_valid_transition(
-            SCLib_DatasetStatus.SYNC_QUEUED, SCLib_DatasetStatus.SYNCING
+            SC_DatasetStatus.SYNC_QUEUED, SC_DatasetStatus.SYNCING
         ))
         self.assertTrue(is_valid_transition(
-            SCLib_DatasetStatus.CONVERTING, SCLib_DatasetStatus.DONE
+            SC_DatasetStatus.CONVERTING, SC_DatasetStatus.DONE
         ))
         
         # Invalid transitions
         self.assertFalse(is_valid_transition(
-            SCLib_DatasetStatus.SUBMITTED, SCLib_DatasetStatus.DONE
+            SC_DatasetStatus.SUBMITTED, SC_DatasetStatus.DONE
         ))
         self.assertFalse(is_valid_transition(
-            SCLib_DatasetStatus.DONE, SCLib_DatasetStatus.SUBMITTED
+            SC_DatasetStatus.DONE, SC_DatasetStatus.SUBMITTED
         ))
         self.assertFalse(is_valid_transition(
-            SCLib_DatasetStatus.SYNCING, SCLib_DatasetStatus.UPLOAD_QUEUED
+            SC_DatasetStatus.SYNCING, SC_DatasetStatus.UPLOAD_QUEUED
         ))
     
     def test_get_job_type_for_status(self):
         """Test getting job type for status."""
         # Statuses with job types
         self.assertEqual(
-            get_job_type_for_status(SCLib_DatasetStatus.SYNCING),
-            SCLib_JobType.GOOGLE_SYNC
+            get_job_type_for_status(SC_DatasetStatus.SYNCING),
+            SC_JobType.GOOGLE_SYNC
         )
         self.assertEqual(
-            get_job_type_for_status(SCLib_DatasetStatus.CONVERTING),
-            SCLib_JobType.DATASET_CONVERSION
+            get_job_type_for_status(SC_DatasetStatus.CONVERTING),
+            SC_JobType.DATASET_CONVERSION
         )
         self.assertEqual(
-            get_job_type_for_status(SCLib_DatasetStatus.UPLOADING),
-            SCLib_JobType.FILE_UPLOAD
+            get_job_type_for_status(SC_DatasetStatus.UPLOADING),
+            SC_JobType.FILE_UPLOAD
         )
         self.assertEqual(
-            get_job_type_for_status(SCLib_DatasetStatus.UNZIPPING),
-            SCLib_JobType.FILE_EXTRACTION
+            get_job_type_for_status(SC_DatasetStatus.UNZIPPING),
+            SC_JobType.FILE_EXTRACTION
         )
         self.assertEqual(
-            get_job_type_for_status(SCLib_DatasetStatus.ZIPPING),
-            SCLib_JobType.DATA_COMPRESSION
+            get_job_type_for_status(SC_DatasetStatus.ZIPPING),
+            SC_JobType.DATA_COMPRESSION
         )
         
         # Statuses without job types
-        self.assertIsNone(get_job_type_for_status(SCLib_DatasetStatus.SUBMITTED))
-        self.assertIsNone(get_job_type_for_status(SCLib_DatasetStatus.DONE))
-        self.assertIsNone(get_job_type_for_status(SCLib_DatasetStatus.FAILED))
+        self.assertIsNone(get_job_type_for_status(SC_DatasetStatus.SUBMITTED))
+        self.assertIsNone(get_job_type_for_status(SC_DatasetStatus.DONE))
+        self.assertIsNone(get_job_type_for_status(SC_DatasetStatus.FAILED))
     
     def test_is_terminal_status(self):
         """Test terminal status detection."""
         # Terminal statuses
-        self.assertTrue(is_terminal_status(SCLib_DatasetStatus.DONE))
-        self.assertTrue(is_terminal_status(SCLib_DatasetStatus.FAILED))
+        self.assertTrue(is_terminal_status(SC_DatasetStatus.DONE))
+        self.assertTrue(is_terminal_status(SC_DatasetStatus.FAILED))
         
         # Non-terminal statuses
-        self.assertFalse(is_terminal_status(SCLib_DatasetStatus.SUBMITTED))
-        self.assertFalse(is_terminal_status(SCLib_DatasetStatus.SYNCING))
-        self.assertFalse(is_terminal_status(SCLib_DatasetStatus.CONVERTING))
-        self.assertFalse(is_terminal_status(SCLib_DatasetStatus.RETRYING))
+        self.assertFalse(is_terminal_status(SC_DatasetStatus.SUBMITTED))
+        self.assertFalse(is_terminal_status(SC_DatasetStatus.SYNCING))
+        self.assertFalse(is_terminal_status(SC_DatasetStatus.CONVERTING))
+        self.assertFalse(is_terminal_status(SC_DatasetStatus.RETRYING))
     
     def test_get_status_description(self):
         """Test getting status descriptions."""
         self.assertEqual(
-            get_status_description(SCLib_DatasetStatus.SUBMITTED),
+            get_status_description(SC_DatasetStatus.SUBMITTED),
             'Dataset submitted, waiting for processing'
         )
         self.assertEqual(
-            get_status_description(SCLib_DatasetStatus.CONVERTING),
+            get_status_description(SC_DatasetStatus.CONVERTING),
             'Currently converting data'
         )
         self.assertEqual(
-            get_status_description(SCLib_DatasetStatus.DONE),
+            get_status_description(SC_DatasetStatus.DONE),
             'Processing completed successfully'
         )
     
     def test_get_job_type_description(self):
         """Test getting job type descriptions."""
         self.assertEqual(
-            get_job_type_description(SCLib_JobType.GOOGLE_SYNC),
+            get_job_type_description(SC_JobType.GOOGLE_SYNC),
             'Synchronize data from Google Drive'
         )
         self.assertEqual(
-            get_job_type_description(SCLib_JobType.DATASET_CONVERSION),
+            get_job_type_description(SC_JobType.DATASET_CONVERSION),
             'Convert dataset to streamable format'
         )
         self.assertEqual(
-            get_job_type_description(SCLib_JobType.FILE_UPLOAD),
+            get_job_type_description(SC_JobType.FILE_UPLOAD),
             'Upload files to storage'
         )
     
@@ -263,89 +263,89 @@ class TestSCLib_JobTypes(unittest.TestCase):
         # Test valid conversions
         self.assertEqual(
             convert_legacy_status('submitted'),
-            SCLib_DatasetStatus.SUBMITTED
+            SC_DatasetStatus.SUBMITTED
         )
         self.assertEqual(
             convert_legacy_status('sync queued'),
-            SCLib_DatasetStatus.SYNC_QUEUED
+            SC_DatasetStatus.SYNC_QUEUED
         )
         self.assertEqual(
             convert_legacy_status('syncing'),
-            SCLib_DatasetStatus.SYNCING
+            SC_DatasetStatus.SYNCING
         )
         self.assertEqual(
             convert_legacy_status('conversion queued'),
-            SCLib_DatasetStatus.CONVERSION_QUEUED
+            SC_DatasetStatus.CONVERSION_QUEUED
         )
         self.assertEqual(
             convert_legacy_status('converting'),
-            SCLib_DatasetStatus.CONVERTING
+            SC_DatasetStatus.CONVERTING
         )
         self.assertEqual(
             convert_legacy_status('done'),
-            SCLib_DatasetStatus.DONE
+            SC_DatasetStatus.DONE
         )
         self.assertEqual(
             convert_legacy_status('failed'),
-            SCLib_DatasetStatus.FAILED
+            SC_DatasetStatus.FAILED
         )
         
         # Test invalid conversion (should default to submitted)
         self.assertEqual(
             convert_legacy_status('invalid_status'),
-            SCLib_DatasetStatus.SUBMITTED
+            SC_DatasetStatus.SUBMITTED
         )
     
     def test_convert_to_legacy_status(self):
         """Test converting enum status to legacy string."""
         # Test valid conversions
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.SUBMITTED),
+            convert_to_legacy_status(SC_DatasetStatus.SUBMITTED),
             'submitted'
         )
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.SYNC_QUEUED),
+            convert_to_legacy_status(SC_DatasetStatus.SYNC_QUEUED),
             'sync queued'
         )
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.SYNCING),
+            convert_to_legacy_status(SC_DatasetStatus.SYNCING),
             'syncing'
         )
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.CONVERSION_QUEUED),
+            convert_to_legacy_status(SC_DatasetStatus.CONVERSION_QUEUED),
             'conversion queued'
         )
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.CONVERTING),
+            convert_to_legacy_status(SC_DatasetStatus.CONVERTING),
             'converting'
         )
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.DONE),
+            convert_to_legacy_status(SC_DatasetStatus.DONE),
             'done'
         )
         self.assertEqual(
-            convert_to_legacy_status(SCLib_DatasetStatus.FAILED),
+            convert_to_legacy_status(SC_DatasetStatus.FAILED),
             'failed'
         )
     
     def test_job_type_config_values(self):
         """Test specific job type configuration values."""
         # Test Google Sync configuration
-        google_sync_config = SC_JOB_TYPE_CONFIGS[SCLib_JobType.GOOGLE_SYNC]
+        google_sync_config = SC_JOB_TYPE_CONFIGS[SC_JobType.GOOGLE_SYNC]
         self.assertEqual(google_sync_config['timeout_minutes'], 60)
         self.assertEqual(google_sync_config['max_attempts'], 3)
         self.assertTrue(google_sync_config['requires_internet'])
         self.assertEqual(google_sync_config['priority'], 2)
         
         # Test Dataset Conversion configuration
-        conversion_config = SC_JOB_TYPE_CONFIGS[SCLib_JobType.DATASET_CONVERSION]
+        conversion_config = SC_JOB_TYPE_CONFIGS[SC_JobType.DATASET_CONVERSION]
         self.assertEqual(conversion_config['timeout_minutes'], 120)
         self.assertEqual(conversion_config['max_attempts'], 2)
         self.assertFalse(conversion_config['requires_internet'])
         self.assertEqual(conversion_config['priority'], 1)
         
         # Test File Upload configuration
-        upload_config = SC_JOB_TYPE_CONFIGS[SCLib_JobType.FILE_UPLOAD]
+        upload_config = SC_JOB_TYPE_CONFIGS[SC_JobType.FILE_UPLOAD]
         self.assertEqual(upload_config['timeout_minutes'], 30)
         self.assertEqual(upload_config['max_attempts'], 5)
         self.assertTrue(upload_config['requires_internet'])
@@ -354,28 +354,28 @@ class TestSCLib_JobTypes(unittest.TestCase):
     def test_dataset_status_transition_logic(self):
         """Test dataset status transition logic."""
         # Test submitted status transitions
-        submitted_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.SUBMITTED]
-        self.assertIn(SCLib_DatasetStatus.SYNC_QUEUED, submitted_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.CONVERSION_QUEUED, submitted_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.UPLOAD_QUEUED, submitted_config['next_states'])
+        submitted_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.SUBMITTED]
+        self.assertIn(SC_DatasetStatus.SYNC_QUEUED, submitted_config['next_states'])
+        self.assertIn(SC_DatasetStatus.CONVERSION_QUEUED, submitted_config['next_states'])
+        self.assertIn(SC_DatasetStatus.UPLOAD_QUEUED, submitted_config['next_states'])
         self.assertIsNone(submitted_config['job_type'])
         self.assertFalse(submitted_config['is_terminal'])
         
         # Test syncing status transitions
-        syncing_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.SYNCING]
-        self.assertIn(SCLib_DatasetStatus.CONVERSION_QUEUED, syncing_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.SYNC_ERROR, syncing_config['next_states'])
-        self.assertEqual(syncing_config['job_type'], SCLib_JobType.GOOGLE_SYNC)
+        syncing_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.SYNCING]
+        self.assertIn(SC_DatasetStatus.CONVERSION_QUEUED, syncing_config['next_states'])
+        self.assertIn(SC_DatasetStatus.SYNC_ERROR, syncing_config['next_states'])
+        self.assertEqual(syncing_config['job_type'], SC_JobType.GOOGLE_SYNC)
         self.assertFalse(syncing_config['is_terminal'])
         
         # Test done status (terminal)
-        done_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.DONE]
+        done_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.DONE]
         self.assertEqual(len(done_config['next_states']), 0)
         self.assertIsNone(done_config['job_type'])
         self.assertTrue(done_config['is_terminal'])
         
         # Test failed status (terminal)
-        failed_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.FAILED]
+        failed_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.FAILED]
         self.assertEqual(len(failed_config['next_states']), 0)
         self.assertIsNone(failed_config['job_type'])
         self.assertTrue(failed_config['is_terminal'])
@@ -383,32 +383,32 @@ class TestSCLib_JobTypes(unittest.TestCase):
     def test_error_status_transitions(self):
         """Test error status transitions."""
         # Test sync error transitions
-        sync_error_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.SYNC_ERROR]
-        self.assertIn(SCLib_DatasetStatus.SYNC_QUEUED, sync_error_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.FAILED, sync_error_config['next_states'])
-        self.assertEqual(sync_error_config['job_type'], SCLib_JobType.GOOGLE_SYNC)
+        sync_error_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.SYNC_ERROR]
+        self.assertIn(SC_DatasetStatus.SYNC_QUEUED, sync_error_config['next_states'])
+        self.assertIn(SC_DatasetStatus.FAILED, sync_error_config['next_states'])
+        self.assertEqual(sync_error_config['job_type'], SC_JobType.GOOGLE_SYNC)
         self.assertFalse(sync_error_config['is_terminal'])
         
         # Test conversion error transitions
-        conversion_error_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.CONVERSION_ERROR]
-        self.assertIn(SCLib_DatasetStatus.CONVERSION_QUEUED, conversion_error_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.FAILED, conversion_error_config['next_states'])
-        self.assertEqual(conversion_error_config['job_type'], SCLib_JobType.DATASET_CONVERSION)
+        conversion_error_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.CONVERSION_ERROR]
+        self.assertIn(SC_DatasetStatus.CONVERSION_QUEUED, conversion_error_config['next_states'])
+        self.assertIn(SC_DatasetStatus.FAILED, conversion_error_config['next_states'])
+        self.assertEqual(conversion_error_config['job_type'], SC_JobType.DATASET_CONVERSION)
         self.assertFalse(conversion_error_config['is_terminal'])
         
         # Test upload error transitions
-        upload_error_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.UPLOAD_ERROR]
-        self.assertIn(SCLib_DatasetStatus.UPLOAD_QUEUED, upload_error_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.FAILED, upload_error_config['next_states'])
-        self.assertEqual(upload_error_config['job_type'], SCLib_JobType.FILE_UPLOAD)
+        upload_error_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.UPLOAD_ERROR]
+        self.assertIn(SC_DatasetStatus.UPLOAD_QUEUED, upload_error_config['next_states'])
+        self.assertIn(SC_DatasetStatus.FAILED, upload_error_config['next_states'])
+        self.assertEqual(upload_error_config['job_type'], SC_JobType.FILE_UPLOAD)
         self.assertFalse(upload_error_config['is_terminal'])
     
     def test_retrying_status_transitions(self):
         """Test retrying status transitions."""
-        retrying_config = SC_DATASET_STATUS_TRANSITIONS[SCLib_DatasetStatus.RETRYING]
-        self.assertIn(SCLib_DatasetStatus.SYNC_QUEUED, retrying_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.CONVERSION_QUEUED, retrying_config['next_states'])
-        self.assertIn(SCLib_DatasetStatus.UPLOAD_QUEUED, retrying_config['next_states'])
+        retrying_config = SC_DATASET_STATUS_TRANSITIONS[SC_DatasetStatus.RETRYING]
+        self.assertIn(SC_DatasetStatus.SYNC_QUEUED, retrying_config['next_states'])
+        self.assertIn(SC_DatasetStatus.CONVERSION_QUEUED, retrying_config['next_states'])
+        self.assertIn(SC_DatasetStatus.UPLOAD_QUEUED, retrying_config['next_states'])
         self.assertIsNone(retrying_config['job_type'])
         self.assertFalse(retrying_config['is_terminal'])
 

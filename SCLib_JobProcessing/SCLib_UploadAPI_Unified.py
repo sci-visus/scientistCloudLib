@@ -196,7 +196,7 @@ async def root():
         "description": "Automatically handles both regular and TB-scale uploads",
         "docs": "/docs",
         "redoc": "/redoc",
-        "large_file_threshold_mb": LARGE_FILE_THRESHOLD // (1024 * 1024)
+        "large_file_threshold_mb": str(LARGE_FILE_THRESHOLD // (1024 * 1024))
     }
 
 @app.get("/health", response_model=Dict[str, str])
@@ -206,8 +206,8 @@ async def health_check():
         "status": "healthy", 
         "timestamp": datetime.now().isoformat(),
         "upload_type": "unified",
-        "large_file_threshold_mb": LARGE_FILE_THRESHOLD // (1024 * 1024),
-        "max_file_size_tb": MAX_FILE_SIZE // (1024**4)
+        "large_file_threshold_mb": str(LARGE_FILE_THRESHOLD // (1024 * 1024)),
+        "max_file_size_tb": str(MAX_FILE_SIZE // (1024**4))
     }
 
 @app.post("/api/upload/initiate", response_model=UploadResponse)

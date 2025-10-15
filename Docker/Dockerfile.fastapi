@@ -1,0 +1,52 @@
+# Use Python 3.11 slim image for better performance
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Set work directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
+    build-essential \
+    libmagic1 \
+    libmagic-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better Docker layer caching
+COPY SCLib_JobProcessing/requirements_fastapi.txt /app/requirements.txt
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the application code
+COPY SCLib_JobProcessing /app
+
+# Create necessary directories
+RUN mkdir -p /app/logs /data/visus/upload /data/visus/converted /data/visus/sync /data/visus/auth /data/visus/tmp
+
+# Set proper permissions
+RUN chmod +x /app/start_fastapi_server.py
+
+# Create a non-root user for security
+RUN useradd --create-home --shell /bin/bash app && \
+    chown -R app:app /app /data
+USER app
+
+# Expose the port
+EXPOSE 5000
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:5000/health || exit 1
+
+# Default command - can be overridden in docker-compose.yml
+CMD ["python", "start_fastapi_server.py", "--host", "0.0.0.0", "--port", "5000", "--api-type", "unified"]

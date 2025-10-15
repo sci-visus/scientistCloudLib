@@ -478,3 +478,4 @@ class AsyncLargeFileUploadClient:
             for chunk in iter(lambda: f.read(8192), b""):
                 file_hash.update(chunk)
         return file_hash.hexdigest()
+

@@ -12,17 +12,17 @@ from unittest.mock import Mock, patch, MagicMock
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-from SCLib_JobMigration import SCLib_JobMigration
-from SCLib_JobQueueManager import SCLib_JobQueueManager
+from SCLib_JobMigration import SC_JobMigration
+from SCLib_JobQueueManager import SC_JobQueueManager
 
 
-class TestSCLib_JobMigration(unittest.TestCase):
+class TestSC_JobMigration(unittest.TestCase):
     """Test cases for SC_JobMigration."""
     
     def setUp(self):
         """Set up test fixtures."""
         self.mock_mongo_client = Mock(spec=MongoClient)
-        self.mock_job_queue = Mock(spec=SCLib_JobQueueManager)
+        self.mock_job_queue = Mock(spec=SC_JobQueueManager)
         self.mock_db = Mock()
         self.mock_jobs = Mock()
         self.mock_datasets = Mock()
@@ -34,10 +34,10 @@ class TestSCLib_JobMigration(unittest.TestCase):
             'visstoredatas': self.mock_datasets
         }[name])
         
-        with patch('SCLib_JobMigration.SCLib_JobQueueManager') as mock_job_queue_class:
+        with patch('SC_JobMigration.SC_JobQueueManager') as mock_job_queue_class:
             mock_job_queue_class.return_value = self.mock_job_queue
             
-            self.migration = SCLib_JobMigration(self.mock_mongo_client, 'test_db')
+            self.migration = SC_JobMigration(self.mock_mongo_client, 'test_db')
             self.migration.jobs = self.mock_jobs
             self.migration.datasets = self.mock_datasets
     

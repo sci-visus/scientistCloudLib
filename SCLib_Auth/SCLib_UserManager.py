@@ -441,3 +441,4 @@ def get_user_manager() -> SCLib_UserManager:
     if _user_manager is None:
         _user_manager = SCLib_UserManager()
     return _user_manager
+

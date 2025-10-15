@@ -229,3 +229,4 @@ def get_jwt_manager() -> SCLib_JWTManager:
     if _jwt_manager is None:
         _jwt_manager = SCLib_JWTManager()
     return _jwt_manager
+

@@ -392,3 +392,4 @@ class AsyncScientistCloudUploadClient:
             await asyncio.sleep(poll_interval)
         
         raise TimeoutError(f"Upload job {job_id} did not complete within {timeout} seconds")
+

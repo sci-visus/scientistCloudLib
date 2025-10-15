@@ -329,3 +329,4 @@ def get_auth_manager() -> SCLib_AuthManager:
     if _auth_manager is None:
         _auth_manager = SCLib_AuthManager()
     return _auth_manager
+
