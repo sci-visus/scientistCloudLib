@@ -100,9 +100,11 @@ copy_env_file() {
     # Modify for Docker if needed
     if grep -q "mongodb+srv://" "$target"; then
         print_info "Converting MongoDB URL for Docker..."
-        sed -i.bak 's|mongodb+srv://[^@]*@[^/]*/|mongodb://admin:your_db_password@mongodb:27017/|g' "$target"
+        # Use environment variable for password instead of hardcoded value
+        DB_PASS=${DB_PASS:-"your_db_password"}
+        sed -i.bak "s|mongodb+srv://[^@]*@[^/]*/|mongodb://admin:${DB_PASS}@mongodb:27017/|g" "$target"
         sed -i.bak 's|?retryWrites=true.*||g' "$target"
-        sed -i.bak 's|mongodb://admin:your_db_password@mongodb:27017/|mongodb://admin:your_db_password@mongodb:27017/|g' "$target"
+        sed -i.bak "s|mongodb://admin:${DB_PASS}@mongodb:27017/|mongodb://admin:${DB_PASS}@mongodb:27017/|g" "$target"
         echo "?authSource=admin" >> "$target"
         rm -f "${target}.bak"
     fi

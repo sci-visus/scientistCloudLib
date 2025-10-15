@@ -11,7 +11,7 @@ services:
   #     - "27017:27017"
   #   environment:
   #     MONGO_INITDB_ROOT_USERNAME: visstore
-  #     MONGO_INITDB_ROOT_PASSWORD: your_db_password
+  #     MONGO_INITDB_ROOT_PASSWORD: ${DB_PASS}
   #     MONGO_INITDB_DATABASE: ${DB_NAME:-SCLib_Test}
   #   volumes:
   #     - mongodb_data:/data/db
