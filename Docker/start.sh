@@ -128,18 +128,8 @@ print_info "Using environment file: $ENV_FILE"
 print_info "Copying $ENV_FILE to .env for Docker Compose..."
 cp "$ENV_FILE" .env
 
-# Modify MongoDB URL for Docker if it's a cloud URL
-if grep -q "mongodb+srv://" .env; then
-    print_info "Converting MongoDB URL for Docker..."
-    sed -i.bak 's|mongodb+srv://[^@]*@[^/]*/|mongodb://admin:your_db_password@mongodb:27017/|g' .env
-    sed -i.bak 's|?retryWrites=true.*||g' .env
-    sed -i.bak 's|mongodb://admin:your_db_password@mongodb:27017/|mongodb://admin:your_db_password@mongodb:27017/|g' .env
-    # Add authSource if not present
-    if ! grep -q "authSource=admin" .env; then
-        sed -i.bak 's|mongodb://admin:your_db_password@mongodb:27017/\([^?]*\)|mongodb://admin:your_db_password@mongodb:27017/\1?authSource=admin|g' .env
-    fi
-    rm -f .env.bak
-fi
+# Keep the original MongoDB URL (cloud or local)
+print_info "Using MongoDB URL as provided in environment file"
 
 print_success "Environment file prepared: .env"
 

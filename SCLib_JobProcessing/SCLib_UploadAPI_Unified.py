@@ -306,6 +306,7 @@ async def upload_file(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    dataset_uuid: Optional[str] = Form(None, description="Optional dataset UUID for directory uploads"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -330,13 +331,13 @@ async def upload_file(
             # Use chunked upload for large files
             return await _handle_chunked_upload(
                 content, file.filename, file_size, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, background_tasks, processor
+                sensor, convert, is_public, folder, team_uuid, dataset_uuid, background_tasks, processor
             )
         else:
             # Use standard upload for smaller files
             return await _handle_standard_upload(
                 content, file.filename, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, background_tasks, processor
+                sensor, convert, is_public, folder, team_uuid, dataset_uuid, background_tasks, processor
             )
         
     except Exception as e:
@@ -346,7 +347,7 @@ async def upload_file(
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
+    team_uuid: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
     # Generate unique job ID
@@ -360,15 +361,17 @@ async def _handle_standard_upload(
         buffer.write(content)
     
     # Create local upload job
+    # Use provided UUID for directory uploads, or generate new one for single files
+    upload_uuid = dataset_uuid if dataset_uuid else str(uuid.uuid4())
     job_config = create_local_upload_job(
         file_path=temp_file_path,
-        dataset_uuid=str(uuid.uuid4()),
+        dataset_uuid=upload_uuid,
         user_email=user_email,
         dataset_name=dataset_name or filename,
         sensor=sensor,
         convert=convert,
         is_public=is_public,
-        folder=folder,
+        folder=folder,  # Use folder parameter for directory structure
         team_uuid=team_uuid
     )
     
@@ -390,7 +393,7 @@ async def _handle_standard_upload(
 async def _handle_chunked_upload(
     content: bytes, filename: str, file_size: int, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
+    team_uuid: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle chunked upload for large files."""
     # Generate unique upload ID
@@ -414,6 +417,7 @@ async def _handle_chunked_upload(
         'is_public': is_public,
         'folder': folder,
         'team_uuid': team_uuid,
+        'dataset_uuid': dataset_uuid,  # Include dataset UUID for directory uploads
         'total_chunks': total_chunks,
         'chunk_size': CHUNK_SIZE,
         'content': content  # Store content for processing
@@ -451,15 +455,17 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
             f.write(content)
         
         # Create upload job
+        # Use provided UUID for directory uploads, or generate new one for single files
+        upload_uuid = session.get('dataset_uuid') if session.get('dataset_uuid') else str(uuid.uuid4())
         job_config = create_local_upload_job(
             file_path=final_file_path,
-            dataset_uuid=str(uuid.uuid4()),
+            dataset_uuid=upload_uuid,
             user_email=session['user_email'],
             dataset_name=session['dataset_name'],
             sensor=session['sensor'],
             convert=session['convert'],
             is_public=session['is_public'],
-            folder=session['folder'],
+            folder=session.get('folder'),  # Use folder parameter for directory structure
             team_uuid=session['team_uuid']
         )
         
@@ -503,7 +509,17 @@ async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)
             if not status:
                 raise HTTPException(status_code=404, detail="Job not found")
             
-            return JobStatusResponse(**status)
+            return JobStatusResponse(
+                job_id=status.job_id,
+                status=status.status,
+                progress_percentage=status.progress_percentage,
+                bytes_uploaded=status.bytes_uploaded,
+                bytes_total=status.bytes_total,
+                message=getattr(status, 'current_file', '') or f"Processing {status.status.value}",
+                error=getattr(status, 'error_message', None),
+                created_at=getattr(status, 'created_at', datetime.now()),
+                updated_at=status.last_updated
+            )
         
     except HTTPException:
         raise

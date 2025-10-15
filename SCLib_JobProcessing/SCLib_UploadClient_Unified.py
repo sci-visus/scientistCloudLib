@@ -11,6 +11,7 @@ import time
 import hashlib
 import os
 import math
+import uuid
 from typing import Dict, Any, Optional, List, Callable
 from pathlib import Path
 import aiohttp
@@ -52,7 +53,7 @@ class ScientistCloudUploadClient:
     
     def upload_file(self, file_path: str, user_email: str, dataset_name: str, 
                    sensor: str, convert: bool = True, is_public: bool = False,
-                   folder: str = None, team_uuid: str = None,
+                   folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
                    progress_callback: Callable[[float], None] = None) -> UploadResult:
         """
         Upload a file with automatic handling of standard vs chunked uploads.
@@ -100,6 +101,8 @@ class ScientistCloudUploadClient:
             form_data['folder'] = folder
         if team_uuid:
             form_data['team_uuid'] = team_uuid
+        if dataset_uuid:
+            form_data['dataset_uuid'] = dataset_uuid
         
         # Prepare file
         with open(file_path, 'rb') as f:
@@ -369,22 +372,22 @@ class ScientistCloudUploadClient:
         
         # Upload each file
         results = []
+        # Use a single UUID for the entire directory upload
+        directory_uuid = str(uuid.uuid4())
+        
         for i, file_path in enumerate(files_to_upload, 1):
             relative_path = file_path.relative_to(directory_path_obj)
             
-            # Create dataset name with subdirectory structure
+            # For directory uploads, use the relative path as the folder structure
+            # This preserves the directory structure within the source directory
             if relative_path.parent != Path('.'):
-                file_dataset_name = f"{dataset_name}/{relative_path.parent}"
+                file_folder = str(relative_path.parent)
             else:
-                file_dataset_name = dataset_name
-            
-            # Create folder with subdirectory structure
-            if folder:
-                file_folder = f"{folder}/{relative_path.parent}" if relative_path.parent != Path('.') else folder
-            else:
-                file_folder = f"directory_upload/{dataset_name}/{relative_path.parent}" if relative_path.parent != Path('.') else f"directory_upload/{dataset_name}"
+                file_folder = None  # No subdirectory, file goes directly in UUID directory
             
             print(f"📤 Uploading {i}/{len(files_to_upload)}: {relative_path}")
+            print(f"   📁 Will go into UUID directory: {directory_uuid}")
+            print(f"   📂 Folder structure: {file_folder if file_folder else 'root'}")
             
             try:
                 # Create progress callback for this file
@@ -398,12 +401,13 @@ class ScientistCloudUploadClient:
                 result = self.upload_file(
                     file_path=str(file_path),
                     user_email=user_email,
-                    dataset_name=file_dataset_name,
+                    dataset_name=dataset_name,  # Use the original dataset name
                     sensor=sensor,
                     convert=convert,
                     is_public=is_public,
                     folder=file_folder,
                     team_uuid=team_uuid,
+                    dataset_uuid=directory_uuid,  # Use shared UUID for directory upload
                     progress_callback=file_progress_callback
                 )
                 
@@ -579,7 +583,7 @@ class AsyncScientistCloudUploadClient:
     
     async def upload_file(self, file_path: str, user_email: str, dataset_name: str,
                          sensor: str, convert: bool = True, is_public: bool = False,
-                         folder: str = None, team_uuid: str = None,
+                         folder: str = None, team_uuid: str = None, dataset_uuid: str = None,
                          progress_callback: Callable[[float], None] = None) -> UploadResult:
         """Async version of upload_file."""
         file_path_obj = Path(file_path)
@@ -606,6 +610,8 @@ class AsyncScientistCloudUploadClient:
             form_data.add_field('folder', folder)
         if team_uuid:
             form_data.add_field('team_uuid', team_uuid)
+        if dataset_uuid:
+            form_data.add_field('dataset_uuid', dataset_uuid)
         
         # Add file
         form_data.add_field('file', open(file_path, 'rb'), filename=file_path_obj.name)
@@ -689,22 +695,22 @@ class AsyncScientistCloudUploadClient:
         
         # Upload each file
         results = []
+        # Use a single UUID for the entire directory upload
+        directory_uuid = str(uuid.uuid4())
+        
         for i, file_path in enumerate(files_to_upload, 1):
             relative_path = file_path.relative_to(directory_path_obj)
             
-            # Create dataset name with subdirectory structure
+            # For directory uploads, use the relative path as the folder structure
+            # This preserves the directory structure within the source directory
             if relative_path.parent != Path('.'):
-                file_dataset_name = f"{dataset_name}/{relative_path.parent}"
+                file_folder = str(relative_path.parent)
             else:
-                file_dataset_name = dataset_name
-            
-            # Create folder with subdirectory structure
-            if folder:
-                file_folder = f"{folder}/{relative_path.parent}" if relative_path.parent != Path('.') else folder
-            else:
-                file_folder = f"directory_upload/{dataset_name}/{relative_path.parent}" if relative_path.parent != Path('.') else f"directory_upload/{dataset_name}"
+                file_folder = None  # No subdirectory, file goes directly in UUID directory
             
             print(f"📤 Uploading {i}/{len(files_to_upload)}: {relative_path}")
+            print(f"   📁 Will go into UUID directory: {directory_uuid}")
+            print(f"   📂 Folder structure: {file_folder if file_folder else 'root'}")
             
             try:
                 # Create progress callback for this file
@@ -718,12 +724,13 @@ class AsyncScientistCloudUploadClient:
                 result = await self.upload_file(
                     file_path=str(file_path),
                     user_email=user_email,
-                    dataset_name=file_dataset_name,
+                    dataset_name=dataset_name,  # Use the original dataset name
                     sensor=sensor,
                     convert=convert,
                     is_public=is_public,
                     folder=file_folder,
                     team_uuid=team_uuid,
+                    dataset_uuid=directory_uuid,  # Use shared UUID for directory upload
                     progress_callback=file_progress_callback
                 )
                 

@@ -2,28 +2,28 @@
 # The start.sh script will copy the appropriate env.<whatever> file to .env at runtime
 
 services:
-  # MongoDB Database Service
-  mongodb:
-    image: mongo:7.0
-    container_name: scientistcloud_mongodb
-    restart: unless-stopped
-    ports:
-      - "27017:27017"
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: ${DB_USER:-admin}
-      MONGO_INITDB_ROOT_PASSWORD: ${DB_PASS:-your_db_password}
-      MONGO_INITDB_DATABASE: ${DB_NAME:-SCLib_Test}
-    volumes:
-      - mongodb_data:/data/db
-      - ./mongo-init:/docker-entrypoint-initdb.d
-    networks:
-      - scientistcloud_network
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
+  # MongoDB Database Service (Disabled - using cloud MongoDB)
+  # mongodb:
+  #   image: mongo:7.0
+  #   container_name: scientistcloud_mongodb
+  #   restart: unless-stopped
+  #   ports:
+  #     - "27017:27017"
+  #   environment:
+  #     MONGO_INITDB_ROOT_USERNAME: visstore
+  #     MONGO_INITDB_ROOT_PASSWORD: your_db_password
+  #     MONGO_INITDB_DATABASE: ${DB_NAME:-SCLib_Test}
+  #   volumes:
+  #     - mongodb_data:/data/db
+  #     - ./mongo-init:/docker-entrypoint-initdb.d
+  #   networks:
+  #     - scientistcloud_network
+  #   healthcheck:
+  #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+  #     interval: 30s
+  #     timeout: 10s
+  #     retries: 3
+  #     start_period: 40s
 
   # FastAPI Application Service
   fastapi:
@@ -69,12 +69,12 @@ services:
       LARGE_FILE_THRESHOLD: ${LARGE_FILE_THRESHOLD:-1073741824}
       MAX_FILE_SIZE: ${MAX_FILE_SIZE:-1099511627776}
       
-      # Paths
-      VISUS_DATASETS: ${VISUS_DATASETS}
-      JOB_IN_DATA_DIR: ${JOB_IN_DATA_DIR}
-      JOB_OUT_DATA_DIR: ${JOB_OUT_DATA_DIR}
-      JOB_SYNC_DATA_DIR: ${JOB_SYNC_DATA_DIR}
-      JOB_AUTH_DATA_DIR: ${JOB_AUTH_DATA_DIR}
+      # Paths (container paths)
+      VISUS_DATASETS: /mnt/visus_datasets
+      JOB_IN_DATA_DIR: /mnt/visus_datasets/upload
+      JOB_OUT_DATA_DIR: /mnt/visus_datasets/converted
+      JOB_SYNC_DATA_DIR: /mnt/visus_datasets/sync
+      JOB_AUTH_DATA_DIR: /mnt/visus_datasets/auth
       
       # SCLib Environment
       SCLIB_HOME: /app
@@ -86,13 +86,13 @@ services:
       DOMAIN_NAME: ${DOMAIN_NAME}
     volumes:
       - ../SCLib_JobProcessing:/app
-      - ${VISUS_DATASETS}:/data/visus
+      - ${VISUS_DATASETS}:/mnt/visus_datasets
       - fastapi_logs:/app/logs
     networks:
       - scientistcloud_network
-    depends_on:
-      mongodb:
-        condition: service_healthy
+    # depends_on:
+    #   mongodb:
+    #     condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:5000/health"]
       interval: 30s

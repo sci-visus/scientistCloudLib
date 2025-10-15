@@ -304,7 +304,17 @@ async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)
         if not status:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        return JobStatusResponse(**status)
+        return JobStatusResponse(
+            job_id=status.job_id,
+            status=status.status,
+            progress_percentage=status.progress_percentage,
+            bytes_uploaded=status.bytes_uploaded,
+            bytes_total=status.bytes_total,
+            message=getattr(status, 'current_file', '') or f"Processing {status.status.value}",
+            error=getattr(status, 'error_message', None),
+            created_at=getattr(status, 'created_at', datetime.now()),
+            updated_at=status.last_updated
+        )
         
     except HTTPException:
         raise

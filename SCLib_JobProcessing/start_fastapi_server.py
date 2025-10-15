@@ -188,14 +188,19 @@ def main():
     # Import and start the appropriate API
     try:
         if args.api_type == "unified":
-            from SCLib_UploadAPI_Unified import app
+            from SCLib_UploadAPI_Unified import app, upload_processor
             print("🎯 Starting Unified API (automatic file size handling)")
         elif args.api_type == "large-files":
-            from SCLib_UploadAPI_LargeFiles import app
+            from SCLib_UploadAPI_LargeFiles import app, upload_processor
             print("📁 Starting Large Files API (TB-scale support)")
         else:
-            from SCLib_UploadAPI_FastAPI import app
+            from SCLib_UploadAPI_FastAPI import app, upload_processor
             print("📄 Starting Standard API")
+        
+        # Start the upload processor
+        print("🚀 Starting upload processor...")
+        upload_processor.start()
+        print("✅ Upload processor started")
         
         # Configure uvicorn settings
         uvicorn_config = {

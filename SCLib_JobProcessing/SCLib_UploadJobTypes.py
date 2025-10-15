@@ -301,10 +301,17 @@ def create_local_upload_job(
     **kwargs
 ) -> UploadJobConfig:
     """Create a local file upload job."""
+    # Always use UUID directory, but preserve folder structure within it
+    base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}"
+    if folder:
+        destination_path = f"{base_path}/{folder}"
+    else:
+        destination_path = base_path
+    
     return create_upload_job_config(
         source_type=UploadSourceType.LOCAL,
         source_path=file_path,
-        destination_path=f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}",
+        destination_path=destination_path,
         dataset_uuid=dataset_uuid,
         user_email=user_email,
         dataset_name=dataset_name,
