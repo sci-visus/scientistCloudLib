@@ -55,6 +55,8 @@ class SCLib_UploadProcessor:
         """Start the upload processor."""
         if not self.running:
             self.running = True
+            # Restore active jobs from database
+            self._restore_active_jobs_from_db()
             self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.worker_thread.start()
             logger.info("Upload processor started")
@@ -73,6 +75,9 @@ class SCLib_UploadProcessor:
         # Store job in database
         self._store_job_in_db(job_id, job_config)
         
+        # Create or update dataset entry in visstoredatas collection
+        self._create_or_update_dataset_entry(job_config)
+        
         # Add to job manager
         self.job_manager.create_upload_job(job_id, job_config)
         
@@ -81,7 +86,13 @@ class SCLib_UploadProcessor:
     
     def get_job_status(self, job_id: str) -> Optional[UploadProgress]:
         """Get the status of an upload job."""
-        return self.job_manager.get_progress(job_id)
+        # First try in-memory cache
+        progress = self.job_manager.get_progress(job_id)
+        if progress:
+            return progress
+        
+        # If not in memory, get from database
+        return self._get_job_progress_from_db(job_id)
     
     def cancel_job(self, job_id: str) -> bool:
         """Cancel an upload job."""
@@ -135,7 +146,8 @@ class SCLib_UploadProcessor:
     
     def _process_upload_job(self, job_id: str):
         """Process a single upload job."""
-        job_config = self.job_manager.get_job_config(job_id)
+        # Get job config from database (persistent storage)
+        job_config = self._get_job_config_from_db(job_id)
         if not job_config:
             logger.error(f"Job config not found for {job_id}")
             return
@@ -463,6 +475,13 @@ class SCLib_UploadProcessor:
             "error_message": error_message,
             "updated_at": datetime.utcnow()
         })
+        
+        # Update dataset status in visstoredatas collection
+        job_config = self._get_job_config_from_db(job_id)
+        if job_config:
+            # Map upload status to dataset status
+            dataset_status = self._map_upload_status_to_dataset_status(status)
+            self._update_dataset_status(job_config.dataset_uuid, dataset_status, error_message)
     
     def _update_job_progress(self, job_id: str, percentage: float, uploaded_bytes: int, total_bytes: int):
         """Update job progress."""
@@ -476,8 +495,8 @@ class SCLib_UploadProcessor:
         # Update in database
         self._update_job_in_db(job_id, {
             "progress_percentage": percentage,
-            "uploaded_bytes": uploaded_bytes,
-            "total_bytes": total_bytes,
+            "bytes_uploaded": uploaded_bytes,
+            "bytes_total": total_bytes,
             "updated_at": datetime.utcnow()
         })
     
@@ -532,6 +551,59 @@ scope = drive
             }, {"job_id": 1})
             return [job["job_id"] for job in jobs]
     
+    def _get_job_config_from_db(self, job_id: str) -> Optional[UploadJobConfig]:
+        """Get job configuration from database."""
+        with mongo_collection_by_type_context('jobs') as collection:
+            job_doc = collection.find_one({"job_id": job_id})
+            if not job_doc:
+                return None
+            
+            # Reconstruct UploadJobConfig from database document
+            config_dict = job_doc.get('config', {})
+            
+            # Convert string enums back to enum objects
+            from SCLib_UploadJobTypes import UploadSourceType, SensorType
+            source_type = UploadSourceType(config_dict.get('source_type', 'local'))
+            sensor = SensorType(config_dict.get('sensor', 'TIFF'))
+            
+            return UploadJobConfig(
+                source_type=source_type,
+                source_path=config_dict.get('source_path', ''),
+                destination_path=config_dict.get('destination_path', ''),
+                dataset_uuid=config_dict.get('dataset_uuid', ''),
+                user_id=config_dict.get('user_id', ''),
+                dataset_name=config_dict.get('dataset_name', ''),
+                sensor=sensor,
+                convert=config_dict.get('convert', True),
+                is_public=config_dict.get('is_public', False),
+                folder=config_dict.get('folder'),
+                team_uuid=config_dict.get('team_uuid'),
+                total_size_bytes=config_dict.get('total_size_bytes', 0),
+                created_at=config_dict.get('created_at', datetime.utcnow())
+            )
+    
+    def _get_job_progress_from_db(self, job_id: str) -> Optional[UploadProgress]:
+        """Get job progress from database."""
+        with mongo_collection_by_type_context('jobs') as collection:
+            job_doc = collection.find_one({"job_id": job_id})
+            if not job_doc:
+                return None
+            
+            # Get job config to determine total size
+            job_config = self._get_job_config_from_db(job_id)
+            total_size = job_config.total_size_bytes if job_config else 0
+            
+            return UploadProgress(
+                job_id=job_id,
+                status=UploadStatus(job_doc.get('status', 'queued')),
+                progress_percentage=job_doc.get('progress_percentage', 0.0),
+                bytes_uploaded=job_doc.get('bytes_uploaded', 0),
+                bytes_total=total_size,
+                speed_mbps=job_doc.get('speed_mbps', 0.0),
+                eta_seconds=job_doc.get('eta_seconds', 0),
+                last_updated=job_doc.get('updated_at', job_doc.get('created_at', datetime.utcnow()))
+            )
+    
     def _update_job_in_db(self, job_id: str, update_data: Dict[str, Any]):
         """Update job in database."""
         with mongo_collection_by_type_context('jobs') as collection:
@@ -574,6 +646,137 @@ scope = drive
                             
         except Exception as e:
             logger.error(f"Error during job cleanup: {e}")
+    
+    def _restore_active_jobs_from_db(self):
+        """Restore active jobs from database on startup."""
+        try:
+            with mongo_collection_by_type_context('jobs') as collection:
+                # Find jobs that were running when the system went down
+                active_jobs = collection.find({
+                    "job_type": "upload",
+                    "status": {"$in": ["initializing", "uploading", "processing"]}
+                })
+                
+                restored_count = 0
+                for job_doc in active_jobs:
+                    job_id = job_doc['job_id']
+                    
+                    # Reset status to queued so it can be reprocessed
+                    collection.update_one(
+                        {"job_id": job_id},
+                        {
+                            "$set": {
+                                "status": UploadStatus.QUEUED.value,
+                                "updated_at": datetime.utcnow(),
+                                "restored_at": datetime.utcnow()
+                            }
+                        }
+                    )
+                    
+                    # Restore job config in memory for faster access
+                    job_config = self._get_job_config_from_db(job_id)
+                    if job_config:
+                        self.job_manager.create_upload_job(job_id, job_config)
+                        restored_count += 1
+                
+                if restored_count > 0:
+                    logger.info(f"Restored {restored_count} active jobs from database")
+                    
+        except Exception as e:
+            logger.error(f"Error restoring active jobs from database: {e}")
+    
+    def _create_or_update_dataset_entry(self, job_config: UploadJobConfig):
+        """Create or update dataset entry in visstoredatas collection."""
+        try:
+            
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                # Check if dataset already exists
+                existing_dataset = collection.find_one({"uuid": job_config.dataset_uuid})
+                
+                dataset_doc = {
+                    "uuid": job_config.dataset_uuid,
+                    "name": job_config.dataset_name,
+                    "user_email": job_config.user_id,
+                    "sensor": job_config.sensor.value,
+                    "convert": job_config.convert,
+                    "is_public": job_config.is_public,
+                    "folder": job_config.folder,
+                    "team_uuid": job_config.team_uuid,
+                    "source_type": job_config.source_type.value,
+                    "source_path": job_config.source_path,
+                    "destination_path": job_config.destination_path,
+                    "total_size_bytes": job_config.total_size_bytes,
+                    "status": "uploading",  # Initial status
+                    "created_at": job_config.created_at,
+                    "updated_at": datetime.utcnow()
+                }
+                
+                if existing_dataset:
+                    # Update existing dataset
+                    collection.update_one(
+                        {"uuid": job_config.dataset_uuid},
+                        {
+                            "$set": {
+                                "name": job_config.dataset_name,
+                                "sensor": job_config.sensor.value,
+                                "convert": job_config.convert,
+                                "is_public": job_config.is_public,
+                                "folder": job_config.folder,
+                                "team_uuid": job_config.team_uuid,
+                                "source_type": job_config.source_type.value,
+                                "source_path": job_config.source_path,
+                                "destination_path": job_config.destination_path,
+                                "total_size_bytes": job_config.total_size_bytes,
+                                "status": "uploading",
+                                "updated_at": datetime.utcnow()
+                            }
+                        }
+                    )
+                    logger.info(f"Updated dataset entry: {job_config.dataset_uuid}")
+                else:
+                    # Create new dataset entry
+                    collection.insert_one(dataset_doc)
+                    logger.info(f"Created dataset entry: {job_config.dataset_uuid}")
+                    
+        except Exception as e:
+            logger.error(f"Error creating/updating dataset entry: {e}")
+    
+    def _update_dataset_status(self, dataset_uuid: str, status: str, error_message: str = ""):
+        """Update dataset status in visstoredatas collection."""
+        try:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                update_data = {
+                    "status": status,
+                    "updated_at": datetime.utcnow()
+                }
+                
+                if status == "completed":
+                    update_data["completed_at"] = datetime.utcnow()
+                elif status == "failed":
+                    update_data["error_message"] = error_message
+                
+                collection.update_one(
+                    {"uuid": dataset_uuid},
+                    {"$set": update_data}
+                )
+                logger.info(f"Updated dataset status: {dataset_uuid} -> {status}")
+                
+        except Exception as e:
+            logger.error(f"Error updating dataset status: {e}")
+    
+    def _map_upload_status_to_dataset_status(self, upload_status: UploadStatus) -> str:
+        """Map upload status to dataset status."""
+        status_mapping = {
+            UploadStatus.QUEUED: "uploading",
+            UploadStatus.INITIALIZING: "uploading",
+            UploadStatus.UPLOADING: "uploading",
+            UploadStatus.PROCESSING: "processing",
+            UploadStatus.COMPLETED: "completed",
+            UploadStatus.FAILED: "failed",
+            UploadStatus.CANCELLED: "cancelled",
+            UploadStatus.PAUSED: "paused"
+        }
+        return status_mapping.get(upload_status, "unknown")
 
 
 # Global upload processor instance
