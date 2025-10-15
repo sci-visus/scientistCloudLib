@@ -350,9 +350,6 @@ async def _handle_standard_upload(
     team_uuid: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
-    # Generate unique job ID
-    job_id = f"upload_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
-    
     # Save uploaded file to temporary location
     temp_dir = tempfile.mkdtemp()
     temp_file_path = os.path.join(temp_dir, filename)
@@ -363,6 +360,12 @@ async def _handle_standard_upload(
     # Create local upload job
     # Use provided UUID for directory uploads, or generate new one for single files
     upload_uuid = dataset_uuid if dataset_uuid else str(uuid.uuid4())
+    
+    # For single file uploads, don't use folder for file system structure
+    # The folder parameter is for UI organization only
+    # Only use folder structure for directory uploads (when dataset_uuid is provided)
+    file_system_folder = folder if dataset_uuid else None
+    
     job_config = create_local_upload_job(
         file_path=temp_file_path,
         dataset_uuid=upload_uuid,
@@ -371,19 +374,19 @@ async def _handle_standard_upload(
         sensor=sensor,
         convert=convert,
         is_public=is_public,
-        folder=folder,  # Use folder parameter for directory structure
+        folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
         team_uuid=team_uuid
     )
     
-    # Submit job to processor
-    background_tasks.add_task(processor.submit_upload_job, job_config)
+    # Submit job to processor and get the actual job ID
+    actual_job_id = processor.submit_upload_job(job_config)
     
     # Estimate duration based on file size
     file_size_mb = len(content) / (1024 * 1024)
     estimated_duration = max(60, int(file_size_mb * 2))  # 2 seconds per MB, minimum 1 minute
     
     return UploadResponse(
-        job_id=job_id,
+        job_id=actual_job_id,
         status="queued",
         message=f"Standard upload initiated: {filename}",
         estimated_duration=estimated_duration,
@@ -457,6 +460,12 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         # Create upload job
         # Use provided UUID for directory uploads, or generate new one for single files
         upload_uuid = session.get('dataset_uuid') if session.get('dataset_uuid') else str(uuid.uuid4())
+        
+        # For single file uploads, don't use folder for file system structure
+        # The folder parameter is for UI organization only
+        # Only use folder structure for directory uploads (when dataset_uuid is provided)
+        file_system_folder = session.get('folder') if session.get('dataset_uuid') else None
+        
         job_config = create_local_upload_job(
             file_path=final_file_path,
             dataset_uuid=upload_uuid,
@@ -465,7 +474,7 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
             sensor=session['sensor'],
             convert=session['convert'],
             is_public=session['is_public'],
-            folder=session.get('folder'),  # Use folder parameter for directory structure
+            folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
             team_uuid=session['team_uuid']
         )
         

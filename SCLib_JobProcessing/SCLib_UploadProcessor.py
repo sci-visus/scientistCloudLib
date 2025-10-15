@@ -105,6 +105,7 @@ class SCLib_UploadProcessor:
     
     def _worker_loop(self):
         """Main worker loop for processing upload jobs."""
+        cleanup_counter = 0
         while self.running:
             try:
                 # Get queued jobs from database
@@ -119,6 +120,12 @@ class SCLib_UploadProcessor:
                     except Exception as e:
                         logger.error(f"Error processing upload job {job_id}: {e}")
                         self._update_job_status(job_id, UploadStatus.FAILED, str(e))
+                
+                # Periodic cleanup of old stuck jobs (every 60 iterations = 5 minutes)
+                cleanup_counter += 1
+                if cleanup_counter >= 60:
+                    cleanup_counter = 0
+                    self._cleanup_old_jobs()
                 
                 time.sleep(5)  # Check for new jobs every 5 seconds
                 
@@ -532,6 +539,41 @@ scope = drive
                 {"job_id": job_id},
                 {"$set": update_data}
             )
+    
+    def _cleanup_old_jobs(self):
+        """Clean up old stuck jobs from the database."""
+        try:
+            from datetime import datetime, timedelta
+            
+            # Clean up queued jobs older than 1 hour
+            cutoff_time = datetime.utcnow() - timedelta(hours=1)
+            
+            with mongo_collection_by_type_context('jobs') as collection:
+                old_jobs = collection.find({
+                    "job_type": "upload",
+                    "status": UploadStatus.QUEUED.value,
+                    "created_at": {"$lt": cutoff_time}
+                }, {"job_id": 1, "created_at": 1})
+                
+                old_job_ids = [job["job_id"] for job in old_jobs]
+                
+                if old_job_ids:
+                    # Delete old stuck jobs
+                    result = collection.delete_many({
+                        "job_id": {"$in": old_job_ids}
+                    })
+                    
+                    logger.info(f"Cleaned up {result.deleted_count} old stuck upload jobs")
+                    
+                    # Also remove from job manager
+                    for job_id in old_job_ids:
+                        if job_id in self.job_manager.upload_configs:
+                            del self.job_manager.upload_configs[job_id]
+                        if job_id in self.job_manager.progress_tracking:
+                            del self.job_manager.progress_tracking[job_id]
+                            
+        except Exception as e:
+            logger.error(f"Error during job cleanup: {e}")
 
 
 # Global upload processor instance
