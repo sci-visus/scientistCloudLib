@@ -86,7 +86,7 @@ DB_PASS=your_db_password
 DB_HOST=Cluster0.wimj3q4.mongodb.net
 
 # Auth0 Configuration (from your existing env.local)
-AUTH0_DOMAIN=dev-ep26akpb.auth0.com
+AUTH0_DOMAIN=your_auth0_domain_here
 AUTH0_CLIENT_ID=your_auth0_client_id_here
 AUTH0_CLIENT_SECRET=your_auth0_client_secret_here
 
