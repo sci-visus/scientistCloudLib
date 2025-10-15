@@ -10,6 +10,7 @@ import json
 import time
 import logging
 import threading
+import uuid
 from typing import Dict, Any, Optional, List, Callable
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -67,7 +68,7 @@ class SCLib_UploadProcessor:
     
     def submit_upload_job(self, job_config: UploadJobConfig) -> str:
         """Submit a new upload job for processing."""
-        job_id = f"upload_{int(time.time())}_{job_config.dataset_uuid[:8]}"
+        job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         
         # Store job in database
         self._store_job_in_db(job_id, job_config)
