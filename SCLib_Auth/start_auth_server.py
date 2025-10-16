@@ -11,42 +11,7 @@ import uvicorn
 from pathlib import Path
 
 def load_env_file(env_path: str = None):
-    """Load environment variables from env.local file."""
-    if env_path is None:
-        # Try to find env.local in common locations
-        possible_paths = []
-        
-        # Check SCLIB_MYTEST first
-        sclib_mytest = os.getenv('SCLIB_MYTEST')
-        if sclib_mytest:
-            possible_paths.append(Path(sclib_mytest) / "env.local")
-        
-        # Check SCLIB_HOME
-        sclib_home = os.getenv('SCLIB_HOME')
-        if sclib_home:
-            possible_paths.append(Path(sclib_home) / "env.local")
-            possible_paths.append(Path(sclib_home).parent / "env.local")
-        
-        # Add relative paths
-        possible_paths.extend([
-            Path.cwd() / "env.local",
-            Path.cwd().parent / "env.local", 
-            Path.cwd().parent / "SCLib_TryTest" / "env.local",
-            Path.cwd().parent.parent / "SCLib_TryTest" / "env.local",
-            Path.home() / "env.local"
-        ])
-        
-        # Filter out None values and non-existent paths
-        possible_paths = [p for p in possible_paths if p is not None]
-        
-        print(f"🔍 Searching for env.local in {len(possible_paths)} locations...")
-        for i, path in enumerate(possible_paths):
-            exists = path.exists()
-            print(f"   {i+1}. {path} {'✅' if exists else '❌'}")
-            if exists:
-                env_path = str(path)
-                break
-    
+    """Load environment variables from specified env file."""
     if env_path and Path(env_path).exists():
         print(f"📁 Loading environment from: {env_path}")
         loaded_vars = []
@@ -62,7 +27,7 @@ def load_env_file(env_path: str = None):
         print(f"✅ Loaded {len(loaded_vars)} environment variables: {', '.join(loaded_vars[:5])}{'...' if len(loaded_vars) > 5 else ''}")
         return True
     else:
-        print("⚠️  No env.local file found. Using system environment variables.")
+        print("ℹ️  Using system environment variables (no env file specified).")
         return False
 
 def check_required_env_vars():

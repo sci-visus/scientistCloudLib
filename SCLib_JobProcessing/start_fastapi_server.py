@@ -14,57 +14,18 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 def load_env_file(env_path: str = None):
-    """Load environment variables from env.local file."""
+    """Load environment variables from specified env file."""
     # If we're running in Docker and have environment variables, skip file loading
     if os.getenv('MONGO_URL') and os.getenv('DB_NAME'):
         print("🐳 Running in Docker with environment variables - skipping env file loading")
         return
         
+    # Check for explicit environment file variable first
     if env_path is None:
-        # Check for explicit environment file variable first
         env_file_from_env = os.getenv('SCLIB_ENV_FILE')
         if env_file_from_env and Path(env_file_from_env).exists():
             env_path = env_file_from_env
             print(f"📁 Using environment file from SCLIB_ENV_FILE: {env_path}")
-        else:
-            # Try to find env.local in common locations
-            possible_paths = []
-            
-            # Check SCLIB_MYTEST first
-            sclib_mytest = os.getenv('SCLIB_MYTEST')
-            if sclib_mytest:
-                possible_paths.append(Path(sclib_mytest) / "env.local")
-            
-            # Check SCLIB_HOME
-            sclib_home = os.getenv('SCLIB_HOME')
-            if sclib_home:
-                possible_paths.append(Path(sclib_home) / "env.local")
-                possible_paths.append(Path(sclib_home).parent / "env.local")
-            
-            # Add relative paths
-            possible_paths.extend([
-                Path.cwd() / "env.local",
-                Path.cwd().parent / "env.local", 
-                Path.cwd().parent / "SCLib_TryTest" / "env.local",
-                Path.cwd().parent.parent / "SCLib_TryTest" / "env.local",
-                Path.home() / "env.local"
-            ])
-            
-            # Filter out None values and non-existent paths
-            possible_paths = [p for p in possible_paths if p is not None]
-            
-            print(f"🔍 Searching for env.local in {len(possible_paths)} locations...")
-            for i, path in enumerate(possible_paths):
-                exists = path.exists()
-                print(f"   {i+1}. {path} {'✅' if exists else '❌'}")
-                if exists:
-                    env_path = str(path)
-                    break
-            
-            # If no env.local found, check if we're running in Docker with environment variables
-            if not env_path and os.getenv('MONGO_URL'):
-                print("🐳 Running in Docker with environment variables - skipping env file loading")
-                return
     
     if env_path and Path(env_path).exists():
         print(f"📁 Loading environment from: {env_path}")
@@ -81,7 +42,7 @@ def load_env_file(env_path: str = None):
         print(f"✅ Loaded {len(loaded_vars)} environment variables: {', '.join(loaded_vars[:5])}{'...' if len(loaded_vars) > 5 else ''}")
         return True
     else:
-        print("⚠️  No env.local file found. Using system environment variables.")
+        print("ℹ️  Using system environment variables (no env file specified).")
         return False
 
 def setup_logging(level: str = "INFO"):

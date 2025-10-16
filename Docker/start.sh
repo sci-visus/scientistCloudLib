@@ -6,7 +6,7 @@
 set -e
 
 # Default values
-ENV_FILE=".env"
+ENV_FILE=""
 COMPOSE_FILE="docker-compose.yml"
 SERVICES=""
 
@@ -50,7 +50,7 @@ show_usage() {
     echo "  clean       Remove all containers and volumes"
     echo ""
     echo "Options:"
-    echo "  --env-file FILE     Use specific environment file (default: .env)"
+    echo "  --env-file FILE     Use specific environment file (required)"
     echo "  --services SERVICE  Start only specific services (comma-separated)"
     echo "  --help              Show this help message"
     echo ""
@@ -61,13 +61,10 @@ show_usage() {
     echo "  $0 up --services mongodb,fastapi"
     echo "  $0 logs --env-file env.local"
     echo ""
-    echo "Available environment files:"
-    if [ -d "../../SCLib_TryTest" ]; then
-        echo "  - env.local (from SCLib_TryTest)"
-        echo "  - env.production (create as needed)"
-        echo "  - env.development (create as needed)"
-    fi
-    echo "  - .env (default Docker configuration)"
+    echo "Environment files:"
+    echo "  - You must provide a valid environment file using --env-file"
+    echo "  - Common names: env.local, env.production, env.development"
+    echo "  - The file must exist and be accessible from the current directory"
 }
 
 # Parse command line arguments
@@ -104,22 +101,20 @@ if [ -z "$COMMAND" ]; then
     exit 1
 fi
 
+# Check if environment file is provided
+if [ -z "$ENV_FILE" ]; then
+    print_error "No environment file provided"
+    print_info "You must specify an environment file using --env-file"
+    show_usage
+    exit 1
+fi
+
 # Check if environment file exists
 if [ ! -f "$ENV_FILE" ]; then
-    # Try to find the env file in common locations
-    if [ -f "../../SCLib_TryTest/$ENV_FILE" ]; then
-        ENV_FILE="../../SCLib_TryTest/$ENV_FILE"
-        print_info "Found environment file at: $ENV_FILE"
-    else
-        print_error "Environment file not found: $ENV_FILE"
-        print_info "Available files:"
-        ls -la *.env 2>/dev/null || echo "  No .env files found in current directory"
-        if [ -d "../../SCLib_TryTest" ]; then
-            echo "  Files in ../../SCLib_TryTest/:"
-            ls -la ../../SCLib_TryTest/env.* 2>/dev/null || echo "    No env.* files found"
-        fi
-        exit 1
-    fi
+    print_error "Environment file not found: $ENV_FILE"
+    print_info "Please specify a valid environment file using --env-file"
+    print_info "Example: $0 up --env-file /path/to/your/env.file"
+    exit 1
 fi
 
 print_info "Using environment file: $ENV_FILE"
