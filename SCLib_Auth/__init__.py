@@ -12,6 +12,12 @@ try:
     from .SCLib_AuthManager import SCLib_AuthManager, get_auth_manager
     from .SCLib_JWTManager import SCLib_JWTManager, get_jwt_manager
     from .SCLib_UserManager import SCLib_UserManager, get_user_manager
+    from .SCLib_AuthMiddleware import (
+        SCLib_AuthMiddleware, get_auth_middleware,
+        require_auth, optional_auth, get_current_user, 
+        get_current_user_email, get_current_user_id,
+        setup_auth_middleware, AuthResult
+    )
     ADVANCED_AUTH_AVAILABLE = True
 except ImportError:
     ADVANCED_AUTH_AVAILABLE = False
@@ -27,5 +33,14 @@ if ADVANCED_AUTH_AVAILABLE:
         'SCLib_JWTManager', 
         'get_jwt_manager',
         'SCLib_UserManager',
-        'get_user_manager'
+        'get_user_manager',
+        'SCLib_AuthMiddleware',
+        'get_auth_middleware',
+        'require_auth',
+        'optional_auth',
+        'get_current_user',
+        'get_current_user_email',
+        'get_current_user_id',
+        'setup_auth_middleware',
+        'AuthResult'
     ])

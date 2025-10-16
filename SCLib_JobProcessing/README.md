@@ -146,17 +146,25 @@ This separation allows you to:
    ```
 
 4. **Start FastAPI Server**:
+   
+   **Option A: Using Docker (Recommended)**:
    ```bash
-   # Option 1: Auto-detection (uses SCLIB_MYTEST or SCLIB_HOME)
+   cd /path/to/scientistCloudLib/Docker
+   ./start.sh up --env-file ../../SCLib_TryTest/env.local
+   # Server will be available at http://localhost:5001
+   ```
+   
+   **Option B: Direct Python execution**:
+   ```bash
+   # First install dependencies
    cd ${SCLIB_HOME}
-   python start_fastapi_server.py --port 8000
+   pip install -r requirements_fastapi.txt
    
-   # Option 2: Explicit env file path
-   python start_fastapi_server.py --port 8000 --env-file ${SCLIB_MYTEST}/env.local
+   # Then start the server
+   python start_fastapi_server.py --port 5001 --api-type unified
    
-   # Option 3: Set environment variable first
-   export SCLIB_ENV_FILE=${SCLIB_MYTEST}/env.local
-   python start_fastapi_server.py --port 8000
+   # Or with explicit env file
+   python start_fastapi_server.py --port 5001 --api-type unified --env-file ${SCLIB_MYTEST}/env.local
    ```
 
 5. **Verify Setup**:
@@ -173,8 +181,8 @@ This separation allows you to:
 
    cd /Users/amygooch/GIT/ScientistCloud_2.0/SCLib_TryTest && source env.local && python test_mongodb_access.py
    
-   # Test API server
-   curl -s http://localhost:8000/api/upload/supported-sources
+   # Test API server (Docker uses port 5001, direct Python uses port 8000)
+   curl -s http://localhost:5001/api/upload/supported-sources
    ```
 
 ### File System Permissions
@@ -289,7 +297,7 @@ For enormous datasets (TB-scale), we provide specialized APIs and clients:
 from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
 # Initialize unified client - handles all file sizes automatically!
-client = ScientistCloudUploadClient("http://localhost:8000")
+client = ScientistCloudUploadClient("http://localhost:5001")  # Docker port
 
 # Upload any file - automatically chooses best method
 result = client.upload_file(
@@ -319,16 +327,16 @@ client = LargeFileUploadClient("http://localhost:5001")
 
 # For standard files only  
 from SCLib_UploadClient_FastAPI import ScientistCloudUploadClient
-client = ScientistCloudUploadClient("http://localhost:8000")
+client = ScientistCloudUploadClient("http://localhost:5001")  # Docker port
 ```
 
 ## Current Status
 
-✅ **FastAPI Server**: Successfully running on localhost:8000  
+✅ **FastAPI Server**: Successfully running on localhost:5001 (Docker) or localhost:8000 (direct)  
 ✅ **API Endpoints**: All upload endpoints working  
 ✅ **Environment Setup**: Localhost directories configured  
-⚠️ **Known Issues**: Some basic endpoints (/, /health) have validation errors but core API works  
-✅ **Documentation**: Available at http://localhost:8000/docs  
+✅ **Unified API**: Automatically handles both small and large files  
+✅ **Documentation**: Available at http://localhost:5001/docs (Docker) or http://localhost:8000/docs (direct)  
 
 ### Troubleshooting
 
@@ -350,13 +358,13 @@ client = ScientistCloudUploadClient("http://localhost:8000")
 The easiest way to use the library is through the upload client:
 
 ```python
-from SCLib_JobProcessing import ScientistCloudUploadClient
+from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
 # Initialize client
-client = ScientistCloudUploadClient("http://localhost:8000")
+client = ScientistCloudUploadClient("http://localhost:5001")  # Docker port
 
 # Upload a local file
-result = client.upload_local_file(
+result = client.upload_file(
     file_path="/path/to/dataset.zip",
     user_email="user@example.com",
     dataset_name="My Dataset",
@@ -365,11 +373,11 @@ result = client.upload_local_file(
     is_public=False
 )
 
-print(f"Upload job started: {result['job_id']}")
+print(f"Upload job started: {result.job_id}")
 
 # Monitor progress
-final_status = client.wait_for_completion(result['job_id'])
-print(f"Upload completed: {final_status['status']}")
+final_status = client.wait_for_completion(result.job_id)
+print(f"Upload completed: {final_status.status}")
 ```
 
 ### Other Upload Sources
@@ -406,16 +414,15 @@ result = client.initiate_url_upload(
 
 ### Complete Example
 
-See `example_usage_new_api.py` for a complete example showing all the main features of the library.
 
 ### More Usage Examples
 
 **Simple Upload:**
 ```python
-from SCLib_JobProcessing import ScientistCloudUploadClient
+from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
 client = ScientistCloudUploadClient()
-result = client.upload_local_file(
+result = client.upload_file(
     file_path="/path/to/dataset.zip",
     user_email="user@example.com",
     dataset_name="My Dataset",
@@ -436,8 +443,8 @@ result = client.initiate_google_drive_upload(
 
 **Monitor Progress:**
 ```python
-status = client.wait_for_completion(result['job_id'])
-print(f"Upload completed: {status['status']}")
+status = client.wait_for_completion(result.job_id)
+print(f"Upload completed: {status.status}")
 ```
 
 ## Overview
@@ -720,20 +727,27 @@ pip install awscli
 
 ### Starting the FastAPI Server
 
+**Option A: Using Docker (Recommended)**:
 ```bash
-# Option 1: Auto-detection (uses SCLIB_MYTEST or SCLIB_HOME)
+cd /path/to/scientistCloudLib/Docker
+./start.sh up --env-file ../../SCLib_TryTest/env.local
+# Server will be available at http://localhost:5001
+```
+
+**Option B: Direct Python execution**:
+```bash
+# First install dependencies
 cd ${SCLIB_HOME}
-python start_fastapi_server.py --port 8000
+pip install -r requirements_fastapi.txt
 
-# Option 2: Explicit env file path
-python start_fastapi_server.py --port 8000 --env-file ${SCLIB_MYTEST}/env.local
+# Then start the server
+python start_fastapi_server.py --port 5001 --api-type unified
 
-# Option 3: Set environment variable first
-export SCLIB_ENV_FILE=${SCLIB_MYTEST}/env.local
-python start_fastapi_server.py --port 8000
+# Or with explicit env file
+python start_fastapi_server.py --port 5001 --api-type unified --env-file ${SCLIB_MYTEST}/env.local
 
-# The server will start on http://localhost:8000
-# Automatically handles both small and large files
+# The server will start on http://localhost:5001
+# Uses the unified API that automatically handles both small and large files
 ```
 
 ### Using the Upload System
@@ -745,7 +759,7 @@ The `ScientistCloudUploadClient` provides a clean, easy-to-use interface:
 ```python
 from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
-client = ScientistCloudUploadClient("http://localhost:8000")
+client = ScientistCloudUploadClient("http://localhost:5001")  # Docker port
 
 # Upload a single file
 result = client.upload_file(
@@ -790,19 +804,19 @@ result = client.upload_from_source(
 )
 
 # Monitor progress
-status = client.wait_for_completion(result['job_id'])
+status = client.wait_for_completion(result.job_id)
 ```
 
 #### Direct API Example
 
 ```python
-from SCLib_JobProcessing import ScientistCloudUploadClient
+from SCLib_UploadClient_Unified import ScientistCloudUploadClient
 
 # Initialize client
-client = ScientistCloudUploadClient("http://localhost:8000")
+client = ScientistCloudUploadClient("http://localhost:5001")  # Docker port
 
 # Upload a local file
-result = client.upload_local_file(
+result = client.upload_file(
     file_path="/path/to/dataset.zip",
     user_email="user@example.com",
     dataset_name="My Dataset",
@@ -813,12 +827,12 @@ result = client.upload_local_file(
     team_uuid="team_123"
 )
 
-job_id = result['job_id']
+job_id = result.job_id
 print(f"Upload started: {job_id}")
 
 # Monitor progress
 final_status = client.wait_for_completion(job_id, timeout=1800)
-print(f"Upload completed: {final_status['status']}")
+print(f"Upload completed: {final_status.status}")
 ```
 
 #### Frontend Integration

@@ -127,8 +127,9 @@ VISUS_TEMP={directories['tmp']}
     
     print("🔧 Next steps:")
     print("1. Add the configuration from localhost_env_config.txt to your env.local file")
-    print("2. Start the FastAPI server: python start_fastapi_server.py")
-    print("3. Test with: python example_unified_upload.py")
+    print("2. Install dependencies: pip install -r requirements_fastapi.txt")
+    print("3. Start the FastAPI server: python start_fastapi_server.py --port 5001 --api-type unified")
+    print("4. Test with: python example_unified_upload.py")
     print()
     
     # Test directory access
@@ -187,5 +188,6 @@ if __name__ == "__main__":
     print("📝 To use these directories:")
     print("1. Copy the configuration from localhost_env_config.txt to your env.local")
     print("2. Set environment variables: source env.local")
-    print("3. Start the server: python start_fastapi_server.py")
-    print("4. Test uploads: python example_unified_upload.py")
+    print("3. Install dependencies: pip install -r requirements_fastapi.txt")
+    print("4. Start the server: python start_fastapi_server.py --port 5001 --api-type unified")
+    print("5. Test uploads: python example_unified_upload.py")

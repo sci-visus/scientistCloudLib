@@ -55,11 +55,27 @@ export AUTH0_CLIENT_SECRET="your-client-secret"
 ```
 
 ### 3. Start the Server
+
+**Option A: Using Docker (Recommended)**:
 ```bash
-# For large files (TB-scale)
+cd /path/to/scientistCloudLib/Docker
+./start.sh up --env-file ../../SCLib_TryTest/env.local
+# Server will be available at http://localhost:5001
+```
+
+**Option B: Direct Python execution**:
+```bash
+# First install dependencies
+cd ${SCLIB_HOME}
+pip install -r requirements_fastapi.txt
+
+# For unified API (handles both small and large files automatically)
+python start_fastapi_server.py --api-type unified --port 5001
+
+# For large files only (TB-scale)
 python start_fastapi_server.py --api-type large-files --port 5001
 
-# For standard files
+# For standard files only (up to 1GB)
 python start_fastapi_server.py --api-type standard --port 5000
 ```
 
