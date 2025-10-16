@@ -124,14 +124,17 @@ fi
 
 print_info "Using environment file: $ENV_FILE"
 
-# Copy the environment file to .env for Docker Compose to use
-print_info "Copying $ENV_FILE to .env for Docker Compose..."
-cp "$ENV_FILE" .env
+# Copy the environment file to .env for Docker Compose to use (only if .env doesn't exist)
+if [ ! -f ".env" ]; then
+    print_info "Copying $ENV_FILE to .env for Docker Compose..."
+    cp "$ENV_FILE" .env
+    print_success "Environment file prepared: .env"
+else
+    print_info "Using existing .env file"
+fi
 
 # Keep the original MongoDB URL (cloud or local)
 print_info "Using MongoDB URL as provided in environment file"
-
-print_success "Environment file prepared: .env"
 
 # Build docker-compose command (Docker Compose will automatically use .env file)
 COMPOSE_CMD="docker-compose -f $COMPOSE_FILE"
