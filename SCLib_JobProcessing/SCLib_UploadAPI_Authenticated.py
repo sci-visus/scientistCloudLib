@@ -317,15 +317,14 @@ async def upload_file(
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier for adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset"),
-    auth_result: AuthResult = Depends(optional_auth),
+    auth_result: AuthResult = Depends(require_auth),
     processor: Any = Depends(get_processor)
 ):
     """
-    Upload a file with automatic handling and optional authentication.
+    Upload a file with automatic handling and required authentication.
     
-    This is the main upload endpoint that supports both authenticated and unauthenticated uploads.
-    If authenticated via token, the authenticated user's email will be used.
-    If not authenticated, the user_email parameter is required.
+    This is the main upload endpoint that requires JWT token authentication.
+    The authenticated user's email will be automatically extracted from the token.
     
     Files larger than 100MB are automatically handled with chunked uploads.
     Smaller files use standard upload for better performance.

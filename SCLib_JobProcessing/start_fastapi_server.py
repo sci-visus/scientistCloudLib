@@ -154,8 +154,8 @@ def create_temp_directories():
 def main():
     """Main startup function."""
     parser = argparse.ArgumentParser(description="Start ScientistCloud FastAPI Server")
-    parser.add_argument("--api-type", choices=["unified", "standard", "large-files"], default="unified",
-                       help="Type of API to start (default: unified)")
+    parser.add_argument("--api-type", choices=["authenticated", "unified", "standard", "large-files"], default="authenticated",
+                       help="Type of API to start (default: authenticated)")
     parser.add_argument("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=5000, help="Port to bind to (default: 5000)")
     parser.add_argument("--workers", type=int, default=1, help="Number of workers (default: 1)")
@@ -200,7 +200,10 @@ def main():
     
     # Import and start the appropriate API
     try:
-        if args.api_type == "unified":
+        if args.api_type == "authenticated":
+            from SCLib_UploadAPI_Authenticated import app, upload_processor
+            print("🔐 Starting Authenticated API (JWT token required)")
+        elif args.api_type == "unified":
             from SCLib_UploadAPI_Unified import app, upload_processor
             print("🎯 Starting Unified API (automatic file size handling)")
         elif args.api_type == "large-files":
