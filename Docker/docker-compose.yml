@@ -201,4 +201,5 @@ volumes:
 
 networks:
   sclib_network:
-    driver: bridge
+    external: true
+    name: docker_visstore_web
