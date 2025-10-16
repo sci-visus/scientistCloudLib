@@ -6,7 +6,7 @@
 set -e
 
 # Default values
-ENV_FILE="docker.env"
+ENV_FILE=".env"
 COMPOSE_FILE="docker-compose.yml"
 SERVICES=""
 
@@ -50,24 +50,24 @@ show_usage() {
     echo "  clean       Remove all containers and volumes"
     echo ""
     echo "Options:"
-    echo "  --env-file FILE     Use specific environment file (default: docker.env)"
+    echo "  --env-file FILE     Use specific environment file (default: .env)"
     echo "  --services SERVICE  Start only specific services (comma-separated)"
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
     echo "  $0 up --env-file env.local"
     echo "  $0 up --env-file env.production"
-    echo "  $0 up --env-file ../SCLib_TryTest/env.local"
+    echo "  $0 up --env-file ../../SCLib_TryTest/env.local"
     echo "  $0 up --services mongodb,fastapi"
     echo "  $0 logs --env-file env.local"
     echo ""
     echo "Available environment files:"
-    if [ -d "../SCLib_TryTest" ]; then
+    if [ -d "../../SCLib_TryTest" ]; then
         echo "  - env.local (from SCLib_TryTest)"
         echo "  - env.production (create as needed)"
         echo "  - env.development (create as needed)"
     fi
-    echo "  - docker.env (default Docker configuration)"
+    echo "  - .env (default Docker configuration)"
 }
 
 # Parse command line arguments
@@ -107,16 +107,16 @@ fi
 # Check if environment file exists
 if [ ! -f "$ENV_FILE" ]; then
     # Try to find the env file in common locations
-    if [ -f "../SCLib_TryTest/$ENV_FILE" ]; then
-        ENV_FILE="../SCLib_TryTest/$ENV_FILE"
+    if [ -f "../../SCLib_TryTest/$ENV_FILE" ]; then
+        ENV_FILE="../../SCLib_TryTest/$ENV_FILE"
         print_info "Found environment file at: $ENV_FILE"
     else
         print_error "Environment file not found: $ENV_FILE"
         print_info "Available files:"
         ls -la *.env 2>/dev/null || echo "  No .env files found in current directory"
-        if [ -d "../SCLib_TryTest" ]; then
-            echo "  Files in ../SCLib_TryTest/:"
-            ls -la ../SCLib_TryTest/env.* 2>/dev/null || echo "    No env.* files found"
+        if [ -d "../../SCLib_TryTest" ]; then
+            echo "  Files in ../../SCLib_TryTest/:"
+            ls -la ../../SCLib_TryTest/env.* 2>/dev/null || echo "    No env.* files found"
         fi
         exit 1
     fi

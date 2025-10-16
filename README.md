@@ -19,6 +19,9 @@ cd /Users/amygooch/GIT/ScientistCloud_2.0/scientistCloudLib/Docker
 # Start all services (auth + upload + database)
 ./start.sh up
 
+# Or specify a custom environment file
+./start.sh up --env-file /path/to/your/env.file
+
 # Verify services are running
 curl http://localhost:8001/health  # Authentication service
 curl http://localhost:5001/health  # Upload service
@@ -209,6 +212,9 @@ curl -H "Authorization: Bearer $TOKEN" \
 # Start all services
 ./start.sh up
 
+# Start with custom environment file
+./start.sh up --env-file /path/to/your/env.file
+
 # Check service status
 ./start.sh status
 
@@ -275,8 +281,49 @@ FASTAPI_PORT=5001
 
 ### Environment Files
 
+The system supports multiple environment file formats for different deployment scenarios:
+
 - **`Docker/docker.env.template`** - Template for Docker configuration
 - **`SCLib_TryTest/env.local`** - Local development configuration
+- **`SCLib_TryTest/env.scientistcloud`** - Production configuration for scientistcloud.com
+
+#### Using Environment Files
+
+```bash
+# Start services with specific environment file
+./start.sh up --env-file /path/to/your/env.file
+
+# Examples:
+./start.sh up --env-file SCLib_TryTest/env.local          # Local development
+./start.sh up --env-file SCLib_TryTest/env.scientistcloud # Production deployment
+```
+
+#### Environment File Structure
+
+Environment files should contain all necessary configuration variables:
+
+```bash
+# Database Configuration
+MONGO_URL=mongodb://admin:password@mongodb:27017/SCLib_Test
+DB_NAME=SCLib_Test
+
+# JWT Configuration
+SECRET_KEY=your-secret-key
+JWT_EXPIRY_HOURS=24
+REFRESH_TOKEN_EXPIRY_DAYS=30
+
+# Service Configuration
+AUTH_HOST=0.0.0.0
+AUTH_PORT=8001
+FASTAPI_HOST=0.0.0.0
+FASTAPI_PORT=5001
+
+# Auth0 Integration (Optional)
+AUTH0_DOMAIN=your-auth0-domain
+AUTH0_CLIENT_ID=your-auth0-client-id
+AUTH0_CLIENT_SECRET=your-auth0-client-secret
+AUTH0_AUDIENCE=your-auth0-audience
+```
 
 ## 🚀 **Getting Started**
 
@@ -284,7 +331,12 @@ FASTAPI_PORT=5001
 
 ```bash
 cd /Users/amygooch/GIT/ScientistCloud_2.0/scientistCloudLib/Docker
+
+# Start with default configuration
 ./start.sh up
+
+# Or start with specific environment file
+./start.sh up --env-file ../SCLib_TryTest/env.local
 ```
 
 ### 2. Test Authentication
@@ -347,6 +399,9 @@ curl http://localhost:5001/health
    
    # View logs
    ./start.sh logs
+   
+   # Check environment file
+   ./start.sh up --env-file /path/to/your/env.file
    ```
 
 2. **Authentication failures**
@@ -384,6 +439,7 @@ For issues and questions:
 3. Test individual services: `curl http://localhost:8001/health`
 4. Check database connectivity
 5. Verify environment variables
+6. Test with different environment file: `./start.sh up --env-file /path/to/env.file`
 
 ## 🎯 **Next Steps**
 
