@@ -148,7 +148,7 @@ case $COMMAND in
         
         # Build the services first
         print_info "Building services..."
-        $COMPOSE_CMD build auth fastapi
+        $COMPOSE_CMD build --no-cache auth fastapi
         
         # Start services
         $COMPOSE_CMD up -d
@@ -192,7 +192,7 @@ case $COMMAND in
         
     build)
         print_info "Building services..."
-        $COMPOSE_CMD build auth fastapi
+        $COMPOSE_CMD build --no-cache auth fastapi
         print_success "Build completed!"
         ;;
         
