@@ -86,12 +86,15 @@ def load_env_file(env_path: str = None):
 
 def setup_logging(level: str = "INFO"):
     """Setup logging configuration."""
+    # Ensure logs directory exists
+    os.makedirs('logs', exist_ok=True)
+    
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler('scientistcloud_api.log')
+            logging.FileHandler('logs/scientistcloud_api.log')
         ]
     )
 
