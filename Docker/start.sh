@@ -148,14 +148,16 @@ case $COMMAND in
         print_info "Environment: $ENV_FILE"
         print_info "Services: ${SERVICES:-all}"
         
-        # Build the FastAPI service first
-        print_info "Building FastAPI service..."
-        $COMPOSE_CMD build fastapi
+        # Build the services first
+        print_info "Building services..."
+        $COMPOSE_CMD build auth fastapi
         
         # Start services
         $COMPOSE_CMD up -d
         
         print_success "Services started successfully!"
+        print_info "Authentication API: http://localhost:8001"
+        print_info "Auth API Documentation: http://localhost:8001/docs"
         print_info "FastAPI API: http://localhost:5001"
         print_info "API Documentation: http://localhost:5001/docs"
         print_info "MongoDB: localhost:27017"
@@ -191,8 +193,8 @@ case $COMMAND in
         ;;
         
     build)
-        print_info "Building FastAPI service..."
-        $COMPOSE_CMD build fastapi
+        print_info "Building services..."
+        $COMPOSE_CMD build auth fastapi
         print_success "Build completed!"
         ;;
         

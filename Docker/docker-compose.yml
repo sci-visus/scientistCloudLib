@@ -5,7 +5,7 @@ services:
   # MongoDB Database Service (Disabled - using cloud MongoDB)
   # mongodb:
   #   image: mongo:7.0
-  #   container_name: scientistcloud_mongodb
+  #   container_name: sclib_mongodb
   #   restart: unless-stopped
   #   ports:
   #     - "27017:27017"
@@ -17,7 +17,7 @@ services:
   #     - mongodb_data:/data/db
   #     - ./mongo-init:/docker-entrypoint-initdb.d
   #   networks:
-  #     - scientistcloud_network
+  #     - sclib_network
   #   healthcheck:
   #     test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
   #     interval: 30s
@@ -25,12 +25,59 @@ services:
   #     retries: 3
   #     start_period: 40s
 
+  # SCLib Authentication Service
+  auth:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.auth
+    container_name: sclib_auth
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      # JWT Configuration
+      SECRET_KEY: ${SECRET_KEY}
+      JWT_EXPIRY_HOURS: ${JWT_EXPIRY_HOURS:-24}
+      REFRESH_TOKEN_EXPIRY_DAYS: ${REFRESH_TOKEN_EXPIRY_DAYS:-30}
+      
+      # Database connection (shared with main app)
+      MONGO_URL: ${MONGO_URL}
+      DB_NAME: ${DB_NAME}
+      DB_PASS: ${DB_PASS}
+      DB_HOST: ${DB_HOST}
+      
+      # Auth0 Configuration (shared with main app)
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTHO_CLIENT_ID: ${AUTHO_CLIENT_ID}
+      AUTHO_CLIENT_SECRET: ${AUTHO_CLIENT_SECRET}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-}
+      
+      # Server Configuration
+      AUTH_HOST: 0.0.0.0
+      AUTH_PORT: 8001
+      AUTH_LOG_LEVEL: ${AUTH_LOG_LEVEL:-info}
+      
+      # SCLib Environment
+      SCLIB_HOME: /app
+      SCLIB_ENV_FILE: /app/.env
+    volumes:
+      - ../SCLib_Auth:/app
+      - auth_logs:/app/logs
+    networks:
+      - sclib_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
   # FastAPI Application Service
   fastapi:
     build:
       context: ..
       dockerfile: Docker/Dockerfile.fastapi
-    container_name: scientistcloud_fastapi
+    container_name: sclib_fastapi
     restart: unless-stopped
     ports:
       - "5001:5000"
@@ -89,7 +136,7 @@ services:
       - ${VISUS_DATASETS}:/mnt/visus_datasets
       - fastapi_logs:/app/logs
     networks:
-      - scientistcloud_network
+      - sclib_network
     # depends_on:
     #   mongodb:
     #     condition: service_healthy
@@ -103,7 +150,7 @@ services:
   # Nginx Reverse Proxy (Optional but recommended)
   # nginx:
   #   image: nginx:alpine
-  #   container_name: scientistcloud_nginx
+  #   container_name: sclib_nginx
   #   restart: unless-stopped
   #   ports:
   #     - "80:80"
@@ -114,7 +161,7 @@ services:
   #     - nginx_logs:/var/log/nginx
   #     - ./ssl:/etc/nginx/ssl:ro
   #   networks:
-  #     - scientistcloud_network
+  #     - sclib_network
   #   depends_on:
   #     - fastapi
   #   healthcheck:
@@ -126,14 +173,14 @@ services:
   # Redis for background tasks (Optional)
   redis:
     image: redis:7-alpine
-    container_name: scientistcloud_redis
+    container_name: sclib_redis
     restart: unless-stopped
     ports:
       - "6379:6379"
     volumes:
       - redis_data:/data
     networks:
-      - scientistcloud_network
+      - sclib_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -145,11 +192,13 @@ volumes:
     driver: local
   fastapi_logs:
     driver: local
+  auth_logs:
+    driver: local
   nginx_logs:
     driver: local
   redis_data:
     driver: local
 
 networks:
-  scientistcloud_network:
+  sclib_network:
     driver: bridge
