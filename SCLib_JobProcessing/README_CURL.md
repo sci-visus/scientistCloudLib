@@ -1,22 +1,96 @@
 # 🚀 ScientistCloud Upload API - Curl Commands
 
-This guide provides curl commands for interacting with the ScientistCloud Upload API directly from the command line.
+This guide provides curl commands for interacting with the ScientistCloud Upload API directly from the command line with JWT authentication.
 
 ## 📋 **Prerequisites**
 
-1. **FastAPI Server Running**: Make sure the server is started
+1. **Docker Services Running**: Make sure both authentication and upload services are started
    ```bash
    # Using Docker (recommended)
    cd /path/to/scientistCloudLib/Docker
    ./start.sh up --env-file ../../SCLib_TryTest/env.local
    
-   # Or directly with Python
-   source ${SCLIB_MYTEST}/env.local
-   cd ${SCLIB_HOME}
-   python start_fastapi_server.py --port 5001 --api-type unified
+   # Verify services are running
+   curl http://localhost:8001/health  # Auth service
+   curl http://localhost:5001/health  # Upload service
    ```
 
-2. **Server URL**: All examples use `http://localhost:5001` (Docker) or `http://localhost:8000` (direct) - adjust if different
+2. **Server URLs**: 
+   - **Authentication Service**: `http://localhost:8001` (Port 8001)
+   - **Upload Service**: `http://localhost:5001` (Port 5001)
+   - **API Documentation**: 
+     - Auth: `http://localhost:8001/docs`
+     - Upload: `http://localhost:5001/docs`
+
+## 🔐 **Authentication**
+
+**All upload operations now require JWT authentication!** Here's how to authenticate:
+
+### 1. Login to Get JWT Token
+
+```bash
+# Login and get JWT token
+curl -X POST "http://localhost:8001/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email": "user@example.com"}'
+
+# Response:
+# {
+#   "success": true,
+#   "data": {
+#     "access_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+#     "refresh_token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...",
+#     "expires_in": 86400,
+#     "token_type": "Bearer"
+#   }
+# }
+```
+
+### 2. Extract Token for Use
+
+```bash
+# Extract token for use in subsequent requests
+TOKEN=$(curl -s -X POST "http://localhost:8001/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email": "user@example.com"}' | \
+     jq -r '.data.access_token')
+
+echo "Token: $TOKEN"
+```
+
+### 3. Check Authentication Status
+
+```bash
+# Check if authentication is valid
+curl -H "Authorization: Bearer $TOKEN" \
+     "http://localhost:5001/api/auth/status"
+
+# Response:
+# {
+#   "authenticated": true,
+#   "user": {
+#     "email": "user@example.com",
+#     "name": "User Name"
+#   }
+# }
+```
+
+### 4. Refresh Token (if expired)
+
+```bash
+# Refresh access token using refresh token
+curl -X POST "http://localhost:8001/api/auth/refresh" \
+     -H "Content-Type: application/json" \
+     -d '{"refresh_token": "YOUR_REFRESH_TOKEN"}'
+```
+
+### 5. Logout
+
+```bash
+# Logout and revoke tokens
+curl -X POST "http://localhost:8001/api/auth/logout" \
+     -H "Authorization: Bearer $TOKEN"
+```
 
 ## 🔍 **API Discovery & Status**
 
@@ -37,15 +111,24 @@ curl -s http://localhost:5001/api/upload/limits
 
 ## 📁 **File Upload Methods**
 
+**All upload operations now require JWT authentication!** Make sure to include the `Authorization: Bearer $TOKEN` header in all requests.
+
 ### 1. Local File Upload (Standard)
 
-Upload a file directly from your local filesystem:
+Upload a file directly from your local filesystem with authentication:
 
 ```bash
+# First, get authentication token
+TOKEN=$(curl -s -X POST "http://localhost:8001/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email": "user@example.com"}' | \
+     jq -r '.data.access_token')
+
+# Upload file with authentication
 curl -X POST "http://localhost:5001/api/upload/upload" \
+  -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: multipart/form-data" \
   -F "file=@/path/to/your/file.tiff" \
-  -F "user_email=user@example.com" \
   -F "dataset_name=My Dataset" \
   -F "sensor=TIFF" \
   -F "convert=true" \

@@ -12,11 +12,64 @@ This directory contains the enhanced job processing system for ScientistCloud 2.
 - **Resumable Uploads**: Handle network interruptions gracefully
 - **Parallel Processing**: Multiple concurrent upload streams
 - **Automatic Handling**: No need to choose between standard and large file APIs!
+- **🔐 JWT Authentication**: Secure token-based authorization for all operations
 
 ### 📚 Upload Methods Documentation
 
 For detailed information about different upload methods and when to use them, see:
 - **[README_upload_methods.md](README_upload_methods.md)** - Complete guide to upload methods
+
+### 🔐 Authentication Integration
+
+**JWT Token-Based Authentication is now fully integrated!** All upload operations require authentication:
+
+- **Authentication Service**: `http://localhost:8001` (Port 8001)
+- **Upload Service**: `http://localhost:5001` (Port 5001)
+- **Token Management**: Automatic token refresh and validation
+- **Secure Operations**: All uploads require valid JWT tokens
+
+#### Quick Authentication Example:
+
+```bash
+# 1. Login to get JWT token
+TOKEN=$(curl -s -X POST "http://localhost:8001/api/auth/login" \
+     -H "Content-Type: application/json" \
+     -d '{"email": "user@example.com"}' | \
+     jq -r '.data.access_token')
+
+# 2. Upload file with authentication
+curl -X POST "http://localhost:5001/api/upload/upload" \
+     -H "Authorization: Bearer $TOKEN" \
+     -F "file=@/path/to/your/file.tiff" \
+     -F "dataset_name=My Dataset" \
+     -F "sensor=TIFF"
+
+# 3. Check upload status
+curl -H "Authorization: Bearer $TOKEN" \
+     "http://localhost:5001/api/upload/status/JOB_ID"
+```
+
+#### Python Authentication Example:
+
+```python
+from SCLib_Auth import AuthenticatedUploadClient, AuthenticatedScientistCloudClient
+
+# Initialize clients
+auth_client = AuthenticatedUploadClient("http://localhost:8001", "http://localhost:5001")
+upload_client = AuthenticatedScientistCloudClient(auth_client)
+
+# Login and upload
+if auth_client.login("user@example.com"):
+    result = upload_client.upload_file_authenticated(
+        file_path="/path/to/file.tiff",
+        dataset_name="My Dataset",
+        sensor="TIFF"
+    )
+```
+
+For complete authentication examples, see:
+- **[README_CURL.md](README_CURL.md)** - Curl-based authentication examples
+- **[../SCLib_TryTest/README_AUTHENTICATION_EXAMPLES.md](../SCLib_TryTest/README_AUTHENTICATION_EXAMPLES.md)** - Comprehensive authentication guide
 
 ### 🎯 Unified API - No More Choices!
 
