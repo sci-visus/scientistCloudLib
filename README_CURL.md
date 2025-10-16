@@ -135,10 +135,22 @@ curl -X POST "http://localhost:8001/api/auth/logout" \
 
 ## 📤 **File Upload Operations**
 
+> **⚠️ Important for UI Development:** All upload operations require the complete set of fields shown below. The UI must collect all these fields from users to ensure proper dataset organization, team access control, and searchability.
+
+### **Required Fields for UI:**
+- `dataset_name` - Human-readable dataset name
+- `sensor` - Data type (TIFF, IDX, HDF5, RAW, CSV, JSON)
+- `convert` - Whether to convert to IDX format (true/false)
+- `is_public` - Public/private access control (true/false)
+- `folder` - UI organization folder (required for proper organization)
+- `team_uuid` - Team association for sharing (required for team access)
+- `tags` - Comma-separated searchable tags (required for discovery)
+- `description` - Detailed dataset description (required for understanding)
+
 ### 1. Upload Single File
 
 ```bash
-# Upload file with authentication
+# Upload file with authentication (all fields required for UI)
 curl -X POST "http://localhost:5001/api/upload/upload" \
      -H "Authorization: Bearer $TOKEN" \
      -F "file=@/path/to/your/file.tiff" \
@@ -147,7 +159,9 @@ curl -X POST "http://localhost:5001/api/upload/upload" \
      -F "convert=true" \
      -F "is_public=false" \
      -F "folder=my_folder" \
-     -F "team_uuid=optional-team-uuid"
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=research,test,2024" \
+     -F "description=My dataset description"
 
 # Response:
 # {
@@ -168,7 +182,11 @@ curl -X POST "http://localhost:5001/api/upload/upload" \
      -F "dataset_name=Large Dataset" \
      -F "sensor=TIFF" \
      -F "convert=true" \
-     -F "is_public=false"
+     -F "is_public=false" \
+     -F "folder=LargeFiles" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=large,research,data" \
+     -F "description=Large dataset for research"
 
 # Response:
 # {
@@ -189,7 +207,11 @@ curl -X POST "http://localhost:5001/api/upload/upload" \
      -F "dataset_name=URL Dataset" \
      -F "sensor=TIFF" \
      -F "convert=false" \
-     -F "is_public=false"
+     -F "is_public=false" \
+     -F "folder=External" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=url,external,reference" \
+     -F "description=External dataset from URL"
 ```
 
 ### 4. Add Files to Existing Dataset
@@ -327,7 +349,13 @@ curl -X POST "http://localhost:5001/api/upload/upload" \
      -F "file_id=GOOGLE_DRIVE_FILE_ID" \
      -F "service_account_file=@/path/to/service-account.json" \
      -F "dataset_name=Google Drive Dataset" \
-     -F "sensor=TIFF"
+     -F "sensor=TIFF" \
+     -F "convert=true" \
+     -F "is_public=false" \
+     -F "folder=GoogleDrive" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=google,drive,cloud" \
+     -F "description=Dataset from Google Drive"
 ```
 
 ### 2. S3 Upload
@@ -342,7 +370,13 @@ curl -X POST "http://localhost:5001/api/upload/upload" \
      -F "access_key_id=AWS_ACCESS_KEY" \
      -F "secret_access_key=AWS_SECRET_KEY" \
      -F "dataset_name=S3 Dataset" \
-     -F "sensor=TIFF"
+     -F "sensor=TIFF" \
+     -F "convert=true" \
+     -F "is_public=false" \
+     -F "folder=S3" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=s3,aws,cloud" \
+     -F "description=Dataset from S3 bucket"
 ```
 
 ### 3. Batch Operations
@@ -355,7 +389,13 @@ for file in /path/to/files/*.tiff; do
          -H "Authorization: Bearer $TOKEN" \
          -F "file=@$file" \
          -F "dataset_name=Batch Upload" \
-         -F "sensor=TIFF"
+         -F "sensor=TIFF" \
+         -F "convert=true" \
+         -F "is_public=false" \
+         -F "folder=Batch" \
+         -F "team_uuid=DevTestTeam" \
+         -F "tags=batch,multiple,files" \
+         -F "description=Batch upload of multiple files"
     echo "Uploaded $file"
 done
 ```
@@ -380,7 +420,14 @@ fi
 RESPONSE=$(curl -s -X POST "http://localhost:5001/api/upload/upload" \
      -H "Authorization: Bearer $TOKEN" \
      -F "file=@/path/to/file.tiff" \
-     -F "dataset_name=My Dataset")
+     -F "dataset_name=My Dataset" \
+     -F "sensor=TIFF" \
+     -F "convert=true" \
+     -F "is_public=false" \
+     -F "folder=Test" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=test,error,handling" \
+     -F "description=Test upload with error handling")
 
 # Check for errors
 if echo "$RESPONSE" | grep -q "error"; then
@@ -401,7 +448,14 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     RESPONSE=$(curl -s -X POST "http://localhost:5001/api/upload/upload" \
          -H "Authorization: Bearer $TOKEN" \
          -F "file=@/path/to/file.tiff" \
-         -F "dataset_name=My Dataset")
+         -F "dataset_name=My Dataset" \
+         -F "sensor=TIFF" \
+         -F "convert=true" \
+         -F "is_public=false" \
+         -F "folder=Test" \
+         -F "team_uuid=DevTestTeam" \
+         -F "tags=test,retry,logic" \
+         -F "description=Test upload with retry logic")
     
     if echo "$RESPONSE" | grep -q "job_id"; then
         echo "Upload successful: $RESPONSE"
@@ -450,7 +504,13 @@ UPLOAD_RESPONSE=$(curl -s -X POST "http://localhost:5001/api/upload/upload" \
      -H "Authorization: Bearer $TOKEN" \
      -F "file=@/path/to/your/file.tiff" \
      -F "dataset_name=My Dataset" \
-     -F "sensor=TIFF")
+     -F "sensor=TIFF" \
+     -F "convert=true" \
+     -F "is_public=false" \
+     -F "folder=Workflow" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=workflow,complete,example" \
+     -F "description=Complete workflow example")
 
 JOB_ID=$(echo "$UPLOAD_RESPONSE" | jq -r '.job_id')
 
