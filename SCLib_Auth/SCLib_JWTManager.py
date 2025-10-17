@@ -58,6 +58,9 @@ class SCLib_JWTManager:
         # Generate unique token ID
         token_id = secrets.token_urlsafe(32)
         
+        # Get audience from environment (should match Auth0 audience)
+        audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
+        
         payload = {
             'user_id': user_id,
             'email': email,
@@ -65,7 +68,7 @@ class SCLib_JWTManager:
             'exp': expiry,
             'jti': token_id,  # JWT ID for token tracking
             'iss': 'sclib-auth',
-            'aud': 'sclib-api',
+            'aud': audience,
             'type': 'access'
         }
         
@@ -92,6 +95,9 @@ class SCLib_JWTManager:
         now = int(time.time())
         expiry = now + (expires_days * 24 * 3600)
         
+        # Get audience from environment (should match Auth0 audience)
+        audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
+        
         payload = {
             'user_id': user_id,
             'email': email,
@@ -99,7 +105,7 @@ class SCLib_JWTManager:
             'exp': expiry,
             'jti': secrets.token_urlsafe(32),
             'iss': 'sclib-auth',
-            'aud': 'sclib-api',
+            'aud': audience,
             'type': 'refresh'
         }
         
@@ -121,7 +127,17 @@ class SCLib_JWTManager:
             jwt.InvalidTokenError: If token is invalid
         """
         try:
-            payload = jwt.decode(token, self.secret_key, algorithms=[self.algorithm])
+            # Get audience from environment (should match Auth0 audience)
+            audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
+            
+            # Decode with audience validation
+            payload = jwt.decode(
+                token, 
+                self.secret_key, 
+                algorithms=[self.algorithm],
+                audience=audience,
+                issuer='sclib-auth'
+            )
             
             # Validate required fields
             if 'user_id' not in payload:
