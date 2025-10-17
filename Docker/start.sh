@@ -205,13 +205,12 @@ case $COMMAND in
         ;;
         
     clean)
-        print_warning "This will remove all containers and volumes. Are you sure? (y/N)"
+        print_warning "This will remove SCLib containers and volumes. Are you sure? (y/N)"
         read -r response
         if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-            print_info "Cleaning up Docker resources..."
-            $COMPOSE_CMD down -v --remove-orphans
-            docker system prune -f
-            print_success "Cleanup completed!"
+            print_info "Cleaning up SCLib Docker resources..."
+            $COMPOSE_CMD down -v --remove-orphans auth fastapi redis
+            print_success "SCLib cleanup completed!"
         else
             print_info "Cleanup cancelled."
         fi
