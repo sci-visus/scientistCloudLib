@@ -50,21 +50,21 @@ show_usage() {
     echo "  clean       Remove all containers and volumes"
     echo ""
     echo "Options:"
-    echo "  --env-file FILE     Use specific environment file (required)"
+    echo "  --env-file FILE     Use specific environment file (optional if .env exists)"
     echo "  --services SERVICE  Start only specific services (comma-separated)"
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
-    echo "  $0 up --env-file env.local"
-    echo "  $0 up --env-file env.production"
-    echo "  $0 up --env-file ../../SCLib_TryTest/env.local"
-    echo "  $0 up --services mongodb,fastapi"
-    echo "  $0 logs --env-file env.local"
+    echo "  $0 up                                    # Use existing .env file"
+    echo "  $0 up --env-file env.local              # Use specific env file"
+    echo "  $0 up --env-file env.production         # Use production env file"
+    echo "  $0 up --services mongodb,fastapi        # Start specific services"
+    echo "  $0 logs                                 # Use existing .env file"
     echo ""
     echo "Environment files:"
-    echo "  - You must provide a valid environment file using --env-file"
+    echo "  - If .env exists, it will be used automatically"
+    echo "  - Use --env-file to specify a different environment file"
     echo "  - Common names: env.local, env.production, env.development"
-    echo "  - The file must exist and be accessible from the current directory"
 }
 
 # Parse command line arguments
@@ -101,31 +101,39 @@ if [ -z "$COMMAND" ]; then
     exit 1
 fi
 
-# Check if environment file is provided
+# Handle environment file logic
 if [ -z "$ENV_FILE" ]; then
-    print_error "No environment file provided"
-    print_info "You must specify an environment file using --env-file"
-    show_usage
-    exit 1
-fi
-
-# Check if environment file exists
-if [ ! -f "$ENV_FILE" ]; then
-    print_error "Environment file not found: $ENV_FILE"
-    print_info "Please specify a valid environment file using --env-file"
-    print_info "Example: $0 up --env-file /path/to/your/env.file"
-    exit 1
-fi
-
-print_info "Using environment file: $ENV_FILE"
-
-# Copy the environment file to .env for Docker Compose to use (only if .env doesn't exist)
-if [ ! -f ".env" ]; then
-    print_info "Copying $ENV_FILE to .env for Docker Compose..."
-    cp "$ENV_FILE" .env
-    print_success "Environment file prepared: .env"
+    # No env file specified - check if .env exists
+    if [ -f ".env" ]; then
+        print_info "Using existing .env file"
+        ENV_FILE=".env"
+    else
+        print_error "No environment file provided and no .env file found"
+        print_info "You must either:"
+        print_info "  1. Provide an environment file using --env-file"
+        print_info "  2. Have a .env file in the current directory"
+        show_usage
+        exit 1
+    fi
 else
-    print_info "Using existing .env file"
+    # Env file specified - check if it exists
+    if [ ! -f "$ENV_FILE" ]; then
+        print_error "Environment file not found: $ENV_FILE"
+        print_info "Please specify a valid environment file using --env-file"
+        print_info "Example: $0 up --env-file /path/to/your/env.file"
+        exit 1
+    fi
+    
+    print_info "Using environment file: $ENV_FILE"
+    
+    # Copy the environment file to .env for Docker Compose to use (only if .env doesn't exist)
+    if [ ! -f ".env" ]; then
+        print_info "Copying $ENV_FILE to .env for Docker Compose..."
+        cp "$ENV_FILE" .env
+        print_success "Environment file prepared: .env"
+    else
+        print_info "Using existing .env file (ignoring --env-file)"
+    fi
 fi
 
 # Keep the original MongoDB URL (cloud or local)
