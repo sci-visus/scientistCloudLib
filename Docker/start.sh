@@ -231,11 +231,11 @@ case $COMMAND in
         read -r response
         if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
             print_info "Cleaning up SCLib Docker resources..."
-            # Stop and remove containers first
+            # Stop and remove only SCLib containers
             $COMPOSE_CMD stop auth fastapi redis
             $COMPOSE_CMD rm -f auth fastapi redis
-            # Remove volumes
-            $COMPOSE_CMD down -v --remove-orphans
+            # Remove only SCLib volumes (not all volumes)
+            docker volume rm docker_fastapi_logs docker_auth_logs docker_redis_data 2>/dev/null || true
             print_success "SCLib cleanup completed!"
         else
             print_info "Cleanup cancelled."
