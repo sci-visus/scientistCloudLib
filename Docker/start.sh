@@ -60,11 +60,15 @@ show_usage() {
     echo "  $0 up --env-file env.production         # Use production env file"
     echo "  $0 up --services mongodb,fastapi        # Start specific services"
     echo "  $0 logs                                 # Use existing .env file"
+    echo "  $0 clean                                # No env file needed"
+    echo "  $0 down                                 # No env file needed"
+    echo "  $0 status                               # No env file needed"
     echo ""
     echo "Environment files:"
+    echo "  - Commands requiring env files: up, build, restart, logs"
+    echo "  - Commands NOT requiring env files: clean, down, status"
     echo "  - If .env exists, it will be used automatically"
     echo "  - Use --env-file to specify a different environment file"
-    echo "  - Common names: env.local, env.production, env.development"
 }
 
 # Parse command line arguments
@@ -101,39 +105,57 @@ if [ -z "$COMMAND" ]; then
     exit 1
 fi
 
+# Commands that don't require environment files
+NO_ENV_COMMANDS=("clean" "down" "status")
+
+# Check if this command needs an environment file
+NEEDS_ENV=true
+for cmd in "${NO_ENV_COMMANDS[@]}"; do
+    if [ "$COMMAND" = "$cmd" ]; then
+        NEEDS_ENV=false
+        break
+    fi
+done
+
 # Handle environment file logic
-if [ -z "$ENV_FILE" ]; then
-    # No env file specified - check if .env exists
-    if [ -f ".env" ]; then
-        print_info "Using existing .env file"
-        ENV_FILE=".env"
+if [ "$NEEDS_ENV" = true ]; then
+    # Commands that need environment files (up, build, restart, logs)
+    if [ -z "$ENV_FILE" ]; then
+        # No env file specified - check if .env exists
+        if [ -f ".env" ]; then
+            print_info "Using existing .env file"
+            ENV_FILE=".env"
+        else
+            print_error "No environment file provided and no .env file found"
+            print_info "You must either:"
+            print_info "  1. Provide an environment file using --env-file"
+            print_info "  2. Have a .env file in the current directory"
+            show_usage
+            exit 1
+        fi
     else
-        print_error "No environment file provided and no .env file found"
-        print_info "You must either:"
-        print_info "  1. Provide an environment file using --env-file"
-        print_info "  2. Have a .env file in the current directory"
-        show_usage
-        exit 1
+        # Env file specified - check if it exists
+        if [ ! -f "$ENV_FILE" ]; then
+            print_error "Environment file not found: $ENV_FILE"
+            print_info "Please specify a valid environment file using --env-file"
+            print_info "Example: $0 up --env-file /path/to/your/env.file"
+            exit 1
+        fi
+        
+        print_info "Using environment file: $ENV_FILE"
+        
+        # Copy the environment file to .env for Docker Compose to use (only if .env doesn't exist)
+        if [ ! -f ".env" ]; then
+            print_info "Copying $ENV_FILE to .env for Docker Compose..."
+            cp "$ENV_FILE" .env
+            print_success "Environment file prepared: .env"
+        else
+            print_info "Using existing .env file (ignoring --env-file)"
+        fi
     fi
 else
-    # Env file specified - check if it exists
-    if [ ! -f "$ENV_FILE" ]; then
-        print_error "Environment file not found: $ENV_FILE"
-        print_info "Please specify a valid environment file using --env-file"
-        print_info "Example: $0 up --env-file /path/to/your/env.file"
-        exit 1
-    fi
-    
-    print_info "Using environment file: $ENV_FILE"
-    
-    # Copy the environment file to .env for Docker Compose to use (only if .env doesn't exist)
-    if [ ! -f ".env" ]; then
-        print_info "Copying $ENV_FILE to .env for Docker Compose..."
-        cp "$ENV_FILE" .env
-        print_success "Environment file prepared: .env"
-    else
-        print_info "Using existing .env file (ignoring --env-file)"
-    fi
+    # Commands that don't need environment files
+    print_info "Command '$COMMAND' does not require environment file"
 fi
 
 # Keep the original MongoDB URL (cloud or local)
