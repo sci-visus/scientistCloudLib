@@ -165,29 +165,29 @@ case $COMMAND in
         
     down)
         print_info "Stopping ScientistCloud services..."
-        $COMPOSE_CMD down
+        $COMPOSE_CMD down auth fastapi redis
         # Clean up the .env file
         if [ -f ".env" ]; then
             rm -f .env
             print_info "Cleaned up .env file"
         fi
-        print_success "Services stopped successfully!"
+        print_success "SCLib services stopped successfully!"
         ;;
         
     restart)
         print_info "Restarting ScientistCloud services..."
-        $COMPOSE_CMD restart
-        print_success "Services restarted successfully!"
+        $COMPOSE_CMD restart auth fastapi redis
+        print_success "SCLib services restarted successfully!"
         ;;
         
     logs)
         print_info "Showing logs for ScientistCloud services..."
-        $COMPOSE_CMD logs -f
+        $COMPOSE_CMD logs -f auth fastapi redis
         ;;
         
     status)
         print_info "Status of ScientistCloud services:"
-        $COMPOSE_CMD ps
+        $COMPOSE_CMD ps auth fastapi redis
         ;;
         
     build)
