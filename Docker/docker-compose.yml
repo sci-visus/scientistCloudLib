@@ -32,8 +32,8 @@ services:
       dockerfile: Docker/Dockerfile.auth
     container_name: sclib_auth
     restart: unless-stopped
-    ports:
-      - "8001:8001"
+    # ports:
+      # - "8001:8001"  # Not needed - Nginx handles forwarding
     networks:
       - visstore_web
     environment:
@@ -80,8 +80,8 @@ services:
       dockerfile: Docker/Dockerfile.fastapi
     container_name: sclib_fastapi
     restart: unless-stopped
-    ports:
-      - "5001:5001"
+    # ports:
+      # - "5001:5001"  # Not needed - Nginx handles forwarding
     networks:
       - visstore_web
     environment:
@@ -177,8 +177,8 @@ services:
     image: redis:7-alpine
     container_name: sclib_redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    # ports:
+      # - "6379:6379"  # Not needed - Redis is internal only
     volumes:
       - redis_data:/data
     networks:
