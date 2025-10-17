@@ -32,8 +32,7 @@ services:
       dockerfile: Docker/Dockerfile.auth
     container_name: sclib_auth
     restart: unless-stopped
-    ports:
-      - "8001:8001"
+    network_mode: "host"
     environment:
       # JWT Configuration
       SECRET_KEY: ${SECRET_KEY}
@@ -64,8 +63,6 @@ services:
     volumes:
       - ../SCLib_Auth:/app
       - auth_logs:/app/logs
-    networks:
-      - sclib_network
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
       interval: 30s
@@ -80,8 +77,7 @@ services:
       dockerfile: Docker/Dockerfile.fastapi
     container_name: sclib_fastapi
     restart: unless-stopped
-    ports:
-      - "5001:5000"
+    network_mode: "host"
     environment:
       # Database connection
       MONGO_URL: ${MONGO_URL}
@@ -137,8 +133,6 @@ services:
       - ../:/app/scientistCloudLib
       - ${VISUS_DATASETS}:/mnt/visus_datasets
       - fastapi_logs:/app/logs
-    networks:
-      - sclib_network
     # depends_on:
     #   mongodb:
     #     condition: service_healthy
@@ -201,6 +195,3 @@ volumes:
   redis_data:
     driver: local
 
-networks:
-  sclib_network:
-    driver: bridge
