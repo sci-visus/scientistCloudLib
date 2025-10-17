@@ -28,6 +28,13 @@ curl http://localhost:5001/health  # Upload service
 
 ## 🔐 **Authentication**
 
+**ALL API endpoints now require JWT authentication!** This includes:
+- File uploads
+- Job status checks  
+- Job listing
+- Authentication status
+- Upload initiation
+
 ### 1. Login to Get JWT Token
 
 ```bash

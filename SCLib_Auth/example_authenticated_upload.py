@@ -111,7 +111,7 @@ class AuthenticatedUploadClient:
     
     def get_job_status(self, job_id: str) -> Dict[str, Any]:
         """
-        Get the status of an upload job.
+        Get the status of an upload job (authentication required).
         
         Args:
             job_id: Job identifier
@@ -139,7 +139,7 @@ class AuthenticatedUploadClient:
     
     def list_jobs(self, limit: int = 10) -> Dict[str, Any]:
         """
-        List upload jobs for the authenticated user.
+        List upload jobs for the authenticated user (authentication required).
         
         Args:
             limit: Maximum number of jobs to return
@@ -169,7 +169,7 @@ class AuthenticatedUploadClient:
     
     def check_auth_status(self) -> Dict[str, Any]:
         """
-        Check authentication status on the upload server.
+        Check authentication status on the upload server (authentication required).
         
         Returns:
             Authentication status

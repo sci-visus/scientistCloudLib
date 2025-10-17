@@ -24,7 +24,14 @@ This guide provides curl commands for interacting with the ScientistCloud Upload
 
 ## 🔐 **Authentication**
 
-**All upload operations now require JWT authentication!** Here's how to authenticate:
+**ALL API endpoints now require JWT authentication!** This includes:
+- File uploads
+- Job status checks  
+- Job listing
+- Authentication status
+- Upload initiation
+
+Here's how to authenticate:
 
 ### 1. Login to Get JWT Token
 
@@ -300,7 +307,9 @@ curl -X POST "http://localhost:5001/api/upload/initiate" \
 
 ```bash
 # Replace JOB_ID with actual job ID from upload response
-curl -s "http://localhost:5001/api/upload/status/JOB_ID"
+# Authentication required for all status checks
+curl -s "http://localhost:5001/api/upload/status/JOB_ID" \
+     -H "Authorization: Bearer $TOKEN"
 ```
 
 **Response Example:**
@@ -318,10 +327,31 @@ curl -s "http://localhost:5001/api/upload/status/JOB_ID"
 }
 ```
 
+### List Upload Jobs
+
+```bash
+# List all jobs for authenticated user (authentication required)
+curl -s "http://localhost:5001/api/upload/jobs" \
+     -H "Authorization: Bearer $TOKEN"
+
+# List jobs with filters
+curl -s "http://localhost:5001/api/upload/jobs?status=completed&limit=10" \
+     -H "Authorization: Bearer $TOKEN"
+```
+
 ### Cancel Upload
 
 ```bash
-curl -X POST "http://localhost:5001/api/upload/cancel/JOB_ID"
+curl -X POST "http://localhost:5001/api/upload/cancel/JOB_ID" \
+     -H "Authorization: Bearer $TOKEN"
+```
+
+### Check Authentication Status
+
+```bash
+# Check current authentication status (authentication required)
+curl -s "http://localhost:5001/api/auth/status" \
+     -H "Authorization: Bearer $TOKEN"
 ```
 
 ## 🔍 **Dataset Management**
@@ -450,9 +480,10 @@ RESPONSE=$(curl -s -X POST "http://localhost:5001/api/upload/upload" \
 JOB_ID=$(echo $RESPONSE | jq -r '.job_id')
 echo "Job ID: $JOB_ID"
 
-# Monitor progress
+# Monitor progress (authentication required)
 while true; do
-  STATUS_RESPONSE=$(curl -s "http://localhost:5001/api/upload/status/$JOB_ID")
+  STATUS_RESPONSE=$(curl -s "http://localhost:5001/api/upload/status/$JOB_ID" \
+                       -H "Authorization: Bearer $TOKEN")
   STATUS=$(echo $STATUS_RESPONSE | jq -r '.status')
   PROGRESS=$(echo $STATUS_RESPONSE | jq -r '.progress_percentage')
   

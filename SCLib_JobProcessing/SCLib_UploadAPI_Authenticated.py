@@ -206,14 +206,13 @@ async def health_check():
 async def initiate_upload(
     request: AuthenticatedUploadRequest,
     background_tasks: BackgroundTasks,
-    auth_result: AuthResult = Depends(optional_auth),
+    auth_result: AuthResult = Depends(require_auth),
     processor: Any = Depends(get_processor)
 ):
     """
-    Initiate an asynchronous upload job with optional authentication.
+    Initiate an asynchronous upload job with required authentication.
     
-    If authenticated via token, the authenticated user's email will be used.
-    If not authenticated, the user_email parameter is required.
+    The authenticated user's email will be automatically extracted from the token.
     
     Supports multiple source types:
     - google_drive: Import from Google Drive
@@ -409,25 +408,22 @@ async def upload_file(
 @app.get("/api/upload/status/{job_id}", response_model=JobStatusResponse)
 async def get_upload_status(
     job_id: str, 
-    auth_result: AuthResult = Depends(optional_auth),
+    auth_result: AuthResult = Depends(require_auth),
     processor: Any = Depends(get_processor)
 ):
     """
-    Get the status of an upload job.
+    Get the status of an upload job with required authentication.
     
-    If authenticated, only returns jobs owned by the authenticated user.
-    If not authenticated, returns any job (for backward compatibility).
+    Only returns jobs owned by the authenticated user.
     """
     try:
         status = processor.get_job_status(job_id)
         if not status:
             raise HTTPException(status_code=404, detail="Job not found")
         
-        # Check if user has access to this job
-        if auth_result.is_authenticated:
-            # For authenticated users, only show their own jobs
-            if hasattr(status, 'user_email') and status.user_email != auth_result.user_email:
-                raise HTTPException(status_code=403, detail="Access denied to this job")
+        # Check if user has access to this job (authentication required)
+        if hasattr(status, 'user_email') and status.user_email != auth_result.user_email:
+            raise HTTPException(status_code=403, detail="Access denied to this job")
         
         return JobStatusResponse(
             job_id=status.job_id,
@@ -454,28 +450,17 @@ async def list_upload_jobs(
     status: Optional[UploadStatus] = None,
     limit: int = 50,
     offset: int = 0,
-    auth_result: AuthResult = Depends(optional_auth),
+    auth_result: AuthResult = Depends(require_auth),
     processor: Any = Depends(get_processor)
 ):
     """
-    List upload jobs.
+    List upload jobs with required authentication.
     
-    If authenticated, only returns jobs owned by the authenticated user.
-    If not authenticated, user_email parameter is required.
+    Only returns jobs owned by the authenticated user.
     """
     try:
-        # Resolve user email
-        if auth_result.is_authenticated:
-            # For authenticated users, use their email
-            resolved_user_email = auth_result.user_email
-        elif user_email:
-            # For unauthenticated users, use provided email
-            resolved_user_email = user_email
-        else:
-            raise HTTPException(
-                status_code=400, 
-                detail="user_email parameter is required when not authenticated"
-            )
+        # Use authenticated user's email (authentication required)
+        resolved_user_email = auth_result.user_email
         
         jobs = processor.get_queued_jobs(resolved_user_email, status, limit, offset)
         
@@ -513,12 +498,12 @@ async def get_supported_sources():
     )
 
 @app.get("/api/auth/status")
-async def get_auth_status(auth_result: AuthResult = Depends(optional_auth)):
+async def get_auth_status(auth_result: AuthResult = Depends(require_auth)):
     """
-    Get authentication status for the current request.
+    Get authentication status for the current request with required authentication.
     
     Returns:
-        Authentication status information
+        Authentication status information for the authenticated user
     """
     return {
         "is_authenticated": auth_result.is_authenticated,
