@@ -13,6 +13,9 @@ from pathlib import Path
 # Add the current directory to Python path
 sys.path.insert(0, str(Path(__file__).parent))
 
+# Add SCLib_Auth to Python path for Docker container
+sys.path.insert(0, '/app/scientistCloudLib/SCLib_Auth')
+
 def load_env_file(env_path: str = None):
     """Load environment variables from specified env file."""
     # If we're running in Docker and have environment variables, skip file loading

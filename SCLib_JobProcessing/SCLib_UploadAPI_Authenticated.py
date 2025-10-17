@@ -44,7 +44,10 @@ try:
 except ImportError:
     # Fallback for standalone usage
     import sys
-    sys.path.append('/Users/amygooch/GIT/ScientistCloud_2.0/scientistCloudLib/SCLib_Auth')
+    from pathlib import Path
+    # Add SCLib_Auth to path for relative imports
+    auth_dir = Path(__file__).parent.parent / 'SCLib_Auth'
+    sys.path.insert(0, str(auth_dir))
     from SCLib_AuthMiddleware import (
         require_auth, optional_auth, get_current_user, get_current_user_email,
         get_current_user_id, AuthResult, setup_auth_middleware,

@@ -19,7 +19,10 @@ try:
 except ImportError:
     # Fallback for standalone usage
     import sys
-    sys.path.append('/Users/amygooch/GIT/ScientistCloud_2.0/scientistCloudLib/SCLib_Auth')
+    from pathlib import Path
+    # Add current directory to path for relative imports
+    current_dir = Path(__file__).parent
+    sys.path.insert(0, str(current_dir))
     from SCLib_JWTManager import SCLib_JWTManager, get_jwt_manager
     from SCLib_UserManager import SCLib_UserManager, get_user_manager, UserProfile
 

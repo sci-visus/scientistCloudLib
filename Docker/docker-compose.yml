@@ -59,6 +59,7 @@ services:
       
       # SCLib Environment
       SCLIB_HOME: /app
+      SCLIB_CODE_HOME: /app/scientistCloudLib
       SCLIB_ENV_FILE: /app/.env
     volumes:
       - ../SCLib_Auth:/app
@@ -125,6 +126,7 @@ services:
       
       # SCLib Environment
       SCLIB_HOME: /app
+      SCLIB_CODE_HOME: /app/scientistCloudLib
       SCLIB_ENV_FILE: /app/.env
       
       # SSL and Domain
@@ -132,7 +134,7 @@ services:
       DEPLOY_SERVER: ${DEPLOY_SERVER}
       DOMAIN_NAME: ${DOMAIN_NAME}
     volumes:
-      - ../SCLib_JobProcessing:/app
+      - ../:/app/scientistCloudLib
       - ${VISUS_DATASETS}:/mnt/visus_datasets
       - fastapi_logs:/app/logs
     networks:

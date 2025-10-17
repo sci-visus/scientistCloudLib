@@ -4,7 +4,7 @@ FROM python:3.11-slim
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
+    PYTHONPATH=/app:/app/scientistCloudLib \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -22,10 +22,11 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
-COPY SCLib_JobProcessing/requirements_fastapi.txt /app/requirements.txt
+COPY SCLib_JobProcessing/requirements_fastapi.txt /app/requirements_fastapi.txt
+COPY SCLib_Auth/requirements.txt /app/requirements_auth.txt
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements_fastapi.txt -r requirements_auth.txt
 
 # Copy the application code
 COPY SCLib_JobProcessing /app

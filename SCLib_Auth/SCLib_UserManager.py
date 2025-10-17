@@ -21,7 +21,10 @@ try:
 except ImportError:
     # Fallback for standalone usage
     import sys
-    sys.path.append('/Users/amygooch/GIT/ScientistCloud_2.0/scientistCloudLib/SCLib_JobProcessing')
+    from pathlib import Path
+    # Add SCLib_JobProcessing to path for relative imports
+    job_processing_dir = Path(__file__).parent.parent / 'SCLib_JobProcessing'
+    sys.path.insert(0, str(job_processing_dir))
     from SCLib_Config import get_config
     from SCLib_MongoConnection import get_mongo_connection
 
