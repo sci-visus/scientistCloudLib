@@ -171,12 +171,9 @@ services:
     image: redis:7-alpine
     container_name: sclib_redis
     restart: unless-stopped
-    ports:
-      - "6379:6379"
+    network_mode: "host"
     volumes:
       - redis_data:/data
-    networks:
-      - sclib_network
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
