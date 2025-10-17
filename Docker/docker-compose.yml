@@ -35,7 +35,7 @@ services:
     # ports:
       # - "8001:8001"  # Not needed - Nginx handles forwarding
     networks:
-      - visstore_web
+      - docker_visstore_web
     environment:
       # JWT Configuration
       SECRET_KEY: ${SECRET_KEY}
@@ -83,7 +83,7 @@ services:
     # ports:
       # - "5001:5001"  # Not needed - Nginx handles forwarding
     networks:
-      - visstore_web
+      - docker_visstore_web
     environment:
       # Database connection
       MONGO_URL: ${MONGO_URL}
@@ -182,7 +182,7 @@ services:
     volumes:
       - redis_data:/data
     networks:
-      - visstore_web
+      - docker_visstore_web
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 30s
@@ -202,6 +202,6 @@ volumes:
     driver: local
 
 networks:
-  visstore_web:
+  docker_visstore_web:
     external: true
 
