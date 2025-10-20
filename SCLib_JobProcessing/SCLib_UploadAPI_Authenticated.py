@@ -38,7 +38,7 @@ except ImportError:
 try:
     from ..SCLib_Auth.SCLib_AuthMiddleware import (
         require_auth, optional_auth, get_current_user, get_current_user_email,
-        get_current_user_id, AuthResult, setup_auth_middleware,
+        AuthResult, setup_auth_middleware,
         create_authenticated_upload_request, log_authenticated_action
     )
 except ImportError:
@@ -50,7 +50,7 @@ except ImportError:
     sys.path.insert(0, str(auth_dir))
     from SCLib_AuthMiddleware import (
         require_auth, optional_auth, get_current_user, get_current_user_email,
-        get_current_user_id, AuthResult, setup_auth_middleware,
+        AuthResult, setup_auth_middleware,
         create_authenticated_upload_request, log_authenticated_action
     )
 
@@ -510,7 +510,6 @@ async def get_auth_status(auth_result: AuthResult = Depends(require_auth)):
     return {
         "is_authenticated": auth_result.is_authenticated,
         "user_email": auth_result.user_email,
-        "user_id": auth_result.user_id,
         "access_type": auth_result.access_type,
         "error": auth_result.error
     }

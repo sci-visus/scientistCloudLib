@@ -251,9 +251,13 @@ class UserManager:
             collection.insert_one(user_doc)
             logger.info(f"Created new user: {email}")
         
+        # Generate user_id from email for JWT compatibility
+        if not user_id:
+            user_id = f"user_{email.replace('@', '_').replace('.', '_')}"
+        
         # Return user data with user_id for JWT compatibility
         return {
-            "user_id": user_id,  # Keep for JWT token compatibility
+            "user_id": user_id,  # Generated from email for JWT token compatibility
             "email": email,
             "name": name,
             "email_verified": user_data.get('email_verified', False)

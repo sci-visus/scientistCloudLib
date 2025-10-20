@@ -534,7 +534,7 @@ scope = drive
                 "source_path": job_config.source_path,
                 "destination_path": job_config.destination_path,
                 "dataset_uuid": job_config.dataset_uuid,
-                "user_id": job_config.user_id,
+                "user_email": job_config.user_email,
                 "status": UploadStatus.QUEUED.value,
                 "created_at": job_config.created_at,
                 "config": config_dict
@@ -570,7 +570,7 @@ scope = drive
                 source_path=config_dict.get('source_path', ''),
                 destination_path=config_dict.get('destination_path', ''),
                 dataset_uuid=config_dict.get('dataset_uuid', ''),
-                user_id=config_dict.get('user_id', ''),
+                user_email=config_dict.get('user_email', ''),
                 dataset_name=config_dict.get('dataset_name', ''),
                 sensor=sensor,
                 convert=config_dict.get('convert', True),
@@ -693,7 +693,7 @@ scope = drive
                 existing_dataset = collection.find_one({"uuid": job_config.dataset_uuid})
                 
                 # Generate additional identifiers
-                dataset_slug = self._generate_dataset_slug(job_config.dataset_name, job_config.user_id)
+                dataset_slug = self._generate_dataset_slug(job_config.dataset_name, job_config.user_email)
                 dataset_id = self._generate_dataset_id()
                 
                 dataset_doc = {
@@ -701,7 +701,7 @@ scope = drive
                     "name": job_config.dataset_name,
                     "slug": dataset_slug,
                     "id": dataset_id,
-                    "user_email": job_config.user_id,
+                    "user_email": job_config.user_email,
                     "sensor": job_config.sensor.value,
                     "convert": job_config.convert,
                     "is_public": job_config.is_public,
