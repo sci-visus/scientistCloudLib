@@ -33,9 +33,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class UserProfile:
     """User profile data structure."""
-    user_id: str
     email: str
     name: str
+    user_id: Optional[str] = None
     picture: Optional[str] = None
     email_verified: bool = False
     created_at: datetime = None
@@ -431,6 +431,15 @@ class SCLib_UserManager:
         # Map database field names to UserProfile field names
         if 'last_logged_in' in user_data:
             user_data['last_login'] = user_data.pop('last_logged_in')
+        
+        # Remove Google-related fields that aren't in UserProfile class
+        user_data.pop('google_access_token', None)
+        user_data.pop('google_token_expires_at', None)
+        user_data.pop('google_refresh_token', None)
+        
+        # Provide default values for required fields that might be missing
+        if 'name' not in user_data:
+            user_data['name'] = user_data.get('email', 'Unknown User').split('@')[0]
         
         # Convert datetime strings back to datetime objects if needed
         for field in ['created_at', 'last_login', 'last_activity']:
