@@ -107,6 +107,11 @@ class AuthConfig:
         self.auth0_audience = os.getenv('AUTH0_AUDIENCE', '')
         self.jwt_expiry_hours = int(os.getenv('JWT_EXPIRY_HOURS', '24'))
         self.refresh_token_expiry_days = int(os.getenv('REFRESH_TOKEN_EXPIRY_DAYS', '30'))
+        
+        # Collection names
+        self.collections = type('Collections', (), {
+            'user_profile': 'user_profile'
+        })()
 
 # Global configuration
 config = AuthConfig()
