@@ -54,17 +54,24 @@ def setup_logging(level: str = "INFO"):
     if logging.getLogger().handlers:
         print("📝 Logging already configured, skipping setup")
         return
+    
+    # Clear any existing handlers to prevent conflicts
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
         
     # Ensure logs directory exists
     os.makedirs('logs', exist_ok=True)
     
+    # Configure logging with force=True to override any existing config
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
             logging.FileHandler('logs/scientistcloud_api.log')
-        ]
+        ],
+        force=True  # Force reconfiguration
     )
 
 def check_environment():

@@ -26,7 +26,7 @@ except ImportError:
 
 # Configure logging (only if not already configured)
 if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.INFO, force=True)
 logger = logging.getLogger(__name__)
 
 
