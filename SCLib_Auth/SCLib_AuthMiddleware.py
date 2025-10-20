@@ -371,5 +371,7 @@ def log_authenticated_action(user_email: str, action: str, resource: str, **kwar
         resource: Resource affected
         **kwargs: Additional logging parameters
     """
+    # Filter out 'filename' to avoid LogRecord conflicts
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k != 'filename'}
     logger.info(f"Authenticated action: {user_email} performed {action} on {resource}", 
-                extra={'user_email': user_email, 'action': action, 'resource': resource, **kwargs})
+                extra={'user_email': user_email, 'action': action, 'resource': resource, **filtered_kwargs})
