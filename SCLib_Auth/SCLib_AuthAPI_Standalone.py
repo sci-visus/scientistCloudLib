@@ -204,14 +204,13 @@ class UserManager:
         email = user_data.get('email')
         name = user_data.get('name', email.split('@')[0] if email else 'Unknown')
         
-        if not user_id or not email:
-            raise ValueError("user_id and email are required")
+        if not email:
+            raise ValueError("email is required")
         
-        # Check if user exists
-        existing_user = collection.find_one({"user_id": user_id})
+        # Check if user exists by email (primary identifier)
+        existing_user = collection.find_one({"email": email})
         
         user_doc = {
-            "user_id": user_id,
             "email": email,
             "name": name,
             "picture": user_data.get('picture'),
@@ -228,7 +227,7 @@ class UserManager:
         if existing_user:
             # Update existing user
             collection.update_one(
-                {"user_id": user_id},
+                {"email": email},
                 {
                     "$set": {
                         "email": email,
@@ -248,13 +247,25 @@ class UserManager:
             collection.insert_one(user_doc)
             logger.info(f"Created new user: {email}")
         
-        return user_doc
+        # Return user data with user_id for JWT compatibility
+        return {
+            "user_id": user_id,  # Keep for JWT token compatibility
+            "email": email,
+            "name": name,
+            "email_verified": user_data.get('email_verified', False)
+        }
     
     @staticmethod
     def get_user_by_id(user_id: str) -> Optional[Dict[str, Any]]:
-        """Get user by ID."""
+        """Get user by ID (for backward compatibility)."""
         collection = get_user_collection()
         return collection.find_one({"user_id": user_id})
+    
+    @staticmethod
+    def get_user_by_email(email: str) -> Optional[Dict[str, Any]]:
+        """Get user by email (primary lookup method)."""
+        collection = get_user_collection()
+        return collection.find_one({"email": email})
     
     @staticmethod
     def store_token(user_id: str, token: str, token_type: str = 'access') -> bool:
@@ -383,9 +394,7 @@ async def login(request: LoginRequest):
         access_token = JWTManager.create_token(user['user_id'], user['email'])
         refresh_token = JWTManager.create_refresh_token(user['user_id'], user['email'])
         
-        # Store tokens
-        UserManager.store_token(user['user_id'], access_token, 'access')
-        UserManager.store_token(user['user_id'], refresh_token, 'refresh')
+        # Note: Token storage is disabled - tokens are stateless JWT tokens
         
         return AuthResponse(
             success=True,
@@ -437,9 +446,7 @@ async def refresh_token(request: RefreshRequest):
         new_access_token = JWTManager.create_token(user_id, email)
         new_refresh_token = JWTManager.create_refresh_token(user_id, email)
         
-        # Store new tokens
-        UserManager.store_token(user_id, new_access_token, 'access')
-        UserManager.store_token(user_id, new_refresh_token, 'refresh')
+        # Note: Token storage is disabled - tokens are stateless JWT tokens
         
         return AuthResponse(
             success=True,
@@ -482,19 +489,13 @@ async def logout(request: LogoutRequest):
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token")
         
-        # Revoke all tokens
-        success = UserManager.revoke_all_tokens(user_id)
+        # Note: Token revocation is disabled - tokens are stateless JWT tokens
+        # In a stateless system, logout is handled client-side by discarding the token
         
-        if success:
-            return AuthResponse(
-                success=True,
-                message="Logout successful"
-            )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Logout failed"
-            )
+        return AuthResponse(
+            success=True,
+            message="Logout successful - please discard your token"
+        )
         
     except HTTPException:
         raise

@@ -131,8 +131,8 @@ class SCLib_AuthMiddleware:
                         error='Invalid token payload - missing user information'
                     )
                 
-                # Get user profile from database
-                user_profile = await self.user_manager.get_user_by_id(user_id)
+                # Get user profile from database using email (primary identifier)
+                user_profile = await self.user_manager.get_user_by_email(user_email)
                 
                 if not user_profile:
                     return AuthResult(
@@ -142,7 +142,7 @@ class SCLib_AuthMiddleware:
                     )
                 
                 # Update user activity
-                await self.user_manager.update_user_activity(user_id)
+                await self.user_manager.update_user_activity(user_email)
                 
                 return AuthResult(
                     is_authenticated=True,

@@ -403,19 +403,19 @@ class SCLib_UserManager:
             logger.error(f"Failed to cleanup expired tokens: {e}")
             return 0
     
-    async def update_user_activity(self, user_id: str) -> bool:
+    async def update_user_activity(self, email: str) -> bool:
         """
         Update user's last activity timestamp.
         
         Args:
-            user_id: User's unique identifier
+            email: User's email address
             
         Returns:
             True if successful
         """
         try:
             result = self.user_profiles.update_one(
-                {"user_id": user_id},
+                {"email": email},
                 {"$set": {"last_activity": datetime.utcnow()}}
             )
             return result.modified_count > 0
