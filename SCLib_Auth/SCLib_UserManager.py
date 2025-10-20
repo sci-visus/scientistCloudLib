@@ -428,6 +428,10 @@ class SCLib_UserManager:
         # Remove MongoDB _id field
         user_data.pop('_id', None)
         
+        # Map database field names to UserProfile field names
+        if 'last_logged_in' in user_data:
+            user_data['last_login'] = user_data.pop('last_logged_in')
+        
         # Convert datetime strings back to datetime objects if needed
         for field in ['created_at', 'last_login', 'last_activity']:
             if field in user_data and isinstance(user_data[field], str):
