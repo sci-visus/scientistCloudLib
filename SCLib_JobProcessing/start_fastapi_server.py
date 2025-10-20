@@ -60,8 +60,9 @@ def setup_logging(level: str = "INFO"):
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
         
-    # Ensure logs directory exists
-    os.makedirs('logs', exist_ok=True)
+    # Use /tmp for logs to avoid permission issues in Docker
+    log_dir = '/tmp/scientistcloud_logs'
+    os.makedirs(log_dir, exist_ok=True)
     
     # Configure logging with force=True to override any existing config
     logging.basicConfig(
@@ -69,7 +70,7 @@ def setup_logging(level: str = "INFO"):
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
             logging.StreamHandler(),
-            logging.FileHandler('logs/scientistcloud_api.log')
+            logging.FileHandler(f'{log_dir}/scientistcloud_api.log')
         ],
         force=True  # Force reconfiguration
     )

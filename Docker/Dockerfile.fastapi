@@ -32,14 +32,15 @@ RUN pip install --no-cache-dir -r requirements_fastapi.txt -r requirements_auth.
 COPY SCLib_JobProcessing /app
 
 # Create necessary directories
-RUN mkdir -p /app/logs /data/visus/upload /data/visus/converted /data/visus/sync /data/visus/auth /data/visus/tmp
+RUN mkdir -p /app/logs /data/visus/upload /data/visus/converted /data/visus/sync /data/visus/auth /data/visus/tmp /tmp/scientistcloud_logs
 
 # Set proper permissions
-RUN chmod +x /app/start_fastapi_server.py
+RUN chmod +x /app/start_fastapi_server.py && \
+    chmod 755 /tmp/scientistcloud_logs
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app /data
+    chown -R app:app /app /data /tmp/scientistcloud_logs
 USER app
 
 # Expose the port
