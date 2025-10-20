@@ -20,9 +20,7 @@ import jwt
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
 
-# Configure logging (only if not already configured)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO, force=True)
+# Get logger without configuring
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app

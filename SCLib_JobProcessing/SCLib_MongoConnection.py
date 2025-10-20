@@ -24,9 +24,7 @@ try:
 except ImportError:
     from SCLib_Config import get_config, get_database_name, get_collection_name
 
-# Configure logging (only if not already configured)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO, force=True)
+# Get logger without configuring
 logger = logging.getLogger(__name__)
 
 

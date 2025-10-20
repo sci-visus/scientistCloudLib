@@ -39,9 +39,7 @@ except ImportError:
         create_s3_upload_job, create_url_upload_job
     )
 
-# Configure logging (only if not already configured)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO, force=True)
+# Get logger without configuring
 logger = logging.getLogger(__name__)
 
 # Configuration constants

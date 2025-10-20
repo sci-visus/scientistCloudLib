@@ -54,9 +54,7 @@ except ImportError:
         create_authenticated_upload_request, log_authenticated_action
     )
 
-# Configure logging (only if not already configured)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO, force=True)
+# Get logger without configuring
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app

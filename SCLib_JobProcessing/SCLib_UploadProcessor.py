@@ -32,9 +32,7 @@ except ImportError:
         UploadJobManager, get_tool_config
     )
 
-# Configure logging (only if not already configured)
-if not logging.getLogger().handlers:
-    logging.basicConfig(level=logging.INFO, force=True)
+# Get logger without configuring
 logger = logging.getLogger(__name__)
 
 
