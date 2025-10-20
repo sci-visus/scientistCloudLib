@@ -50,6 +50,11 @@ def load_env_file(env_path: str = None):
 
 def setup_logging(level: str = "INFO"):
     """Setup logging configuration."""
+    # Check if logging is already configured
+    if logging.getLogger().handlers:
+        print("📝 Logging already configured, skipping setup")
+        return
+        
     # Ensure logs directory exists
     os.makedirs('logs', exist_ok=True)
     
