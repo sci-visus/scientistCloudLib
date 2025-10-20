@@ -9,6 +9,7 @@ set -e
 ENV_FILE=""
 COMPOSE_FILE="docker-compose.yml"
 SERVICES=""
+FORCE_CLEAN=true
 
 # Colors for output
 RED='\033[0;31m'
@@ -52,6 +53,7 @@ show_usage() {
     echo "Options:"
     echo "  --env-file FILE     Use specific environment file (optional if .env exists)"
     echo "  --services SERVICE  Start only specific services (comma-separated)"
+    echo "  --force             Force clean without confirmation prompt"
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
@@ -61,6 +63,7 @@ show_usage() {
     echo "  $0 up --services mongodb,fastapi        # Start specific services"
     echo "  $0 logs                                 # Use existing .env file"
     echo "  $0 clean                                # No env file needed"
+    echo "  $0 clean --force                        # Force clean without confirmation"
     echo "  $0 down                                 # No env file needed"
     echo "  $0 status                               # No env file needed"
     echo ""
@@ -81,6 +84,10 @@ while [[ $# -gt 0 ]]; do
         --services)
             SERVICES="$2"
             shift 2
+            ;;
+        --force)
+            FORCE_CLEAN=true
+            shift
             ;;
         --help)
             show_usage
@@ -227,19 +234,24 @@ case $COMMAND in
         ;;
         
     clean)
-        print_warning "This will remove SCLib containers and volumes. Are you sure? (y/N)"
-        read -r response
-        if [[ "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
-            print_info "Cleaning up SCLib Docker resources..."
-            # Stop and remove only SCLib containers
-            $COMPOSE_CMD stop auth fastapi redis
-            $COMPOSE_CMD rm -f auth fastapi redis
-            # Remove only SCLib volumes (not all volumes)
-            docker volume rm docker_fastapi_logs docker_auth_logs docker_redis_data 2>/dev/null || true
-            print_success "SCLib cleanup completed!"
+        if [ "$FORCE_CLEAN" = true ]; then
+            print_info "Force cleaning SCLib Docker resources..."
         else
-            print_info "Cleanup cancelled."
+            print_warning "This will remove SCLib containers and volumes. Are you sure? (y/N)"
+            read -r response
+            if [[ ! "$response" =~ ^([yY][eE][sS]|[yY])$ ]]; then
+                print_info "Cleanup cancelled."
+                exit 0
+            fi
         fi
+        
+        print_info "Cleaning up SCLib Docker resources..."
+        # Stop and remove only SCLib containers
+        $COMPOSE_CMD stop auth fastapi redis
+        $COMPOSE_CMD rm -f auth fastapi redis
+        # Remove only SCLib volumes (not all volumes)
+        docker volume rm docker_fastapi_logs docker_auth_logs docker_redis_data 2>/dev/null || true
+        print_success "SCLib cleanup completed!"
         ;;
         
     *)

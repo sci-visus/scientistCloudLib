@@ -231,7 +231,7 @@ class SCLib_UserManager:
         try:
             user_data = self.user_profile.find_one({"email": email})
             if user_data:
-                return self._dict_to_(user_data)
+                return self._dict_to_user_profile(user_data)
             return None
         except Exception as e:
             logger.error(f"Failed to get user by email: {e}")
