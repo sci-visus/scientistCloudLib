@@ -60,17 +60,13 @@ def setup_logging(level: str = "INFO"):
     for handler in root_logger.handlers[:]:
         root_logger.removeHandler(handler)
         
-    # Use /tmp for logs to avoid permission issues in Docker
-    log_dir = '/tmp/scientistcloud_logs'
-    os.makedirs(log_dir, exist_ok=True)
-    
-    # Configure logging with force=True to override any existing config
+    # Temporarily disable file logging to isolate the issue
+    # Only use console logging to avoid any file-related conflicts
     logging.basicConfig(
         level=getattr(logging, level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.StreamHandler(),
-            logging.FileHandler(f'{log_dir}/scientistcloud_api.log')
+            logging.StreamHandler()
         ],
         force=True  # Force reconfiguration
     )
