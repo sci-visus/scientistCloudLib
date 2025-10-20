@@ -106,7 +106,7 @@ class SCLib_UserManager:
                 db_name = config.database.db_name
         
         self.db = mongo_client[db_name]
-        self.user_profiles = self.db[config.collections.user_profile]
+        self.user_profile = self.db[config.collections.user_profile]
         
         # Create indexes for better performance
         self._create_indexes()
@@ -128,7 +128,7 @@ class SCLib_UserManager:
         
         for index in indexes:
             try:
-                self.user_profiles.create_index(index)
+                self.user_profile.create_index(index)
             except PyMongoError as e:
                 logger.warning(f"Could not create index {index}: {e}")
     
@@ -144,7 +144,7 @@ class SCLib_UserManager:
         """
         try:
             # Check if user exists
-            existing_user = self.user_profiles.find_one({"user_id": user_info.user_id})
+            existing_user = self.user_profile.find_one({"user_id": user_info.user_id})
             
             if existing_user:
                 # Update existing user
@@ -161,7 +161,7 @@ class SCLib_UserManager:
                     }
                 }
                 
-                result = self.user_profiles.update_one(
+                result = self.user_profile.update_one(
                     {"user_id": user_info.user_id},
                     {"$set": update_data}
                 )
@@ -170,7 +170,7 @@ class SCLib_UserManager:
                     logger.info(f"Updated user profile: {user_info.email}")
                 
                 # Return updated user
-                updated_user = self.user_profiles.find_one({"user_id": user_info.user_id})
+                updated_user = self.user_profile.find_one({"user_id": user_info.user_id})
                 return self._dict_to_user_profile(updated_user)
             else:
                 # Create new user
@@ -187,7 +187,7 @@ class SCLib_UserManager:
                     }
                 )
                 
-                self.user_profiles.insert_one(asdict(user_profile))
+                self.user_profile.insert_one(asdict(user_profile))
                 logger.info(f"Created new user profile: {user_info.email}")
                 return user_profile
                 
@@ -210,7 +210,7 @@ class SCLib_UserManager:
             UserProfile object or None if not found
         """
         try:
-            user_data = self.user_profiles.find_one({"user_id": user_id})
+            user_data = self.user_profile.find_one({"user_id": user_id})
             if user_data:
                 return self._dict_to_user_profile(user_data)
             return None
@@ -229,9 +229,9 @@ class SCLib_UserManager:
             UserProfile object or None if not found
         """
         try:
-            user_data = self.user_profiles.find_one({"email": email})
+            user_data = self.user_profile.find_one({"email": email})
             if user_data:
-                return self._dict_to_user_profile(user_data)
+                return self._dict_to_(user_data)
             return None
         except Exception as e:
             logger.error(f"Failed to get user by email: {e}")
@@ -279,7 +279,7 @@ class SCLib_UserManager:
             
             # Add to user's token list
             field_name = f"{token_type}_tokens"
-            result = self.user_profiles.update_one(
+            result = self.user_profile.update_one(
                 {"user_id": user_id},
                 {
                     "$push": {field_name: token_record},
@@ -312,7 +312,7 @@ class SCLib_UserManager:
         """
         try:
             field_name = f"{token_type}_tokens"
-            result = self.user_profiles.update_one(
+            result = self.user_profile.update_one(
                 {
                     "user_id": user_id,
                     f"{field_name}.token_id": token_id
@@ -349,7 +349,7 @@ class SCLib_UserManager:
         """
         try:
             now = datetime.utcnow()
-            result = self.user_profiles.update_one(
+            result = self.user_profile.update_one(
                 {"user_id": user_id},
                 {
                     "$set": {
@@ -384,13 +384,13 @@ class SCLib_UserManager:
             now = datetime.utcnow()
             
             # Remove expired access tokens
-            access_result = self.user_profiles.update_many(
+            access_result = self.user_profile.update_many(
                 {"access_tokens.expires_at": {"$lt": now}},
                 {"$pull": {"access_tokens": {"expires_at": {"$lt": now}}}}
             )
             
             # Remove expired refresh tokens
-            refresh_result = self.user_profiles.update_many(
+            refresh_result = self.user_profile.update_many(
                 {"refresh_tokens.expires_at": {"$lt": now}},
                 {"$pull": {"refresh_tokens": {"expires_at": {"$lt": now}}}}
             )
@@ -414,7 +414,7 @@ class SCLib_UserManager:
             True if successful
         """
         try:
-            result = self.user_profiles.update_one(
+            result = self.user_profile.update_one(
                 {"email": email},
                 {"$set": {"last_activity": datetime.utcnow()}}
             )

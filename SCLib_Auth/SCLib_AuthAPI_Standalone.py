@@ -120,7 +120,7 @@ def get_user_collection():
     """Get user profiles collection."""
     client = get_mongo_client()
     db = client[config.db_name]
-    return db['user_profiles']
+    return db[config.collections.user_profile]
 
 # JWT token management
 class JWTManager:

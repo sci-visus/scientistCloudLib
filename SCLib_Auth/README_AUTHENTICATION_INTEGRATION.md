@@ -244,7 +244,7 @@ AUTH0_AUDIENCE=your-api-audience
 ### Database Collections
 
 The system uses the following MongoDB collections:
-- `user_profiles`: User information and token storage
+- `user_profile`: User information and token storage
 - `upload_jobs`: Upload job tracking (existing)
 - `datasets`: Dataset metadata (existing)
 

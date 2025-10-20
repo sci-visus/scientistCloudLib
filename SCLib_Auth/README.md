@@ -140,7 +140,7 @@ curl -X POST "http://localhost:8001/api/auth/logout" \
 
 ## MongoDB Schema
 
-### User Profiles Collection (`user_profiles`)
+### User Profiles Collection (`user_profile`)
 
 ```json
 {
