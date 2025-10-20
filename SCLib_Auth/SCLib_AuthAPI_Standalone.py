@@ -133,6 +133,9 @@ class JWTManager:
         expiry_hours = expires_hours or config.jwt_expiry_hours
         expiry = now + (expiry_hours * 3600)
         
+        # Get audience from environment (should match Auth0 audience)
+        audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
+        
         payload = {
             'user_id': user_id,
             'email': email,
@@ -140,7 +143,7 @@ class JWTManager:
             'exp': expiry,
             'jti': secrets.token_urlsafe(32),
             'iss': 'sclib-auth',
-            'aud': 'sclib-api',
+            'aud': audience,
             'type': 'access'
         }
         
@@ -152,6 +155,9 @@ class JWTManager:
         now = int(datetime.utcnow().timestamp())
         expiry = now + (config.refresh_token_expiry_days * 24 * 3600)
         
+        # Get audience from environment (should match Auth0 audience)
+        audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
+        
         payload = {
             'user_id': user_id,
             'email': email,
@@ -159,7 +165,7 @@ class JWTManager:
             'exp': expiry,
             'jti': secrets.token_urlsafe(32),
             'iss': 'sclib-auth',
-            'aud': 'sclib-api',
+            'aud': audience,
             'type': 'refresh'
         }
         
@@ -169,7 +175,16 @@ class JWTManager:
     def validate_token(token: str) -> Dict[str, Any]:
         """Validate a JWT token."""
         try:
-            payload = jwt.decode(token, config.secret_key, algorithms=['HS256'])
+            # Get audience from environment (should match Auth0 audience)
+            audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
+            
+            payload = jwt.decode(
+                token, 
+                config.secret_key, 
+                algorithms=['HS256'],
+                audience=audience,
+                issuer='sclib-auth'
+            )
             return payload
         except jwt.ExpiredSignatureError:
             raise HTTPException(status_code=401, detail="Token has expired")
