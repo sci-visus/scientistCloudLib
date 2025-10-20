@@ -316,6 +316,7 @@ async def upload_file(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier for adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset"),
     auth_result: AuthResult = Depends(require_auth),
@@ -383,7 +384,8 @@ async def upload_file(
             convert=convert,
             is_public=is_public,
             folder=folder,
-            team_uuid=team_uuid
+            team_uuid=team_uuid,
+            tags=tags
         )
         
         # Submit job to processor

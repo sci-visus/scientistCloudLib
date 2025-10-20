@@ -701,17 +701,18 @@ scope = drive
                     "name": job_config.dataset_name,
                     "slug": dataset_slug,
                     "id": dataset_id,
-                    "user_email": job_config.user_email,
+                    "user": job_config.user_email,
                     "sensor": job_config.sensor.value,
                     "convert": job_config.convert,
                     "is_public": job_config.is_public,
-                    "folder": job_config.folder,
+                    "folder_uuid": job_config.folder,
                     "team_uuid": job_config.team_uuid,
                     "source_type": job_config.source_type.value,
                     "source_path": job_config.source_path,
                     "destination_path": job_config.destination_path,
                     "total_size_bytes": job_config.total_size_bytes,
                     "status": "uploading",  # Initial status
+                    "tags": ",".join(job_config.tags) if job_config.tags else "",  # Convert list to comma-separated string
                     "created_at": job_config.created_at,
                     "updated_at": datetime.utcnow()
                 }
@@ -751,6 +752,18 @@ scope = drive
                     
         except Exception as e:
             logger.error(f"Error creating/updating dataset entry: {e}")
+    
+    def _format_data_size(self, size_bytes: int) -> str:
+        """Format data size in the same format as existing schema."""
+        if size_bytes == 0:
+            return "0 KB"
+        
+        # Convert to KB, MB, GB, etc.
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.2f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.2f} PB"
     
     def _generate_dataset_slug(self, dataset_name: str, user_email: str) -> str:
         """Generate a human-readable slug for the dataset."""
@@ -819,6 +832,7 @@ scope = drive
                 }
                 
                 if status == "completed":
+                    update_data["status"] = "done"  # Match existing schema
                     update_data["completed_at"] = datetime.utcnow()
                 elif status == "failed":
                     update_data["error_message"] = error_message

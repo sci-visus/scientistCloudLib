@@ -305,6 +305,7 @@ async def upload_file(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
     processor: Any = Depends(get_processor)
@@ -331,13 +332,13 @@ async def upload_file(
             # Use chunked upload for large files
             return await _handle_chunked_upload(
                 content, file.filename, file_size, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, folder, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         else:
             # Use standard upload for smaller files
             return await _handle_standard_upload(
                 content, file.filename, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, folder, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         
     except Exception as e:
@@ -355,6 +356,7 @@ async def upload_file_by_path(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
     processor: Any = Depends(get_processor)
@@ -441,7 +443,7 @@ async def upload_file_by_path(
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
+    team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
     # For large files, we should work directly with the original file path
@@ -491,7 +493,8 @@ async def _handle_standard_upload(
         convert=convert,
         is_public=is_public,
         folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
-        team_uuid=team_uuid
+        team_uuid=team_uuid,
+        tags=tags
     )
     
     # Submit job to processor and get the actual job ID
@@ -512,7 +515,7 @@ async def _handle_standard_upload(
 async def _handle_chunked_upload(
     content: bytes, filename: str, file_size: int, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
+    team_uuid: Optional[str], tags: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle chunked upload for large files."""
     # Generate unique upload ID
@@ -536,6 +539,7 @@ async def _handle_chunked_upload(
         'is_public': is_public,
         'folder': folder,
         'team_uuid': team_uuid,
+        'tags': tags,
         'dataset_uuid': dataset_uuid,  # Include dataset UUID for directory uploads
         'total_chunks': total_chunks,
         'chunk_size': CHUNK_SIZE,
@@ -592,7 +596,8 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
             convert=session['convert'],
             is_public=session['is_public'],
             folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
-            team_uuid=session['team_uuid']
+            team_uuid=session['team_uuid'],
+            tags=session.get('tags')
         )
         
         # Submit job to processor

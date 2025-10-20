@@ -242,6 +242,7 @@ async def upload_local_file(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -275,7 +276,8 @@ async def upload_local_file(
             convert=convert,
             is_public=is_public,
             folder=folder,
-            team_uuid=team_uuid
+            team_uuid=team_uuid,
+            tags=tags
         )
         
         # Submit job to processor
@@ -307,6 +309,7 @@ async def upload_file_by_path(
     is_public: bool = Form(False, description="Whether dataset is public"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
+    tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
     processor: Any = Depends(get_processor)
@@ -360,7 +363,8 @@ async def upload_file_by_path(
             convert=convert,
             is_public=is_public,
             folder=file_system_folder,
-            team_uuid=team_uuid
+            team_uuid=team_uuid,
+            tags=tags
         )
         
         # Submit job to processor and get the actual job ID

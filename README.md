@@ -36,12 +36,18 @@ TOKEN=$(curl -s -X POST "http://localhost:8001/api/auth/login" \
      -d '{"email": "user@example.com"}' | \
      jq -r '.data.access_token')
 
-# 2. Upload file with authentication
+# 2. Upload file with authentication (all fields required for UI)
 curl -X POST "http://localhost:5001/api/upload/upload" \
      -H "Authorization: Bearer $TOKEN" \
      -F "file=@/path/to/your/file.tiff" \
      -F "dataset_name=My Dataset" \
-     -F "sensor=TIFF"
+     -F "sensor=TIFF" \
+     -F "convert=true" \
+     -F "is_public=false" \
+     -F "folder=Test" \
+     -F "team_uuid=DevTestTeam" \
+     -F "tags=test,example,quickstart" \
+     -F "description=Quick start example"
 
 # 3. Check upload status
 curl -H "Authorization: Bearer $TOKEN" \
