@@ -52,7 +52,7 @@ class SCLib_CollectionConfig:
     shared_team: str = 'shared_team'
     shared_user: str = 'shared_user'
     teams: str = 'teams'
-    user_profile: str = 'user_profile'
+    user_profile: str = 'user_profiles'
     visstoredatas: str = 'visstoredatas'
     
     # Job processing collections (new for SC_JobProcessing)
