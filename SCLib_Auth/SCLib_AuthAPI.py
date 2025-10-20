@@ -17,8 +17,9 @@ from .SCLib_AuthManager import SCLib_AuthManager, get_auth_manager, UserInfo, To
 from .SCLib_JWTManager import SCLib_JWTManager, get_jwt_manager
 from .SCLib_UserManager import SCLib_UserManager, get_user_manager, UserProfile
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging (only if not already configured)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Create FastAPI app
