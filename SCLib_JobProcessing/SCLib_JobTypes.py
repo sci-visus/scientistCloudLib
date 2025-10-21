@@ -159,7 +159,7 @@ SC_DATASET_STATUS_TRANSITIONS = {
     },
     SCLib_DatasetStatus.UPLOADING: {
         'description': 'Currently uploading files',
-        'next_states': [SCLib_DatasetStatus.DONE, SCLib_DatasetStatus.UPLOAD_ERROR],
+        'next_states': [SCLib_DatasetStatus.UNZIPPING, SCLib_DatasetStatus.CONVERSION_QUEUED, SCLib_DatasetStatus.UPLOAD_ERROR],
         'job_type': SCLib_JobType.FILE_UPLOAD,
         'is_terminal': False
     },
