@@ -77,6 +77,20 @@ function get_mongo_connection() {
     $database_name = $config['database_name'];
     
     try {
+        // Try to manually load MongoDB extension if not loaded
+        if (!extension_loaded('mongodb')) {
+            // Try to find and load the extension
+            $ext_dirs = glob('/usr/local/lib/php/extensions/*/mongodb.so');
+            if (!empty($ext_dirs)) {
+                foreach ($ext_dirs as $ext_file) {
+                    if (file_exists($ext_file) && function_exists('dl')) {
+                        dl($ext_file);
+                        break;
+                    }
+                }
+            }
+        }
+        
         // Try native MongoDB extension first
         if (class_exists('MongoDB\Client')) {
             $client = new MongoDB\Client($mongo_url);
@@ -89,6 +103,13 @@ function get_mongo_connection() {
             require_once('/var/www/html/vendor/autoload.php');
             $client = new MongoDB\Client($mongo_url);
             $database = $client->selectDatabase($database_name);
+            return $database;
+        }
+        
+        // If all else fails, try using the old mongo extension
+        if (class_exists('MongoClient')) {
+            $client = new MongoClient($mongo_url);
+            $database = $client->selectDB($database_name);
             return $database;
         }
         
