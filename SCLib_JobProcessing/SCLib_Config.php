@@ -77,9 +77,23 @@ function get_mongo_connection() {
     $database_name = $config['database_name'];
     
     try {
-        $client = new MongoDB\Client($mongo_url);
-        $database = $client->selectDatabase($database_name);
-        return $database;
+        // Try native MongoDB extension first
+        if (class_exists('MongoDB\Client')) {
+            $client = new MongoDB\Client($mongo_url);
+            $database = $client->selectDatabase($database_name);
+            return $database;
+        }
+        
+        // Fallback to Composer MongoDB library
+        if (file_exists('/var/www/html/vendor/autoload.php')) {
+            require_once('/var/www/html/vendor/autoload.php');
+            $client = new MongoDB\Client($mongo_url);
+            $database = $client->selectDatabase($database_name);
+            return $database;
+        }
+        
+        throw new Exception("MongoDB extension not available and Composer library not found");
+        
     } catch (Exception $e) {
         throw new Exception("MongoDB connection error: " . $e->getMessage());
     }
