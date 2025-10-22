@@ -651,6 +651,106 @@ async def get_dataset_info(identifier: str, processor: Any = Depends(get_process
         logger.error(f"Error getting dataset info: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Portal-specific dataset endpoints
+@app.get("/api/datasets")
+async def get_user_datasets(user_id: str, processor: Any = Depends(get_processor)):
+    """Get user's datasets for the portal."""
+    try:
+        # Get user's own datasets
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            user_datasets = list(collection.find({'user_id': user_id}))
+            
+            # Get shared datasets
+            shared_datasets = list(collection.find({'shared_with': user_id}))
+            
+            # Get team datasets (if user has team_id)
+            with mongo_collection_by_type_context('user_profile') as user_collection:
+                user_profile = user_collection.find_one({'user_id': user_id})
+                
+            team_datasets = []
+            if user_profile and user_profile.get('team_id'):
+                team_datasets = list(collection.find({'team_id': user_profile['team_id']}))
+            
+            # Combine and deduplicate datasets
+            all_datasets = user_datasets + shared_datasets + team_datasets
+            unique_datasets = {}
+            for dataset in all_datasets:
+                dataset_id = str(dataset['_id'])
+                if dataset_id not in unique_datasets:
+                    # Convert ObjectId to string for JSON serialization
+                    if '_id' in dataset:
+                        dataset['_id'] = str(dataset['_id'])
+                    unique_datasets[dataset_id] = dataset
+            
+            return {
+                'success': True,
+                'datasets': list(unique_datasets.values())
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to get user datasets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/dataset/{dataset_id}")
+async def get_dataset_details(dataset_id: str, user_id: str, processor: Any = Depends(get_processor)):
+    """Get detailed information about a specific dataset."""
+    try:
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            dataset = collection.find_one({'_id': ObjectId(dataset_id)})
+            
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+            
+            # Check access permissions
+            if (dataset.get('user_id') != user_id and 
+                user_id not in dataset.get('shared_with', []) and
+                dataset.get('team_id') != user_id):
+                raise HTTPException(status_code=403, detail="Access denied")
+            
+            # Convert ObjectId to string for JSON serialization
+            if '_id' in dataset:
+                dataset['_id'] = str(dataset['_id'])
+            
+            return {
+                'success': True,
+                'dataset': dataset
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get dataset details: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/dataset/{dataset_id}/status")
+async def get_dataset_status(dataset_id: str, user_id: str, processor: Any = Depends(get_processor)):
+    """Get the current status of a dataset."""
+    try:
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            dataset = collection.find_one({'_id': ObjectId(dataset_id)})
+            
+            if not dataset:
+                raise HTTPException(status_code=404, detail="Dataset not found")
+            
+            # Check access permissions
+            if (dataset.get('user_id') != user_id and 
+                user_id not in dataset.get('shared_with', []) and
+                dataset.get('team_id') != user_id):
+                raise HTTPException(status_code=403, detail="Access denied")
+            
+            return {
+                'success': True,
+                'status': dataset.get('status', 'unknown'),
+                'progress': dataset.get('progress', 0),
+                'message': dataset.get('status_message', '')
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get dataset status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/upload/status/{job_id}", response_model=JobStatusResponse)
 async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)):
     """Get the status of an upload job."""
