@@ -30,8 +30,8 @@ REFRESH_TOKEN_EXPIRY_DAYS=30
 
 # Auth0 Configuration (Optional)
 AUTH0_DOMAIN="your-domain.auth0.com"
-AUTHO_CLIENT_ID="your-client-id"
-AUTHO_CLIENT_SECRET="your-client-secret"
+AUTH0_CLIENT_ID="your-client-id"
+AUTH0_CLIENT_SECRET="your-client-secret"
 AUTH0_AUDIENCE="your-api-audience"
 
 # SCLib Environment Variables (Optional)
@@ -256,8 +256,8 @@ pytest tests/
 | `JWT_EXPIRY_HOURS` | Access token expiry in hours | 24 |
 | `REFRESH_TOKEN_EXPIRY_DAYS` | Refresh token expiry in days | 30 |
 | `AUTH0_DOMAIN` | Auth0 domain (optional) | - |
-| `AUTHO_CLIENT_ID` | Auth0 client ID (optional) | - |
-| `AUTHO_CLIENT_SECRET` | Auth0 client secret (optional) | - |
+| `AUTH0_CLIENT_ID` | Auth0 client ID (optional) | - |
+| `AUTH0_CLIENT_SECRET` | Auth0 client secret (optional) | - |
 | `AUTH0_AUDIENCE` | Auth0 API audience (optional) | - |
 
 ## Production Deployment

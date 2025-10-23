@@ -58,8 +58,8 @@ DB_PASS=password
 
 # Auth0 Configuration (optional)
 AUTH0_DOMAIN=your-domain.auth0.com
-AUTHO_CLIENT_ID=your-client-id
-AUTHO_CLIENT_SECRET=your-client-secret
+AUTH0_CLIENT_ID=your-client-id
+AUTH0_CLIENT_SECRET=your-client-secret
 AUTH0_AUDIENCE=your-api-audience
 ```
 
@@ -240,8 +240,8 @@ DB_PASS=password
 
 # Auth0 Configuration (optional)
 AUTH0_DOMAIN=your-domain.auth0.com
-AUTHO_CLIENT_ID=your-client-id
-AUTHO_CLIENT_SECRET=your-client-secret
+AUTH0_CLIENT_ID=your-client-id
+AUTH0_CLIENT_SECRET=your-client-secret
 AUTH0_AUDIENCE=your-api-audience
 
 # Service Configuration

@@ -101,8 +101,8 @@ class AuthConfig:
         self.db_name = os.getenv('DB_NAME', 'SCLib_Test')
         self.secret_key = os.getenv('SECRET_KEY', 'your-secret-key-change-in-production')
         self.auth0_domain = os.getenv('AUTH0_DOMAIN', '')
-        self.auth0_client_id = os.getenv('AUTHO_CLIENT_ID', '')  # Note: AUTHO not AUTH0
-        self.auth0_client_secret = os.getenv('AUTHO_CLIENT_SECRET', '')
+        self.auth0_client_id = os.getenv('AUTH0_CLIENT_ID', '')
+        self.auth0_client_secret = os.getenv('AUTH0_CLIENT_SECRET', '')
         self.auth0_audience = os.getenv('AUTH0_AUDIENCE', '')
         self.jwt_expiry_hours = int(os.getenv('JWT_EXPIRY_HOURS', '24'))
         self.refresh_token_expiry_days = int(os.getenv('REFRESH_TOKEN_EXPIRY_DAYS', '30'))

@@ -72,8 +72,8 @@ class SCLib_AuthManager:
         """Load authentication configuration from environment variables."""
         return AuthConfig(
             auth0_domain=os.getenv('AUTH0_DOMAIN', ''),
-            auth0_client_id=os.getenv('AUTHO_CLIENT_ID', ''),  # Note: AUTHO not AUTH0
-            auth0_client_secret=os.getenv('AUTHO_CLIENT_SECRET', ''),  # Note: AUTHO not AUTH0
+            auth0_client_id=os.getenv('AUTH0_CLIENT_ID', ''),
+            auth0_client_secret=os.getenv('AUTH0_CLIENT_SECRET', ''),
             auth0_audience=os.getenv('AUTH0_AUDIENCE', ''),
             jwt_algorithm=os.getenv('JWT_ALGORITHM', 'RS256'),
             token_expiry_hours=int(os.getenv('TOKEN_EXPIRY_HOURS', '24')),

@@ -137,8 +137,8 @@ VISUS_TEMP=/tmp/visus
 
 # Authentication (Auth0)
 AUTH0_DOMAIN=your-domain.auth0.com
-AUTHO_CLIENT_ID=your_client_id
-AUTHO_CLIENT_SECRET=your_client_secret
+AUTH0_CLIENT_ID=your_client_id
+AUTH0_CLIENT_SECRET=your_client_secret
 AUTH0_MANAGEMENT_CLIENT_ID=your_mgmt_client_id
 AUTH0_MANAGEMENT_CLIENT_SECRET=your_mgmt_client_secret
 
@@ -397,7 +397,7 @@ client = ScientistCloudUploadClient("http://localhost:5001")  # Docker port
 **Solution**: This is a known issue with response validation. The core API endpoints work fine. Use `/api/upload/supported-sources` to test connectivity.
 
 **Issue**: Environment variables not loading  
-**Solution**: Make sure to use `AUTHO_CLIENT_ID` and `AUTHO_CLIENT_SECRET` (not `AUTH0_CLIENT_ID`). Load environment with `source env.local` before starting server.
+**Solution**: Make sure to use `AUTH0_CLIENT_ID` and `AUTH0_CLIENT_SECRET`. Load environment with `source env.local` before starting server.
 
 **Issue**: Port 5000 already in use  
 **Solution**: Use `--port 8000` or disable macOS AirPlay Receiver in System Preferences.  
