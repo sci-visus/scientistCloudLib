@@ -93,6 +93,18 @@ class AuthStatusResponse(BaseModel):
     access_type: str
     error: Optional[str] = None
 
+class CreateUserRequest(BaseModel):
+    """Create user request model."""
+    email: EmailStr
+    name: str
+    auth0_id: Optional[str] = None
+    sub: Optional[str] = None  # Auth0 user ID (sub claim)
+    picture: Optional[str] = None
+    email_verified: bool = False
+    preferences: Optional[Dict[str, Any]] = None
+    permissions: Optional[list] = None
+    auth0_metadata: Optional[Dict[str, Any]] = None
+
 # MongoDB connection and configuration
 class AuthConfig:
     """Authentication configuration."""
@@ -255,6 +267,18 @@ class UserManager:
         if not user_id:
             user_id = f"user_{email.replace('@', '_').replace('.', '_')}"
         
+        # Update user document with user_id if it doesn't exist
+        if existing_user and 'user_id' not in existing_user:
+            collection.update_one(
+                {"email": email},
+                {"$set": {"user_id": user_id}}
+            )
+        elif not existing_user:
+            user_doc["user_id"] = user_id
+        
+        # Get the final user document
+        final_user = collection.find_one({"email": email})
+        
         # Return user data with user_id for JWT compatibility
         return {
             "user_id": user_id,  # Generated from email for JWT token compatibility
@@ -361,7 +385,8 @@ async def root():
             "refresh": "POST /api/auth/refresh",
             "me": "GET /api/auth/me",
             "status": "GET /api/auth/status",
-            "authorize": "GET /api/auth/authorize"
+            "authorize": "GET /api/auth/authorize",
+            "create-user": "POST /api/auth/create-user"
         }
     }
 
@@ -628,6 +653,68 @@ async def get_authorization_url(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get authorization URL: {e}"
+        )
+
+@app.post("/api/auth/create-user")
+async def create_user(request: CreateUserRequest):
+    """
+    Create or update user profile from Auth0 user info.
+    
+    Args:
+        request: User information from Auth0 callback
+        
+    Returns:
+        Created/updated user information
+    """
+    try:
+        # Prepare user data for UserManager
+        user_id = request.sub or request.auth0_id or f"user_{request.email.replace('@', '_').replace('.', '_')}"
+        
+        user_data = {
+            'user_id': user_id,
+            'email': request.email,
+            'name': request.name,
+            'picture': request.picture,
+            'email_verified': request.email_verified,
+            'auth0_id': request.sub or request.auth0_id,
+            'auth0_metadata': request.auth0_metadata or {}
+        }
+        
+        # Create or update user in database
+        user = UserManager.create_or_update_user(user_data)
+        
+        # Update preferences if provided
+        if request.preferences:
+            user_collection = get_user_collection()
+            user_collection.update_one(
+                {"email": request.email},
+                {"$set": {"preferences": request.preferences}}
+            )
+        
+        logger.info(f"Created/updated user: {request.email}")
+        
+        return {
+            "success": True,
+            "user_id": user.get('user_id') or user_id,
+            "user": {
+                "id": user.get('user_id') or user_id,
+                "user_id": user.get('user_id') or user_id,
+                "email": user.get('email') or request.email,
+                "name": user.get('name') or request.name,
+                "picture": user.get('picture') or request.picture,
+                "email_verified": user.get('email_verified', request.email_verified),
+                "created_at": user.get('created_at').isoformat() if user.get('created_at') else None,
+                "last_login": user.get('last_login').isoformat() if user.get('last_login') else None,
+                "preferences": user.get('preferences') or (request.preferences or {}),
+                "auth0_id": user.get('auth0_id') or request.sub or request.auth0_id
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to create/update user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create/update user: {e}"
         )
 
 if __name__ == "__main__":
