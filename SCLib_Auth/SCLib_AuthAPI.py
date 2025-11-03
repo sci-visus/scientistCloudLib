@@ -73,6 +73,18 @@ class AuthResponse(BaseModel):
     message: str
     data: Optional[Dict[str, Any]] = None
 
+class CreateUserRequest(BaseModel):
+    """Create user request model."""
+    email: EmailStr
+    name: str
+    auth0_id: Optional[str] = None
+    sub: Optional[str] = None  # Auth0 user ID (sub claim)
+    picture: Optional[str] = None
+    email_verified: bool = False
+    preferences: Optional[Dict[str, Any]] = None
+    permissions: Optional[list] = None
+    auth0_metadata: Optional[Dict[str, Any]] = None
+
 # Dependency to get auth manager
 def get_auth_manager_dep() -> SCLib_AuthManager:
     return get_auth_manager()
@@ -120,7 +132,11 @@ async def root():
             "logout": "POST /api/auth/logout", 
             "refresh": "POST /api/auth/refresh",
             "me": "GET /api/auth/me",
-            "authorize": "GET /api/auth/authorize"
+            "authorize": "GET /api/auth/authorize",
+            "user-by-email": "GET /api/auth/user-by-email?email=...",
+            "create-user": "POST /api/auth/create-user",
+            "update-last-login": "POST /api/auth/user/{email}/update-last-login",
+            "validate": "GET /api/auth/validate"
         }
     }
 
@@ -193,10 +209,10 @@ async def login(
         # Create or update user in database
         user = await user_manager.create_or_update_user(user_info)
         
-        # Generate our own JWT token for API access
+        # Generate our own JWT token for API access - use email as primary identifier
         api_token = jwt_manager.create_token(
-            user_id=user_info.user_id,
             email=user_info.email,
+            user_id=user_info.user_id,  # Optional for backward compatibility
             expires_hours=24
         )
         
@@ -248,10 +264,10 @@ async def refresh_token(
         # Get user info
         user_info = auth_manager.get_user_info(token_pair.access_token)
         
-        # Generate new API token
+        # Generate new API token - use email as primary identifier
         api_token = jwt_manager.create_token(
-            user_id=user_info.user_id,
             email=user_info.email,
+            user_id=user_info.user_id,  # Optional for backward compatibility
             expires_hours=24
         )
         
@@ -329,16 +345,16 @@ async def get_current_user(
         
         # Validate our JWT token
         payload = jwt_manager.validate_token(token)
-        user_id = payload.get('user_id')
+        email = payload.get('email')
         
-        if not user_id:
+        if not email:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid token payload"
+                detail="Invalid token payload - missing email"
             )
         
-        # Get user from database
-        user = await user_manager.get_user_by_id(user_id)
+        # Get user from database using email (primary identifier)
+        user = await user_manager.get_user_by_email(email)
         
         if not user:
             raise HTTPException(
@@ -347,7 +363,7 @@ async def get_current_user(
             )
         
         return UserResponse(
-            user_id=user.user_id,
+            user_id=user.user_id or user.email,  # Use email if user_id is not set
             email=user.email,
             name=user.name,
             picture=user.picture,
@@ -393,6 +409,167 @@ async def validate_token(
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Token validation failed: {e}"
+        )
+
+@app.get("/api/auth/user-by-email")
+async def get_user_by_email(
+    email: EmailStr,
+    user_manager: SCLib_UserManager = Depends(get_user_manager_dep)
+):
+    """
+    Get user profile by email address.
+    
+    Args:
+        email: User's email address
+        
+    Returns:
+        User information or null if not found
+    """
+    try:
+        user = await user_manager.get_user_by_email(email)
+        
+        if not user:
+            return {
+                "user": None,
+                "found": False
+            }
+        
+        return {
+            "user": {
+                "id": user.user_id,
+                "user_id": user.user_id,
+                "email": user.email,
+                "name": user.name,
+                "picture": user.picture,
+                "email_verified": user.email_verified,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+                "preferences": user.preferences or {},
+                "auth0_id": user.auth0_user_id
+            },
+            "found": True
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get user by email: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user by email: {e}"
+        )
+
+@app.post("/api/auth/create-user")
+async def create_user(
+    request: CreateUserRequest,
+    user_manager: SCLib_UserManager = Depends(get_user_manager_dep)
+):
+    """
+    Create or update user profile from Auth0 user info.
+    
+    Args:
+        request: User information from Auth0 callback
+        
+    Returns:
+        Created/updated user information
+    """
+    try:
+        # Convert request to UserInfo object
+        # Use sub (Auth0 user ID) or auth0_id as user_id
+        user_id = request.sub or request.auth0_id or f"user_{request.email.replace('@', '_').replace('.', '_')}"
+        
+        user_info = UserInfo(
+            user_id=user_id,
+            email=request.email,
+            name=request.name,
+            picture=request.picture,
+            email_verified=request.email_verified
+        )
+        
+        # Create or update user in database
+        user = await user_manager.create_or_update_user(user_info)
+        
+        # Update preferences if provided
+        if request.preferences:
+            from datetime import datetime
+            user_manager.user_profile.update_one(
+                {"email": user.email},
+                {"$set": {"preferences": request.preferences}}
+            )
+        
+        logger.info(f"Created/updated user: {user.email}")
+        
+        return {
+            "success": True,
+            "user_id": user.user_id,
+            "user": {
+                "id": user.user_id,
+                "user_id": user.user_id,
+                "email": user.email,
+                "name": user.name,
+                "picture": user.picture,
+                "email_verified": user.email_verified,
+                "created_at": user.created_at.isoformat() if user.created_at else None,
+                "last_login": user.last_login.isoformat() if user.last_login else None,
+                "preferences": user.preferences or {},
+                "auth0_id": user.auth0_user_id
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to create/update user: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create/update user: {e}"
+        )
+
+@app.post("/api/auth/user/{email}/update-last-login")
+async def update_user_last_login(
+    email: str,
+    user_manager: SCLib_UserManager = Depends(get_user_manager_dep)
+):
+    """
+    Update user's last login timestamp.
+    
+    Args:
+        email: User's email address (primary identifier)
+        
+    Returns:
+        Success status
+    """
+    try:
+        from datetime import datetime
+        
+        # Update last_login in user_profile collection using email
+        result = user_manager.user_profile.update_one(
+            {"email": email},
+            {
+                "$set": {
+                    "last_login": datetime.utcnow(),
+                    "last_activity": datetime.utcnow()
+                }
+            }
+        )
+        
+        if result.matched_count == 0:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"User not found: {email}"
+            )
+        
+        logger.info(f"Updated last login for user: {email}")
+        
+        return {
+            "success": True,
+            "email": email,
+            "message": "Last login updated successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update last login: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update last login: {e}"
         )
 
 if __name__ == "__main__":

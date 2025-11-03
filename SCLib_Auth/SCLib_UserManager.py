@@ -135,6 +135,7 @@ class SCLib_UserManager:
     async def create_or_update_user(self, user_info: 'UserInfo') -> UserProfile:
         """
         Create or update a user profile.
+        Uses email as primary identifier since that's what's stored in user_profile collection.
         
         Args:
             user_info: User information from Auth0 or other source
@@ -143,12 +144,13 @@ class SCLib_UserManager:
             UserProfile object
         """
         try:
-            # Check if user exists
-            existing_user = self.user_profile.find_one({"user_id": user_info.user_id})
+            # Check if user exists by email (primary identifier in user_profile collection)
+            existing_user = self.user_profile.find_one({"email": user_info.email})
             
             if existing_user:
-                # Update existing user
+                # Update existing user - use email as the key since that's what's in user_profile
                 update_data = {
+                    "user_id": user_info.user_id,  # Update user_id if it changed
                     "email": user_info.email,
                     "name": user_info.name,
                     "picture": user_info.picture,
@@ -162,7 +164,7 @@ class SCLib_UserManager:
                 }
                 
                 result = self.user_profile.update_one(
-                    {"user_id": user_info.user_id},
+                    {"email": user_info.email},
                     {"$set": update_data}
                 )
                 
@@ -170,7 +172,7 @@ class SCLib_UserManager:
                     logger.info(f"Updated user profile: {user_info.email}")
                 
                 # Return updated user
-                updated_user = self.user_profile.find_one({"user_id": user_info.user_id})
+                updated_user = self.user_profile.find_one({"email": user_info.email})
                 return self._dict_to_user_profile(updated_user)
             else:
                 # Create new user
@@ -201,18 +203,26 @@ class SCLib_UserManager:
     
     async def get_user_by_id(self, user_id: str) -> Optional[UserProfile]:
         """
-        Get user profile by user ID.
+        Get user profile by user ID (deprecated - use get_user_by_email instead).
+        This method first tries to find by user_id, then falls back to email lookup.
         
         Args:
-            user_id: User's unique identifier
+            user_id: User's identifier (could be user_id or email)
             
         Returns:
             UserProfile object or None if not found
         """
         try:
+            # Try by user_id first
             user_data = self.user_profile.find_one({"user_id": user_id})
             if user_data:
                 return self._dict_to_user_profile(user_data)
+            
+            # Fallback: try by email (in case user_id is actually an email)
+            user_data = self.user_profile.find_one({"email": user_id})
+            if user_data:
+                return self._dict_to_user_profile(user_data)
+                
             return None
         except Exception as e:
             logger.error(f"Failed to get user by ID: {e}")
@@ -237,13 +247,13 @@ class SCLib_UserManager:
             logger.error(f"Failed to get user by email: {e}")
             return None
     
-    async def store_token(self, user_id: str, token: str, token_type: str = 'access', 
+    async def store_token(self, email: str, token: str, token_type: str = 'access', 
                          expires_at: Optional[datetime] = None) -> bool:
         """
         Store a token for a user.
         
         Args:
-            user_id: User's unique identifier
+            email: User's email address (primary identifier)
             token: Token string
             token_type: Type of token ('access' or 'refresh')
             expires_at: Token expiration time
@@ -277,10 +287,10 @@ class SCLib_UserManager:
                 }
             }
             
-            # Add to user's token list
+            # Add to user's token list - use email as primary identifier
             field_name = f"{token_type}_tokens"
             result = self.user_profile.update_one(
-                {"user_id": user_id},
+                {"email": email},
                 {
                     "$push": {field_name: token_record},
                     "$set": {"last_activity": datetime.utcnow()}
@@ -288,22 +298,22 @@ class SCLib_UserManager:
             )
             
             if result.modified_count > 0:
-                logger.info(f"Stored {token_type} token for user: {user_id}")
+                logger.info(f"Stored {token_type} token for user: {email}")
                 return True
             else:
-                logger.warning(f"Failed to store token for user: {user_id}")
+                logger.warning(f"Failed to store token for user: {email}")
                 return False
                 
         except Exception as e:
             logger.error(f"Failed to store token: {e}")
             return False
     
-    async def revoke_token(self, user_id: str, token_id: str, token_type: str = 'access') -> bool:
+    async def revoke_token(self, email: str, token_id: str, token_type: str = 'access') -> bool:
         """
         Revoke a token for a user.
         
         Args:
-            user_id: User's unique identifier
+            email: User's email address (primary identifier)
             token_id: Token ID to revoke
             token_type: Type of token ('access' or 'refresh')
             
@@ -314,7 +324,7 @@ class SCLib_UserManager:
             field_name = f"{token_type}_tokens"
             result = self.user_profile.update_one(
                 {
-                    "user_id": user_id,
+                    "email": email,
                     f"{field_name}.token_id": token_id
                 },
                 {
@@ -327,22 +337,22 @@ class SCLib_UserManager:
             )
             
             if result.modified_count > 0:
-                logger.info(f"Revoked {token_type} token for user: {user_id}")
+                logger.info(f"Revoked {token_type} token for user: {email}")
                 return True
             else:
-                logger.warning(f"Token not found for revocation: {user_id}")
+                logger.warning(f"Token not found for revocation: {email}")
                 return False
                 
         except Exception as e:
             logger.error(f"Failed to revoke token: {e}")
             return False
     
-    async def revoke_all_tokens(self, user_id: str) -> bool:
+    async def revoke_all_tokens(self, email: str) -> bool:
         """
         Revoke all tokens for a user (logout from all devices).
         
         Args:
-            user_id: User's unique identifier
+            email: User's email address (primary identifier)
             
         Returns:
             True if successful
@@ -350,7 +360,7 @@ class SCLib_UserManager:
         try:
             now = datetime.utcnow()
             result = self.user_profile.update_one(
-                {"user_id": user_id},
+                {"email": email},
                 {
                     "$set": {
                         "access_tokens.$[].is_revoked": True,
@@ -363,10 +373,10 @@ class SCLib_UserManager:
             )
             
             if result.modified_count > 0:
-                logger.info(f"Revoked all tokens for user: {user_id}")
+                logger.info(f"Revoked all tokens for user: {email}")
                 return True
             else:
-                logger.warning(f"User not found for token revocation: {user_id}")
+                logger.warning(f"User not found for token revocation: {email}")
                 return False
                 
         except Exception as e:

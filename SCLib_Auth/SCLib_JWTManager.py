@@ -37,14 +37,15 @@ class SCLib_JWTManager:
         
         logger.info("SCLib_JWTManager initialized")
     
-    def create_token(self, user_id: str, email: str, expires_hours: Optional[int] = None, 
+    def create_token(self, email: str, user_id: Optional[str] = None, expires_hours: Optional[int] = None, 
                     additional_claims: Optional[Dict[str, Any]] = None) -> str:
         """
         Create a JWT token for a user.
+        Email is the primary identifier - user_id is optional for backward compatibility.
         
         Args:
-            user_id: User's unique identifier
-            email: User's email address
+            email: User's email address (primary identifier)
+            user_id: User's identifier (optional, for backward compatibility)
             expires_hours: Token expiry in hours (defaults to configured value)
             additional_claims: Additional claims to include in the token
             
@@ -62,8 +63,7 @@ class SCLib_JWTManager:
         audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
         
         payload = {
-            'user_id': user_id,
-            'email': email,
+            'email': email,  # Primary identifier
             'iat': now,
             'exp': expiry,
             'jti': token_id,  # JWT ID for token tracking
@@ -71,6 +71,10 @@ class SCLib_JWTManager:
             'aud': audience,
             'type': 'access'
         }
+        
+        # Include user_id if provided (for backward compatibility)
+        if user_id:
+            payload['user_id'] = user_id
         
         # Add additional claims if provided
         if additional_claims:
@@ -80,13 +84,14 @@ class SCLib_JWTManager:
         logger.info(f"Created JWT token for user: {email}")
         return token
     
-    def create_refresh_token(self, user_id: str, email: str, expires_days: int = 30) -> str:
+    def create_refresh_token(self, email: str, user_id: Optional[str] = None, expires_days: int = 30) -> str:
         """
         Create a refresh token for a user.
+        Email is the primary identifier - user_id is optional for backward compatibility.
         
         Args:
-            user_id: User's unique identifier
-            email: User's email address
+            email: User's email address (primary identifier)
+            user_id: User's identifier (optional, for backward compatibility)
             expires_days: Token expiry in days
             
         Returns:
@@ -99,8 +104,7 @@ class SCLib_JWTManager:
         audience = os.getenv('AUTH0_AUDIENCE', 'sclib-api')
         
         payload = {
-            'user_id': user_id,
-            'email': email,
+            'email': email,  # Primary identifier
             'iat': now,
             'exp': expiry,
             'jti': secrets.token_urlsafe(32),
@@ -108,6 +112,10 @@ class SCLib_JWTManager:
             'aud': audience,
             'type': 'refresh'
         }
+        
+        # Include user_id if provided (for backward compatibility)
+        if user_id:
+            payload['user_id'] = user_id
         
         token = jwt.encode(payload, self.secret_key, algorithm=self.algorithm)
         logger.info(f"Created refresh token for user: {email}")
@@ -140,8 +148,8 @@ class SCLib_JWTManager:
             )
             
             # Validate required fields
-            if 'user_id' not in payload:
-                raise jwt.InvalidTokenError("Missing 'user_id' field in token")
+            if 'email' not in payload:
+                raise jwt.InvalidTokenError("Missing 'email' field in token")
             
             logger.debug(f"Token validated for user: {payload.get('email', 'unknown')}")
             return payload
@@ -158,19 +166,20 @@ class SCLib_JWTManager:
     
     def extract_user_id(self, token: str) -> str:
         """
-        Extract user ID from a JWT token.
+        Extract user ID from a JWT token (deprecated - use extract_email instead).
         
         Args:
             token: JWT token string
             
         Returns:
-            User ID
+            User ID or email if user_id not present
             
         Raises:
             jwt.InvalidTokenError: If token is invalid
         """
         payload = self.validate_token(token)
-        return payload['user_id']
+        # Return email as primary identifier, fallback to user_id for backward compatibility
+        return payload.get('email') or payload.get('user_id', '')
     
     def extract_email(self, token: str) -> str:
         """
