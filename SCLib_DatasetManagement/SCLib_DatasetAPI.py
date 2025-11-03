@@ -17,14 +17,14 @@ from pathlib import Path
 import re
 
 try:
-    from ..SCLib_JobProcessing.SCLib_Config import get_config
+    from ..SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
     from ..SCLib_JobProcessing.SCLib_MongoConnection import mongo_collection_by_type_context
     from ..SCLib_JobProcessing.SCLib_UploadProcessor import get_upload_processor
 except ImportError:
     import sys
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).parent.parent))
-    from SCLib_JobProcessing.SCLib_Config import get_config
+    from SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
     from SCLib_JobProcessing.SCLib_MongoConnection import mongo_collection_by_type_context
     from SCLib_JobProcessing.SCLib_UploadProcessor import get_upload_processor
 
@@ -216,6 +216,7 @@ async def root():
         "version": "1.0.0",
         "endpoints": {
             "list_datasets": "GET /api/v1/datasets",
+            "get_user_datasets": "GET /api/v1/datasets/by-user?user_email={email}",
             "create_dataset": "POST /api/v1/datasets",
             "get_dataset": "GET /api/v1/datasets/{identifier}",
             "update_dataset": "PUT /api/v1/datasets/{identifier}",
@@ -283,6 +284,131 @@ async def list_datasets(
             
     except Exception as e:
         logger.error(f"Failed to list datasets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/datasets/by-user")
+async def get_user_datasets_organized(
+    user_email: EmailStr,
+    processor: Any = Depends(get_processor)
+):
+    """
+    Get all datasets for a user organized by type (my, shared, team).
+    Similar to old portal's getFullDatasets() function.
+    """
+    try:
+        db_name = get_database_name()
+        
+        # Get my datasets
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            my_datasets = list(collection.find({
+                '$or': [
+                    {'user': user_email},
+                    {'user_email': user_email}
+                ]
+            }).sort([('folder_uuid', 1), ('name', 1)]))
+        
+        # Get shared datasets via shared_user collection
+        with mongo_collection_by_type_context('shared_user') as shared_collection:
+            shared_pipeline = [
+                {'$match': {'user': user_email}},
+                {'$lookup': {
+                    'from': 'visstoredatas',
+                    'localField': 'uuid',
+                    'foreignField': 'uuid',
+                    'as': 'sharing_data'
+                }},
+                {'$sort': {'folder_uuid': 1, 'name': 1}}
+            ]
+            shared_cursor = shared_collection.aggregate(shared_pipeline)
+            shared_uuids = [doc['uuid'] for doc in shared_cursor if doc.get('uuid')]
+        
+        shared_datasets = []
+        if shared_uuids:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                shared_datasets = list(collection.find({'uuid': {'$in': shared_uuids}}))
+        
+        # Get team datasets
+        team_datasets = []
+        with mongo_collection_by_type_context('teams') as teams_collection:
+            teams = list(teams_collection.find({'emails': user_email}))
+            team_uuids = [team.get('uuid') for team in teams if team.get('uuid')]
+        
+        if team_uuids:
+            with mongo_collection_by_type_context('shared_team') as shared_team_collection:
+                team_pipeline = [
+                    {'$match': {'team_uuid': {'$in': team_uuids}}},
+                    {'$lookup': {
+                        'from': 'visstoredatas',
+                        'localField': 'uuid',
+                        'foreignField': 'uuid',
+                        'as': 'sharing_data'
+                    }}
+                ]
+                team_cursor = shared_team_collection.aggregate(team_pipeline)
+                team_uuids_list = [doc['uuid'] for doc in team_cursor if doc.get('uuid')]
+            
+            if team_uuids_list:
+                with mongo_collection_by_type_context('visstoredatas') as collection:
+                    team_datasets = list(collection.find({'uuid': {'$in': team_uuids_list}}))
+        
+        # Format datasets
+        def format_dataset(doc):
+            doc_dict = dict(doc) if not isinstance(doc, dict) else doc
+            if '_id' in doc_dict:
+                doc_dict['_id'] = str(doc_dict['_id'])
+            
+            # Format similar to old portal
+            link = doc_dict.get('google_drive_link', '')
+            uuid = doc_dict.get('uuid', '')
+            contains_http = 'http' in link
+            contains_google = 'google.com' in link
+            server = 'true' if (contains_http and not contains_google) else 'false'
+            
+            dataset_url = ''
+            if server == 'true':
+                dataset_url = link
+            else:
+                config = get_config()
+                deploy_server = config.server.deploy_server
+                dataset_url = f"{deploy_server}/mod_visus?dataset={uuid}&&server=false"
+            
+            return {
+                'uuid': uuid,
+                'name': doc_dict.get('name', 'Unnamed Dataset'),
+                'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
+                'folder': doc_dict.get('folder_uuid', ''),
+                'folder_uuid': doc_dict.get('folder_uuid', ''),
+                'time': doc_dict.get('time') or doc_dict.get('date_imported'),
+                'team': doc_dict.get('team_uuid', ''),
+                'team_uuid': doc_dict.get('team_uuid', ''),
+                'tags': doc_dict.get('tags', []),
+                'sensor': doc_dict.get('sensor', 'Unknown'),
+                'status': doc_dict.get('status', 'unknown'),
+                'compression_status': doc_dict.get('compression_status', 'unknown'),
+                'url': dataset_url,
+                'google_drive_link': link,
+                'bucket': doc_dict.get('bucket'),
+                'prefix': doc_dict.get('prefix'),
+                'accesskey': doc_dict.get('accesskey'),
+                'secretkey': doc_dict.get('secretkey')
+            }
+        
+        return {
+            'success': True,
+            'datasets': {
+                'my': [format_dataset(d) for d in my_datasets],
+                'shared': [format_dataset(d) for d in shared_datasets],
+                'team': [format_dataset(d) for d in team_datasets]
+            },
+            'counts': {
+                'my': len(my_datasets),
+                'shared': len(shared_datasets),
+                'team': len(team_datasets)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get user datasets organized: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/datasets")
