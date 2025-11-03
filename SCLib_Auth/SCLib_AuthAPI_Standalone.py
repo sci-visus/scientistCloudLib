@@ -226,40 +226,46 @@ class UserManager:
         # Check if user exists by email (primary identifier)
         existing_user = collection.find_one({"email": email})
         
-        user_doc = {
-            "email": email,
-            "name": name,
-            "picture": user_data.get('picture'),
-            "email_verified": user_data.get('email_verified', False),
-            "last_login": datetime.utcnow(),
-            "last_activity": datetime.utcnow(),
-            "is_active": True,
-            "auth0_metadata": user_data,
-            "access_tokens": [],
-            "refresh_tokens": [],
-            "preferences": {}
-        }
-        
         if existing_user:
-            # Update existing user
+            logger.info(f"User exists, updating: {email} (existing user_id: {existing_user.get('user_id', 'N/A')})")
+            # Update existing user - preserve existing data, only update what's provided
+            update_data = {
+                "last_login": datetime.utcnow(),
+                "last_activity": datetime.utcnow()
+            }
+            
+            # Only update fields if they're provided in user_data
+            if user_data.get('name'):
+                update_data["name"] = name
+            if user_data.get('picture'):
+                update_data["picture"] = user_data.get('picture')
+            if 'email_verified' in user_data:
+                update_data["email_verified"] = user_data.get('email_verified', False)
+            if user_data.get('auth0_metadata'):
+                update_data["auth0_metadata"] = user_data
+            
             collection.update_one(
                 {"email": email},
-                {
-                    "$set": {
-                        "email": email,
-                        "name": name,
-                        "picture": user_data.get('picture'),
-                        "email_verified": user_data.get('email_verified', False),
-                        "last_login": datetime.utcnow(),
-                        "last_activity": datetime.utcnow(),
-                        "auth0_metadata": user_data
-                    }
-                }
+                {"$set": update_data}
             )
-            logger.info(f"Updated user: {email}")
+            logger.info(f"Updated existing user: {email}")
         else:
+            logger.info(f"User does not exist, creating new user: {email}")
             # Create new user
-            user_doc["created_at"] = datetime.utcnow()
+            user_doc = {
+                "email": email,
+                "name": name,
+                "picture": user_data.get('picture'),
+                "email_verified": user_data.get('email_verified', False),
+                "created_at": datetime.utcnow(),
+                "last_login": datetime.utcnow(),
+                "last_activity": datetime.utcnow(),
+                "is_active": True,
+                "auth0_metadata": user_data,
+                "access_tokens": [],
+                "refresh_tokens": [],
+                "preferences": {}
+            }
             collection.insert_one(user_doc)
             logger.info(f"Created new user: {email}")
         
@@ -281,10 +287,15 @@ class UserManager:
         
         # Return user data with user_id for JWT compatibility
         return {
-            "user_id": user_id,  # Generated from email for JWT token compatibility
+            "user_id": final_user.get('user_id') if final_user else user_id,  # Use existing user_id if available
             "email": email,
             "name": name,
-            "email_verified": user_data.get('email_verified', False)
+            "picture": final_user.get('picture') if final_user else user_data.get('picture'),
+            "email_verified": final_user.get('email_verified', False) if final_user else user_data.get('email_verified', False),
+            "created_at": final_user.get('created_at') if final_user else None,
+            "last_login": final_user.get('last_login') if final_user else None,
+            "preferences": final_user.get('preferences', {}) if final_user else {},
+            "auth0_id": final_user.get('auth0_metadata', {}).get('auth0_id') if final_user else user_data.get('auth0_id')
         }
     
     @staticmethod
