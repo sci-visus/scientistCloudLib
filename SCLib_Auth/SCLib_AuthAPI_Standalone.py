@@ -397,7 +397,8 @@ async def root():
             "me": "GET /api/auth/me",
             "status": "GET /api/auth/status",
             "authorize": "GET /api/auth/authorize",
-            "create-user": "POST /api/auth/create-user"
+            "create-user": "POST /api/auth/create-user",
+            "user-by-email": "GET /api/auth/user-by-email?email=..."
         }
     }
 
@@ -664,6 +665,53 @@ async def get_authorization_url(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get authorization URL: {e}"
+        )
+
+@app.get("/api/auth/user-by-email")
+async def get_user_by_email(email: str):
+    """
+    Get user profile by email address.
+    
+    Args:
+        email: User's email address
+        
+    Returns:
+        User information or null if not found
+    """
+    try:
+        user_collection = get_user_collection()
+        user = user_collection.find_one({"email": email})
+        
+        if not user:
+            return {
+                "user": None,
+                "found": False
+            }
+        
+        # Convert MongoDB document to response format
+        return {
+            "user": {
+                "id": user.get('user_id') or f"user_{email.replace('@', '_').replace('.', '_')}",
+                "user_id": user.get('user_id') or f"user_{email.replace('@', '_').replace('.', '_')}",
+                "email": user.get('email', email),
+                "name": user.get('name', email.split('@')[0]),
+                "picture": user.get('picture'),
+                "email_verified": user.get('email_verified', False),
+                "created_at": user.get('created_at').isoformat() if user.get('created_at') else None,
+                "last_login": user.get('last_login').isoformat() if user.get('last_login') else None,
+                "preferences": user.get('preferences', {}),
+                "auth0_id": user.get('auth0_metadata', {}).get('auth0_id') if user.get('auth0_metadata') else None,
+                "team_id": user.get('team_id'),
+                "permissions": user.get('permissions', ['read', 'upload'])
+            },
+            "found": True
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get user by email: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user by email: {e}"
         )
 
 @app.post("/api/auth/create-user")
