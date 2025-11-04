@@ -102,6 +102,10 @@ except ImportError:
             Path(os.getenv('SCLIB_CODE_HOME', '')) / 'SCLib_DatasetManagement' if os.getenv('SCLIB_CODE_HOME') else None
         ]
         
+        # Ensure /app is in sys.path so DatasetManagement can import JobProcessing from /app/SCLib_JobProcessing
+        if '/app' not in sys.path:
+            sys.path.insert(0, '/app')
+        
         dataset_api_app = None
         for dataset_path in possible_paths:
             if dataset_path and dataset_path.exists():
@@ -114,11 +118,12 @@ except ImportError:
                     from SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
                     logger.info(f"✅ Dataset Management API found at: {dataset_path}")
                     break
-                except ImportError:
+                except ImportError as e:
+                    logger.warning(f"   Failed to import from {dataset_path}: {e}")
                     # Remove the paths we just added
                     if str(dataset_path) in sys.path:
                         sys.path.remove(str(dataset_path))
-                    if parent_path in sys.path:
+                    if parent_path in sys.path and parent_path != '/app':
                         sys.path.remove(parent_path)
                     continue
         

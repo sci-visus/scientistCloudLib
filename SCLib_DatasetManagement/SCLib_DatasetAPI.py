@@ -23,10 +23,39 @@ try:
 except ImportError:
     import sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    from SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
-    from SCLib_JobProcessing.SCLib_MongoConnection import mongo_collection_by_type_context
-    from SCLib_JobProcessing.SCLib_UploadProcessor import get_upload_processor
+    import os
+    
+    # Try multiple paths for SCLib_JobProcessing
+    # In Docker, JobProcessing might be at /app (copied by Dockerfile) or /app/scientistCloudLib/SCLib_JobProcessing (mounted)
+    possible_paths = [
+        Path(__file__).parent.parent / 'SCLib_JobProcessing',  # Relative to scientistCloudLib
+        Path('/app/SCLib_JobProcessing'),  # Docker copy location
+        Path('/app/scientistCloudLib/SCLib_JobProcessing'),  # Docker mount location
+    ]
+    
+    # Also check SCLIB_CODE_HOME environment variable
+    if os.getenv('SCLIB_CODE_HOME'):
+        possible_paths.insert(0, Path(os.getenv('SCLIB_CODE_HOME')) / 'SCLib_JobProcessing')
+    
+    imported = False
+    for job_path in possible_paths:
+        if job_path.exists():
+            job_parent = str(job_path.parent)
+            if job_parent not in sys.path:
+                sys.path.insert(0, job_parent)
+            try:
+                from SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
+                from SCLib_JobProcessing.SCLib_MongoConnection import mongo_collection_by_type_context
+                from SCLib_JobProcessing.SCLib_UploadProcessor import get_upload_processor
+                # Logger will be defined later, but log here for debugging
+                print(f"✅ SCLib_JobProcessing found at: {job_path}")
+                imported = True
+                break
+            except ImportError:
+                continue
+    
+    if not imported:
+        raise ImportError(f"Could not find SCLib_JobProcessing module. Tried paths: {[str(p) for p in possible_paths]}")
 
 # Get logger
 logger = logging.getLogger(__name__)
