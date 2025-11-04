@@ -78,6 +78,64 @@ app.add_middleware(
 # Setup authentication middleware
 setup_auth_middleware(app)
 
+# Include Dataset Management API router
+# Note: Dataset API routes are already prefixed with /api/v1, so mount at root
+try:
+    from ..SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
+    # Mount at root since Dataset API routes already have /api/v1 prefix
+    app.mount("/", dataset_api_app)
+    logger.info("✅ Dataset Management API mounted (routes at /api/v1/*)")
+except ImportError:
+    try:
+        # Fallback for direct import (when running from /app in Docker)
+        # Try multiple possible paths for DatasetManagement module
+        import sys
+        from pathlib import Path
+        
+        # Try paths in order:
+        # 1. Relative to current file (if in scientistCloudLib structure)
+        # 2. From /app/scientistCloudLib (Docker volume mount)
+        # 3. From SCLIB_CODE_HOME environment variable
+        possible_paths = [
+            Path(__file__).parent.parent / 'SCLib_DatasetManagement',
+            Path('/app/scientistCloudLib/SCLib_DatasetManagement'),
+            Path(os.getenv('SCLIB_CODE_HOME', '')) / 'SCLib_DatasetManagement' if os.getenv('SCLIB_CODE_HOME') else None
+        ]
+        
+        dataset_api_app = None
+        for dataset_path in possible_paths:
+            if dataset_path and dataset_path.exists():
+                # Add parent directory to path so DatasetManagement can find SCLib_JobProcessing
+                parent_path = str(dataset_path.parent)
+                if parent_path not in sys.path:
+                    sys.path.insert(0, parent_path)
+                sys.path.insert(0, str(dataset_path))
+                try:
+                    from SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
+                    logger.info(f"✅ Dataset Management API found at: {dataset_path}")
+                    break
+                except ImportError:
+                    # Remove the paths we just added
+                    if str(dataset_path) in sys.path:
+                        sys.path.remove(str(dataset_path))
+                    if parent_path in sys.path:
+                        sys.path.remove(parent_path)
+                    continue
+        
+        if dataset_api_app:
+            app.mount("/", dataset_api_app)
+            logger.info("✅ Dataset Management API mounted (routes at /api/v1/*)")
+        else:
+            raise ImportError("Could not find SCLib_DatasetManagement module")
+            
+    except Exception as e:
+        logger.warning(f"⚠️  Could not mount Dataset Management API: {e}")
+        try:
+            logger.warning(f"   Tried paths: {[str(p) for p in possible_paths if p]}")
+        except NameError:
+            logger.warning("   Could not determine attempted paths")
+        logger.warning("   Dataset endpoints will not be available")
+
 # Global upload processor
 upload_processor = get_upload_processor()
 
