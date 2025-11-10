@@ -1,0 +1,25 @@
+#!/bin/bash
+# Example wrapper script for running update_dataset_sizes.py
+# Copy this file to run_update_sizes.sh and customize with your settings
+
+# Set environment variables
+export MONGO_URL="mongodb://user:password@host:port/database"
+export DB_NAME="your_database_name"
+export UPLOAD_BASE_DIR="/mnt/visus_datasets/upload"
+export CONVERT_BASE_DIR="/mnt/visus_datasets/converted"
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Change to script directory
+cd "$SCRIPT_DIR"
+
+# Run the Python script
+# Log to both file and console
+/usr/bin/python3 update_dataset_sizes.py 2>&1 | tee -a update_dataset_sizes_cron.log
+
+# Optional: Send email on errors (uncomment and configure)
+# if [ $? -ne 0 ]; then
+#     echo "Dataset size update failed. Check logs for details." | mail -s "Dataset Size Update Failed" admin@example.com
+# fi
+
