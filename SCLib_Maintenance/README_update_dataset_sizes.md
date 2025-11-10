@@ -113,6 +113,26 @@ chmod +x /path/to/scientistCloudLib/SCLib_Maintenance/run_update_sizes.sh
 0 2 * * * /path/to/scientistCloudLib/SCLib_Maintenance/run_update_sizes.sh
 ```
 
+## Running in Docker Container
+
+The script is available in the FastAPI container at:
+- Container path: `/app/scientistCloudLib/SCLib_Maintenance/update_dataset_sizes.py`
+
+To run inside the container:
+
+```bash
+# Execute in running container
+docker exec -it sclib_fastapi python3 /app/scientistCloudLib/SCLib_Maintenance/update_dataset_sizes.py --dry-run
+
+# Or with environment variables
+docker exec -it sclib_fastapi bash -c "export MONGO_URL='...' && export DB_NAME='...' && python3 /app/scientistCloudLib/SCLib_Maintenance/update_dataset_sizes.py"
+```
+
+For cron jobs in the container, you can:
+1. Add a cron job inside the container (not recommended - lost on restart)
+2. Use host cron to execute `docker exec` commands (recommended)
+3. Create a separate maintenance container that runs the script
+
 ## Output
 
 The script logs to both:

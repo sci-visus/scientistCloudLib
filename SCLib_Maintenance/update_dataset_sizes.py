@@ -36,11 +36,15 @@ except ImportError:
     sys.exit(1)
 
 # Configure logging
+# Determine log file location (use script directory)
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+LOG_FILE = os.path.join(SCRIPT_DIR, 'update_dataset_sizes.log')
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('update_dataset_sizes.log'),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler(sys.stdout)
     ]
 )
