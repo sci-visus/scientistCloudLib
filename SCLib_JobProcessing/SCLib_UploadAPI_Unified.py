@@ -334,13 +334,13 @@ async def upload_file(
             # Use chunked upload for large files
             return await _handle_chunked_upload(
                 content, file.filename, file_size, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         else:
             # Use standard upload for smaller files
             return await _handle_standard_upload(
                 content, file.filename, user_email, dataset_name,
-                sensor, convert, is_public, folder, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         
     except Exception as e:
@@ -402,10 +402,8 @@ async def upload_file_by_path(
         else:
             upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
         
-        # For single file uploads, don't use folder for file system structure
-        # The folder parameter is for UI organization only
-        # Only use folder structure for directory uploads (when dataset_identifier is provided)
-        file_system_folder = folder if dataset_identifier else None
+        # The folder parameter is for UI organization only (metadata), NOT for file system structure
+        # All files go directly into the UUID directory
         
         # Create local upload job with the original file path (no /tmp copying!)
         job_config = create_local_upload_job(
@@ -417,7 +415,7 @@ async def upload_file_by_path(
             original_source_path=file_path,  # Store original path for retry purposes
             convert=convert,
             is_public=is_public,
-            folder=file_system_folder,
+            folder=folder,  # Metadata only - for UI organization in the portal
             team_uuid=team_uuid
         )
         
@@ -445,7 +443,7 @@ async def upload_file_by_path(
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
+    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
     # For large files, we should work directly with the original file path
@@ -480,11 +478,19 @@ async def _handle_standard_upload(
     else:
         upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
     
-    # For single file uploads, don't use folder for file system structure
-    # The folder parameter is for UI organization only
-    # Only use folder structure for directory uploads (when dataset_identifier is provided)
-    file_system_folder = folder if dataset_identifier else None
+    # The folder parameter is for UI organization only (metadata), NOT for file system structure
+    # For directory uploads, use relative_path to preserve directory structure in file system
+    # Construct destination path: {uuid}/{relative_path}/ if relative_path provided, else {uuid}/
+    base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
+    if relative_path:
+        # Preserve directory structure: files go into {uuid}/{relative_path}/
+        destination_path = f"{base_path}/{relative_path}"
+    else:
+        # No directory structure to preserve: files go directly into {uuid}/
+        destination_path = base_path
     
+    # Create job config with custom destination path for directory structure preservation
+    # Note: We override the default destination_path from create_local_upload_job
     job_config = create_local_upload_job(
         file_path=temp_file_path,
         dataset_uuid=upload_uuid,
@@ -494,10 +500,12 @@ async def _handle_standard_upload(
         original_source_path=filename,  # Store original filename for retry purposes
         convert=convert,
         is_public=is_public,
-        folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
+        folder=folder,  # Metadata only - for UI organization in the portal
         team_uuid=team_uuid,
         tags=tags
     )
+    # Override destination_path to preserve directory structure
+    job_config.destination_path = destination_path
     
     # Submit job to processor and get the actual job ID
     actual_job_id = processor.submit_upload_job(job_config)
@@ -517,7 +525,7 @@ async def _handle_standard_upload(
 async def _handle_chunked_upload(
     content: bytes, filename: str, file_size: int, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
-    team_uuid: Optional[str], tags: Optional[str], dataset_uuid: Optional[str], background_tasks: BackgroundTasks, processor: Any
+    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle chunked upload for large files."""
     # Generate unique upload ID
@@ -525,6 +533,23 @@ async def _handle_chunked_upload(
     
     # Calculate file hash
     file_hash = hashlib.sha256(content).hexdigest()
+    
+    # Resolve dataset identifier to UUID if provided
+    upload_uuid = None
+    if dataset_identifier:
+        if add_to_existing:
+            # For adding to existing dataset, resolve the identifier
+            try:
+                upload_uuid = processor._resolve_dataset_identifier(dataset_identifier)
+                logger.info(f"Resolved dataset identifier '{dataset_identifier}' to UUID: {upload_uuid}")
+            except ValueError as e:
+                raise HTTPException(status_code=404, detail=str(e))
+        else:
+            # For creating new dataset, use the identifier directly as UUID
+            upload_uuid = dataset_identifier
+            logger.info(f"Using provided dataset identifier as UUID: {upload_uuid}")
+    else:
+        upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
     
     # Calculate chunk information
     total_chunks = math.ceil(file_size / CHUNK_SIZE)
@@ -539,10 +564,11 @@ async def _handle_chunked_upload(
         'sensor': sensor,
         'convert': convert,
         'is_public': is_public,
-        'folder': folder,
+        'folder': folder,  # Metadata only - for UI organization
+        'relative_path': relative_path,  # For preserving directory structure
         'team_uuid': team_uuid,
         'tags': tags,
-        'dataset_uuid': dataset_uuid,  # Include dataset UUID for directory uploads
+        'dataset_uuid': upload_uuid,  # Include dataset UUID for directory uploads
         'total_chunks': total_chunks,
         'chunk_size': CHUNK_SIZE,
         'content': content  # Store content for processing
@@ -583,10 +609,16 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         # Use provided UUID for directory uploads, or generate new one for single files
         upload_uuid = session.get('dataset_uuid') if session.get('dataset_uuid') else str(uuid.uuid4())
         
-        # For single file uploads, don't use folder for file system structure
-        # The folder parameter is for UI organization only
-        # Only use folder structure for directory uploads (when dataset_uuid is provided)
-        file_system_folder = session.get('folder') if session.get('dataset_uuid') else None
+        # The folder parameter is for UI organization only (metadata), NOT for file system structure
+        # For directory uploads, use relative_path to preserve directory structure in file system
+        relative_path = session.get('relative_path')
+        base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
+        if relative_path:
+            # Preserve directory structure: files go into {uuid}/{relative_path}/
+            destination_path = f"{base_path}/{relative_path}"
+        else:
+            # No directory structure to preserve: files go directly into {uuid}/
+            destination_path = base_path
         
         job_config = create_local_upload_job(
             file_path=final_file_path,
@@ -597,10 +629,12 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
             original_source_path=None,  # No original path for chunked uploads
             convert=session['convert'],
             is_public=session['is_public'],
-            folder=file_system_folder,  # Only use folder for UI in ScientistCloud Data Portal
+            folder=session.get('folder'),  # Metadata only - for UI organization in the portal
             team_uuid=session['team_uuid'],
             tags=session.get('tags')
         )
+        # Override destination_path to preserve directory structure
+        job_config.destination_path = destination_path
         
         # Submit job to processor
         background_tasks.add_task(processor.submit_upload_job, job_config)

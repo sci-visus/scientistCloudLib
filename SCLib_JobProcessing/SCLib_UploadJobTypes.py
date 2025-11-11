@@ -304,13 +304,14 @@ def create_local_upload_job(
     team_uuid: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
-    """Create a local file upload job."""
-    # Always use UUID directory, but preserve folder structure within it
-    base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}"
-    if folder:
-        destination_path = f"{base_path}/{folder}"
-    else:
-        destination_path = base_path
+    """Create a local file upload job.
+    
+    Note: The 'folder' parameter is for UI organization only (metadata).
+    It does NOT affect file system paths - all files go directly into the UUID directory.
+    For directory uploads, use the relative_path parameter to preserve directory structure.
+    """
+    # Always use UUID directory - folder is metadata only, not for file system structure
+    destination_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}"
     
     return create_upload_job_config(
         source_type=UploadSourceType.LOCAL,

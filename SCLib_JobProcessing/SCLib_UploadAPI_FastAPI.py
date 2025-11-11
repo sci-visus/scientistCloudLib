@@ -347,10 +347,8 @@ async def upload_file_by_path(
         else:
             upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
         
-        # For single file uploads, don't use folder for file system structure
-        # The folder parameter is for UI organization only
-        # Only use folder structure for directory uploads (when dataset_identifier is provided)
-        file_system_folder = folder if dataset_identifier else None
+        # The folder parameter is for UI organization only (metadata), NOT for file system structure
+        # All files go directly into the UUID directory
         
         # Create local upload job with the original file path (no /tmp copying!)
         job_config = create_local_upload_job(
@@ -362,7 +360,7 @@ async def upload_file_by_path(
             original_source_path=file_path,
             convert=convert,
             is_public=is_public,
-            folder=file_system_folder,
+            folder=folder,  # Metadata only - for UI organization in the portal
             team_uuid=team_uuid,
             tags=tags
         )
