@@ -862,13 +862,91 @@ async def add_files_to_dataset(
         logger.error(f"Failed to add files: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+def _should_exclude_file(filename: str, excluded_patterns: List[str] = None) -> bool:
+    """Check if a file should be excluded based on patterns."""
+    if excluded_patterns is None:
+        excluded_patterns = ['.bin']  # Default excluded patterns
+    
+    import fnmatch
+    filename_lower = filename.lower()
+    
+    for pattern in excluded_patterns:
+        pattern_lower = pattern.lower()
+        # Handle wildcard patterns
+        if '*' in pattern_lower:
+            if fnmatch.fnmatch(filename_lower, pattern_lower):
+                return True
+        else:
+            # Handle extension patterns
+            normalized_pattern = pattern_lower if pattern_lower.startswith('.') else f'.{pattern_lower}'
+            if filename_lower.endswith(normalized_pattern):
+                return True
+    
+    return False
+
+def _scan_directory_tree(directory: Path, base_path: str = '', excluded_patterns: List[str] = None) -> List[Dict]:
+    """Recursively scan directory and return hierarchical file structure."""
+    result = []
+    
+    if not directory.exists() or not directory.is_dir():
+        return result
+    
+    try:
+        items = sorted(directory.iterdir(), key=lambda x: (x.is_file(), x.name))
+    except PermissionError:
+        logger.warning(f"Permission denied accessing directory: {directory}")
+        return result
+    
+    for item in items:
+        if item.name.startswith('.'):
+            continue
+        
+        relative_path = f"{base_path}/{item.name}" if base_path else item.name
+        
+        if item.is_dir():
+            # Recursively scan subdirectory
+            children = _scan_directory_tree(item, relative_path, excluded_patterns)
+            # Only include directory if it has children (after filtering)
+            if len(children) > 0:
+                result.append({
+                    'name': item.name,
+                    'type': 'directory',
+                    'path': relative_path,
+                    'children': children
+                })
+        elif item.is_file():
+            # Check if file should be excluded
+            if _should_exclude_file(item.name, excluded_patterns):
+                continue
+            
+            try:
+                stat = item.stat()
+                result.append({
+                    'name': item.name,
+                    'type': 'file',
+                    'path': relative_path,
+                    'size': stat.st_size,
+                    'modified': stat.st_mtime
+                })
+            except (OSError, PermissionError) as e:
+                logger.warning(f"Error accessing file {item}: {e}")
+                continue
+    
+    # Sort: directories first, then files, both alphabetically
+    result.sort(key=lambda x: (x['type'] != 'directory', x['name'].lower()))
+    
+    return result
+
 @app.get("/api/v1/datasets/{identifier}/files")
 async def list_dataset_files(
     identifier: str,
     user_email: Optional[str] = None,
     processor: Any = Depends(get_processor)
 ):
-    """List files in a dataset."""
+    """List files in a dataset with hierarchical structure.
+    
+    Returns files from both upload and converted directories in a tree structure.
+    """
     try:
         # Resolve identifier to UUID
         dataset_uuid = _resolve_dataset_identifier(identifier)
@@ -883,31 +961,40 @@ async def list_dataset_files(
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
         
-        # Get file list from dataset directory
+        # Get directory paths from config
         config = get_config()
         upload_dir = config.job_processing.in_data_dir if hasattr(config, 'job_processing') else f"{config.server.visus_datasets}/upload"
-        dataset_dir = Path(upload_dir) / dataset_uuid
+        converted_dir = config.job_processing.out_data_dir if hasattr(config, 'job_processing') else f"{config.server.visus_datasets}/converted"
         
-        files = []
-        if dataset_dir.exists():
-            for file_path in dataset_dir.rglob('*'):
-                if file_path.is_file():
-                    file_size = file_path.stat().st_size
-                    files.append({
-                        'name': file_path.name,
-                        'path': str(file_path.relative_to(dataset_dir)),
-                        'size': file_size,
-                        'size_human': _format_size(file_size),
-                        'modified': datetime.fromtimestamp(file_path.stat().st_mtime).isoformat()
-                    })
+        upload_path = Path(upload_dir) / dataset_uuid
+        converted_path = Path(converted_dir) / dataset_uuid
+        
+        # Excluded file patterns (default to .bin files)
+        excluded_patterns = getattr(config, 'excluded_file_patterns', ['.bin']) if hasattr(config, 'excluded_file_patterns') else ['.bin']
+        
+        # Scan both directories
+        upload_files = _scan_directory_tree(upload_path, 'upload', excluded_patterns)
+        converted_files = _scan_directory_tree(converted_path, 'converted', excluded_patterns)
         
         return {
             "success": True,
             "dataset_uuid": dataset_uuid,
-            "files": files,
-            "file_count": len(files),
-            "total_size": sum(f['size'] for f in files),
-            "total_size_human": _format_size(sum(f['size'] for f in files))
+            "directories": {
+                "upload": {
+                    "path": str(upload_path),
+                    "exists": upload_path.exists(),
+                    "readable": upload_path.exists() and os.access(upload_path, os.R_OK),
+                    "files": upload_files,
+                    "file_count": len(upload_files)
+                },
+                "converted": {
+                    "path": str(converted_path),
+                    "exists": converted_path.exists(),
+                    "readable": converted_path.exists() and os.access(converted_path, os.R_OK),
+                    "files": converted_files,
+                    "file_count": len(converted_files)
+                }
+            }
         }
         
     except ValueError as e:
