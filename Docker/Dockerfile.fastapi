@@ -43,7 +43,7 @@ RUN chmod +x /app/start_fastapi_server.py && \
 
 # Create a non-root user for security
 RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app /data /tmp/scientistcloud_logs
+    chown -R app:app /app /mnt/visus_datasets /tmp/scientistcloud_logs
 USER app
 
 # Expose the port
