@@ -75,38 +75,6 @@ app.add_middleware(
 # Global upload processor
 upload_processor = get_upload_processor()
 
-# Include Dataset Management API router
-# Note: Dataset API routes are already prefixed with /api/v1, so mount at root
-try:
-    from ..SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
-    # Mount at root since Dataset API routes already have /api/v1 prefix
-    app.mount("/", dataset_api_app)
-    logger.info("✅ Dataset Management API mounted (routes at /api/v1/*)")
-except ImportError:
-    try:
-        # Fallback for direct import (when running from /app in Docker)
-        import sys
-        from pathlib import Path
-        possible_paths = [
-            Path('/app/scientistCloudLib/SCLib_DatasetManagement'),
-            Path(__file__).parent.parent.parent / 'SCLib_DatasetManagement',
-        ]
-        for dataset_path in possible_paths:
-            if dataset_path.exists():
-                dataset_parent = str(dataset_path.parent)
-                if dataset_parent not in sys.path:
-                    sys.path.insert(0, dataset_parent)
-                try:
-                    from SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
-                    app.mount("/", dataset_api_app)
-                    logger.info(f"✅ Dataset Management API mounted from {dataset_path}")
-                    break
-                except ImportError:
-                    continue
-    except Exception as e:
-        logger.warning(f"⚠️ Could not mount Dataset Management API: {e}")
-        logger.warning("   Upload endpoints will work, but dataset management endpoints will not be available")
-
 # In-memory storage for upload sessions (use Redis in production)
 upload_sessions: Dict[str, Dict[str, Any]] = {}
 
@@ -916,6 +884,39 @@ async def internal_error_handler(request, exc):
         status_code=500,
         content={"error": "Internal server error", "detail": "An unexpected error occurred"}
     )
+
+# Include Dataset Management API router
+# Mount AFTER all upload routes are defined to avoid route conflicts
+# Note: Dataset API routes are already prefixed with /api/v1, so mount at root
+try:
+    from ..SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
+    # Mount at root since Dataset API routes already have /api/v1 prefix
+    app.mount("/", dataset_api_app)
+    logger.info("✅ Dataset Management API mounted (routes at /api/v1/*)")
+except ImportError:
+    try:
+        # Fallback for direct import (when running from /app in Docker)
+        import sys
+        from pathlib import Path
+        possible_paths = [
+            Path('/app/scientistCloudLib/SCLib_DatasetManagement'),
+            Path(__file__).parent.parent.parent / 'SCLib_DatasetManagement',
+        ]
+        for dataset_path in possible_paths:
+            if dataset_path.exists():
+                dataset_parent = str(dataset_path.parent)
+                if dataset_parent not in sys.path:
+                    sys.path.insert(0, dataset_parent)
+                try:
+                    from SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
+                    app.mount("/", dataset_api_app)
+                    logger.info(f"✅ Dataset Management API mounted from {dataset_path}")
+                    break
+                except ImportError:
+                    continue
+    except Exception as e:
+        logger.warning(f"⚠️ Could not mount Dataset Management API: {e}")
+        logger.warning("   Upload endpoints will work, but dataset management endpoints will not be available")
 
 if __name__ == "__main__":
     import uvicorn
