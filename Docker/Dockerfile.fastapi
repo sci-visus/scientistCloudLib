@@ -32,7 +32,10 @@ RUN pip install --no-cache-dir -r requirements_fastapi.txt -r requirements_auth.
 COPY SCLib_JobProcessing /app
 
 # Create necessary directories
-RUN mkdir -p /app/logs /data/visus/upload /data/visus/converted /data/visus/sync /data/visus/auth /data/visus/tmp /tmp/scientistcloud_logs
+# Note: /mnt/visus_datasets is mounted as a volume from the host
+# The actual paths used are controlled by JOB_IN_DATA_DIR and JOB_OUT_DATA_DIR env vars
+# Directories will be created automatically when needed, but we create base structure here
+RUN mkdir -p /app/logs /mnt/visus_datasets/upload /mnt/visus_datasets/converted /mnt/visus_datasets/sync /mnt/visus_datasets/auth /mnt/visus_datasets/tmp /tmp/scientistcloud_logs
 
 # Set proper permissions
 RUN chmod +x /app/start_fastapi_server.py && \
