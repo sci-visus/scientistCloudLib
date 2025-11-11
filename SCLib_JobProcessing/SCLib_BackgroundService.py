@@ -181,6 +181,8 @@ class SCLib_BackgroundService:
     
     def _handle_dataset_conversion(self, job: Dict[str, Any]) -> Dict[str, Any]:
         """Handle dataset conversion job."""
+        import json
+        
         parameters = job['parameters']
         conversion_input = parameters['input_path']
         output_dir = parameters['output_path']
@@ -189,17 +191,30 @@ class SCLib_BackgroundService:
         
         print(f"Starting dataset conversion: {conversion_input} -> {output_dir}")
         
-        # Format conversion parameters
-        param_string = self._format_conversion_params(conversion_params)
-        
-        # Run conversion process
-        conversion_script = 'run_slampy.sh'
+        # Use Python conversion script (preferred) or fallback to shell script
+        conversion_script = os.path.join(os.path.dirname(__file__), 'scripts', 'run_conversion.py')
         if not os.path.exists(conversion_script):
-            conversion_script = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'run_slampy.sh')
+            # Fallback to shell script for backward compatibility
+            conversion_script = os.path.join(os.path.dirname(__file__), 'scripts', 'run_slampy.sh')
+            if not os.path.exists(conversion_script):
+                conversion_script = os.path.join(os.path.dirname(__file__), '..', 'scripts', 'run_slampy.sh')
         
-        cmd = ['/bin/bash', conversion_script, conversion_input, output_dir, sensor]
-        if param_string:
-            cmd.append(param_string)
+        # Determine if using Python or shell script
+        is_python_script = conversion_script.endswith('.py')
+        
+        if is_python_script:
+            # Use Python script
+            cmd = ['python3', conversion_script, conversion_input, output_dir, sensor]
+            if conversion_params:
+                # Format as JSON string
+                params_json = json.dumps(conversion_params)
+                cmd.extend(['--params', params_json])
+        else:
+            # Use shell script (legacy)
+            param_string = self._format_conversion_params(conversion_params)
+            cmd = ['/bin/bash', conversion_script, conversion_input, output_dir, sensor]
+            if param_string:
+                cmd.append(param_string)
         
         process = subprocess.Popen(
             cmd,

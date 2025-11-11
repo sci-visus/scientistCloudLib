@@ -494,8 +494,8 @@ class SCLib_UploadProcessor:
         job_config = self._get_job_config_from_db(job_id)
         if job_config:
             # Map upload status to dataset status
-            dataset_status = self._map_upload_status_to_dataset_status(status)
-            self._update_dataset_status(job_config.dataset_uuid, dataset_status, error_message)
+            dataset_status = self._map_upload_status_to_dataset_status(status, job_config)
+            self._update_dataset_status(job_config.dataset_uuid, dataset_status, error_message, job_config)
     
     def _update_job_progress(self, job_id: str, percentage: float, uploaded_bytes: int, total_bytes: int):
         """Update job progress."""
@@ -837,7 +837,7 @@ scope = drive
             logger.error(f"Error resolving dataset identifier '{identifier}': {e}")
             raise ValueError(f"Dataset not found: {identifier}")
     
-    def _update_dataset_status(self, dataset_uuid: str, status: str, error_message: str = ""):
+    def _update_dataset_status(self, dataset_uuid: str, status: str, error_message: str = "", job_config: Optional[UploadJobConfig] = None):
         """Update dataset status in visstoredatas collection."""
         try:
             with mongo_collection_by_type_context('visstoredatas') as collection:
@@ -847,8 +847,20 @@ scope = drive
                 }
                 
                 if status == "completed":
-                    update_data["status"] = "done"  # Match existing schema
-                    update_data["completed_at"] = datetime.utcnow()
+                    # Check if conversion is needed
+                    if job_config and job_config.convert:
+                        # Set status to "conversion queued" instead of "done"
+                        update_data["status"] = "conversion queued"
+                        update_data["data_conversion_needed"] = True
+                        logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
+                        
+                        # Automatically create conversion job in the queue
+                        self._create_conversion_job(dataset_uuid, job_config, collection)
+                    else:
+                        # No conversion needed, mark as done
+                        update_data["status"] = "done"  # Match existing schema
+                        update_data["completed_at"] = datetime.utcnow()
+                        logger.info(f"Upload completed, no conversion needed for dataset: {dataset_uuid}")
                 elif status == "failed":
                     update_data["error_message"] = error_message
                 
@@ -856,12 +868,69 @@ scope = drive
                     {"uuid": dataset_uuid},
                     {"$set": update_data}
                 )
-                logger.info(f"Updated dataset status: {dataset_uuid} -> {status}")
+                logger.info(f"Updated dataset status: {dataset_uuid} -> {update_data.get('status', status)}")
                 
         except Exception as e:
             logger.error(f"Error updating dataset status: {e}")
     
-    def _map_upload_status_to_dataset_status(self, upload_status: UploadStatus) -> str:
+    def _create_conversion_job(self, dataset_uuid: str, job_config: UploadJobConfig, collection):
+        """Create a conversion job for a dataset that needs conversion."""
+        try:
+            # Get dataset to determine paths
+            dataset = collection.find_one({"uuid": dataset_uuid})
+            if not dataset:
+                logger.error(f"Dataset not found for conversion job: {dataset_uuid}")
+                return
+            
+            # Import job queue manager
+            try:
+                from .SCLib_JobQueueManager import SCLib_JobQueueManager
+            except ImportError:
+                from SCLib_JobQueueManager import SCLib_JobQueueManager
+            
+            # Get MongoDB connection
+            from .SCLib_MongoConnection import get_mongo_connection
+            mongo_client = get_mongo_connection()
+            db_name = get_database_name()
+            
+            # Create job queue manager
+            job_queue = SCLib_JobQueueManager(mongo_client, db_name)
+            
+            # Determine input and output paths
+            config = get_config()
+            input_dir = config.job_processing.in_data_dir if hasattr(config, 'job_processing') else f"{config.server.visus_datasets}/upload"
+            output_dir = config.job_processing.out_data_dir if hasattr(config, 'job_processing') else f"{config.server.visus_datasets}/converted"
+            
+            input_path = os.path.join(input_dir, dataset_uuid)
+            output_path = os.path.join(output_dir, dataset_uuid)
+            
+            # Get sensor type from dataset or job config
+            sensor = dataset.get('sensor', job_config.sensor.value)
+            
+            # Get conversion parameters if any
+            conversion_params = dataset.get('conversion_parameters', {})
+            
+            # Create conversion job
+            job_id = job_queue.create_job(
+                dataset_uuid=dataset_uuid,
+                job_type='dataset_conversion',
+                parameters={
+                    'input_path': input_path,
+                    'output_path': output_path,
+                    'sensor_type': sensor,
+                    'conversion_params': conversion_params
+                },
+                priority=1  # High priority for conversion jobs
+            )
+            
+            logger.info(f"Created conversion job {job_id} for dataset {dataset_uuid}")
+            
+        except Exception as e:
+            logger.error(f"Error creating conversion job for dataset {dataset_uuid}: {e}")
+            # Don't raise - we don't want to fail the upload if job creation fails
+            # The migration utility can pick it up later
+    
+    def _map_upload_status_to_dataset_status(self, upload_status: UploadStatus, job_config: Optional[UploadJobConfig] = None) -> str:
         """Map upload status to dataset status."""
         status_mapping = {
             UploadStatus.QUEUED: "uploading",
