@@ -615,10 +615,13 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         logger.error(f"Error processing chunks for {upload_id}: {e}")
         raise
 
-@app.get("/api/v1/datasets/{identifier}", response_model=dict)
+@app.get("/api/upload/datasets/{identifier}", response_model=dict)
 async def get_dataset_info(identifier: str, processor: Any = Depends(get_processor)):
     """
     Get dataset information using flexible identifier.
+    
+    NOTE: This endpoint is for upload-related dataset queries.
+    For general dataset management, use the Dataset Management API endpoints.
     
     Supports multiple identifier types:
     - UUID: 550e8400-e29b-41d4-a716-446655440000
@@ -917,6 +920,37 @@ except ImportError:
     except Exception as e:
         logger.warning(f"⚠️ Could not mount Dataset Management API: {e}")
         logger.warning("   Upload endpoints will work, but dataset management endpoints will not be available")
+
+# Mount Sharing and Team API
+try:
+    from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
+    # Mount at root since Sharing API routes already have /api/v1 prefix
+    app.mount("/", sharing_api_app)
+    logger.info("✅ Sharing and Team API mounted (routes at /api/v1/*)")
+except ImportError:
+    try:
+        # Fallback for direct import (when running from /app in Docker)
+        import sys
+        from pathlib import Path
+        possible_paths = [
+            Path('/app/scientistCloudLib/SCLib_Sharing_and_Team'),
+            Path(__file__).parent.parent.parent / 'SCLib_Sharing_and_Team',
+        ]
+        for sharing_path in possible_paths:
+            if sharing_path.exists():
+                sharing_parent = str(sharing_path.parent)
+                if sharing_parent not in sys.path:
+                    sys.path.insert(0, sharing_parent)
+                try:
+                    from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
+                    app.mount("/", sharing_api_app)
+                    logger.info(f"✅ Sharing and Team API mounted from {sharing_path}")
+                    break
+                except ImportError:
+                    continue
+    except Exception as e:
+        logger.warning(f"⚠️ Could not mount Sharing and Team API: {e}")
+        logger.warning("   Sharing and team endpoints will not be available")
 
 if __name__ == "__main__":
     import uvicorn
