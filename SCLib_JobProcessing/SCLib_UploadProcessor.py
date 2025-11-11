@@ -158,8 +158,12 @@ class SCLib_UploadProcessor:
         
         try:
             # Prepare destination directory
-            dest_dir = Path(job_config.destination_path)
-            dest_dir.mkdir(parents=True, exist_ok=True)
+            # If destination_path is a file path, create parent directory; if it's a directory, create it
+            dest_path = Path(job_config.destination_path)
+            if dest_path.suffix:  # Has file extension, treat as file path
+                dest_path.parent.mkdir(parents=True, exist_ok=True)
+            else:  # No extension, treat as directory
+                dest_path.mkdir(parents=True, exist_ok=True)
             
             # Process based on source type
             if job_config.source_type == UploadSourceType.LOCAL:
@@ -287,8 +291,19 @@ class SCLib_UploadProcessor:
         self._update_job_status(job_id, UploadStatus.UPLOADING)
         
         try:
+            # Ensure destination directory exists
+            dest_dir = os.path.dirname(dest_path) if os.path.isfile(source_path) else dest_path
+            os.makedirs(dest_dir, exist_ok=True)
+            
             if os.path.isfile(source_path):
-                shutil.copy2(source_path, dest_path)
+                # If dest_path is a directory, copy file into it; otherwise copy to exact path
+                if os.path.isdir(dest_path):
+                    dest_file = os.path.join(dest_path, os.path.basename(source_path))
+                else:
+                    dest_file = dest_path
+                    # Ensure parent directory exists
+                    os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                shutil.copy2(source_path, dest_file)
             else:
                 shutil.copytree(source_path, dest_path, dirs_exist_ok=True)
             

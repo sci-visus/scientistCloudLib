@@ -403,7 +403,15 @@ async def upload_file_by_path(
             upload_uuid = str(uuid.uuid4())  # Generate new UUID for single files
         
         # The folder parameter is for UI organization only (metadata), NOT for file system structure
-        # All files go directly into the UUID directory
+        # For directory uploads, use relative_path to preserve directory structure in file system
+        # Construct destination path: {uuid}/{relative_path}/filename if relative_path provided, else {uuid}/filename
+        base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
+        if relative_path:
+            # Preserve directory structure: files go into {uuid}/{relative_path}/filename
+            destination_path = f"{base_path}/{relative_path}/{filename}"
+        else:
+            # No directory structure to preserve: files go directly into {uuid}/filename
+            destination_path = f"{base_path}/{filename}"
         
         # Create local upload job with the original file path (no /tmp copying!)
         job_config = create_local_upload_job(
@@ -418,6 +426,8 @@ async def upload_file_by_path(
             folder=folder,  # Metadata only - for UI organization in the portal
             team_uuid=team_uuid
         )
+        # Override destination_path to preserve directory structure
+        job_config.destination_path = destination_path
         
         # Submit job to processor and get the actual job ID
         actual_job_id = processor.submit_upload_job(job_config)
@@ -480,14 +490,15 @@ async def _handle_standard_upload(
     
     # The folder parameter is for UI organization only (metadata), NOT for file system structure
     # For directory uploads, use relative_path to preserve directory structure in file system
-    # Construct destination path: {uuid}/{relative_path}/ if relative_path provided, else {uuid}/
+    # Construct destination path: {uuid}/{relative_path}/filename if relative_path provided, else {uuid}/filename
     base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
     if relative_path:
-        # Preserve directory structure: files go into {uuid}/{relative_path}/
-        destination_path = f"{base_path}/{relative_path}"
+        # Preserve directory structure: files go into {uuid}/{relative_path}/filename
+        # Include filename in path so rclone/rsync copy to the right location
+        destination_path = f"{base_path}/{relative_path}/{filename}"
     else:
-        # No directory structure to preserve: files go directly into {uuid}/
-        destination_path = base_path
+        # No directory structure to preserve: files go directly into {uuid}/filename
+        destination_path = f"{base_path}/{filename}"
     
     # Create job config with custom destination path for directory structure preservation
     # Note: We override the default destination_path from create_local_upload_job
@@ -612,13 +623,14 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         # The folder parameter is for UI organization only (metadata), NOT for file system structure
         # For directory uploads, use relative_path to preserve directory structure in file system
         relative_path = session.get('relative_path')
+        filename = session['filename']
         base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
         if relative_path:
-            # Preserve directory structure: files go into {uuid}/{relative_path}/
-            destination_path = f"{base_path}/{relative_path}"
+            # Preserve directory structure: files go into {uuid}/{relative_path}/filename
+            destination_path = f"{base_path}/{relative_path}/{filename}"
         else:
-            # No directory structure to preserve: files go directly into {uuid}/
-            destination_path = base_path
+            # No directory structure to preserve: files go directly into {uuid}/filename
+            destination_path = f"{base_path}/{filename}"
         
         job_config = create_local_upload_job(
             file_path=final_file_path,
