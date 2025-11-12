@@ -767,14 +767,18 @@ async def trigger_conversion(
             raise HTTPException(status_code=403, detail="Access denied")
         
         # Update dataset status to trigger conversion
+        # Set status to "conversion queued" so the background service picks it up
         with mongo_collection_by_type_context('visstoredatas') as collection:
             collection.update_one(
                 {"uuid": dataset_uuid},
                 {
                     "$set": {
-                        "status": "processing",
+                        "status": "conversion queued",
                         "data_conversion_needed": True,
-                        "date_updated": datetime.utcnow()
+                        "updated_at": datetime.utcnow()
+                    },
+                    "$unset": {
+                        "error_message": ""
                     }
                 }
             )
@@ -784,7 +788,7 @@ async def trigger_conversion(
         return {
             "success": True,
             "message": "Dataset conversion triggered successfully",
-            "status": "processing",
+            "status": "conversion queued",
             "dataset_uuid": dataset_uuid
         }
         
