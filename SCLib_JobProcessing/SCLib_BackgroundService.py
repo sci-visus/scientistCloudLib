@@ -601,7 +601,7 @@ def main():
             settings = json.load(f)
         
         # Create and start service
-        service = SC_BackgroundService(settings)
+        service = SCLib_BackgroundService(settings)
         service.start()
         
     except FileNotFoundError:
