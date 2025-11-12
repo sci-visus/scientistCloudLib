@@ -173,6 +173,19 @@ services:
   #     timeout: 10s
   #     retries: 3
 
+  # Base image for background service (contains OpenVisus and dependencies)
+  # Build this first to cache heavy dependencies
+  # Note: This service is only used for building the base image, not running
+  background-service-base:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.background-service-base
+    image: sclib_background_service_base:latest
+    profiles:
+      - base-images
+    # Don't start this service, it's just a base image
+    command: ["echo", "Base image only - not meant to run"]
+
   # SCLib Background Service
   # Processes datasets with status 'conversion queued' from visstoredatas collection
   background-service:

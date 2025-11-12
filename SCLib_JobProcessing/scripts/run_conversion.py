@@ -49,6 +49,17 @@ class DatasetConverter:
         self.input_dir = Path(input_dir).resolve()
         self.output_dir = Path(output_dir).resolve()
         self.sensor_type = sensor_type.upper().strip()
+        
+        # Map common sensor type variations to standard types
+        sensor_type_mapping = {
+            'RGB': 'TIFF_RGB',  # RGB is typically TIFF RGB
+            'TIFF RGB': 'TIFF_RGB',
+            'TIFFRGB': 'TIFF_RGB',
+        }
+        if self.sensor_type in sensor_type_mapping:
+            self.sensor_type = sensor_type_mapping[self.sensor_type]
+            logger.info(f"Mapped sensor type '{sensor_type}' to '{self.sensor_type}'")
+        
         self.conversion_params = conversion_params or {}
         self.upload_to_aws = upload_to_aws
         

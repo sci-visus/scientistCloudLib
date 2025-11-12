@@ -11,14 +11,59 @@ The background service container processes datasets with `status: 'conversion qu
 - **UUID-based** - All processing uses `dataset_uuid`, not user email
 - **Direct updates** - Updates dataset status: `conversion queued` → `converting` → `done`
 
-## Building and Running
+## Base Image
 
-### Build the Container
+The background service uses a **two-stage build** with a base image:
+
+1. **`Dockerfile.background-service-base`** - Base image containing:
+   - System dependencies (build tools, libraries)
+   - Python dependencies (from requirements files)
+   - **OpenVisus** (large package, cached in base image)
+
+2. **`Dockerfile.background-service`** - Final image that:
+   - Uses the base image
+   - Adds startup script
+   - Adds application-specific configuration
+
+### Why a Base Image?
+
+- **Faster builds**: OpenVisus and heavy dependencies are cached in the base image
+- **Consistency**: Same base across all builds
+- **Efficiency**: Only rebuild base image when dependencies change
+
+## Building
+
+### Build Base Image First
 
 ```bash
 cd /path/to/ScientistCloud2.0/scientistCloudLib/Docker
+
+# Build base image (this takes a while - OpenVisus is large)
+docker-compose --profile base-images build background-service-base
+
+# Then build the main service
 docker-compose build background-service
 ```
+
+### Build Everything
+
+```bash
+# The start.sh script handles base image building automatically
+./start.sh build
+```
+
+Or manually:
+
+```bash
+# Build base image
+docker-compose --profile base-images build background-service-base
+
+# Build and start all services
+docker-compose build background-service
+docker-compose up -d background-service
+```
+
+## Running
 
 ### Start the Container
 
@@ -120,6 +165,20 @@ docker inspect sclib_background_service | grep -A 10 Health
    docker exec sclib_background_service python3 -c "import pymongo; client = pymongo.MongoClient('$MONGO_URL'); print(client.server_info())"
    ```
 
+### OpenVisus not found
+
+If you see `ModuleNotFoundError: No module named 'OpenVisus'`:
+
+1. Rebuild the base image:
+   ```bash
+   docker-compose --profile base-images build --no-cache background-service-base
+   ```
+
+2. Then rebuild the main service:
+   ```bash
+   docker-compose build --no-cache background-service
+   ```
+
 ## Integration with Docker Compose
 
 The background service is automatically started when you run:
@@ -163,10 +222,11 @@ The new background service is simpler than the old one:
 | Processing | Processes jobs from queue | Queries datasets by status |
 | Architecture | Job-based | Status-based |
 | Complexity | Higher (job creation, tracking) | Lower (direct status updates) |
+| Base Image | Yes (visstore-ag-explorer-bg-service-base) | Yes (sclib_background_service_base) |
 
 ## Files
 
-- `Dockerfile.background-service` - Container definition
+- `Dockerfile.background-service-base` - Base image definition (OpenVisus, dependencies)
+- `Dockerfile.background-service` - Final service image (uses base image)
 - `start_background_service.sh` - Startup script
 - `docker-compose.yml` - Service configuration
-

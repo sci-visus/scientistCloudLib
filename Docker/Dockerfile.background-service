@@ -1,50 +1,15 @@
 # Dockerfile for SCLib Background Service
 # Processes datasets with status 'conversion queued' from visstoredatas collection
+# Uses base image for faster builds (OpenVisus and dependencies are cached)
 
-FROM python:3.11-slim
-
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:/app/scientistCloudLib \
-    PIP_NO_CACHE_DIR=1 \
-    PIP_DISABLE_PIP_VERSION_CHECK=1
+FROM sclib_background_service_base:latest
 
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    procps \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy requirements first for better Docker layer caching
-# The background service uses the same dependencies as FastAPI
-COPY SCLib_JobProcessing/requirements_fastapi.txt /app/requirements_fastapi.txt
-COPY SCLib_JobProcessing/requirements.txt /app/requirements.txt
-
-# Install Python dependencies
-# Install both requirements files to ensure all dependencies are available
-RUN pip install --no-cache-dir -r requirements_fastapi.txt && \
-    pip install --no-cache-dir -r requirements.txt
-
-# Create necessary directories
-RUN mkdir -p /app/logs \
-    /app/config \
-    /mnt/visus_datasets/upload \
-    /mnt/visus_datasets/converted \
-    /mnt/visus_datasets/sync \
-    /mnt/visus_datasets/tmp
-
 # Copy startup script
 COPY Docker/start_background_service.sh /app/start_background_service.sh
 RUN chmod +x /app/start_background_service.sh
-
-# Create a non-root user for security
-RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app /mnt/visus_datasets
-USER app
 
 # Health check - verify the service is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

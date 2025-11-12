@@ -1,0 +1,57 @@
+# Base Image for SCLib Background Service
+# Contains system packages, Python dependencies, and OpenVisus
+# This base image is built separately and cached for faster builds
+
+FROM python:3.11-slim
+
+# Set environment variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app:/app/scientistCloudLib \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# Set work directory
+WORKDIR /app
+
+# Install system dependencies (including build tools for OpenVisus)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    procps \
+    build-essential \
+    cmake \
+    python3-dev \
+    libjpeg-dev \
+    libpng-dev \
+    zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first for better Docker layer caching
+COPY SCLib_JobProcessing/requirements_fastapi.txt /app/requirements_fastapi.txt
+COPY SCLib_JobProcessing/requirements.txt /app/requirements.txt
+
+# Install Python dependencies
+# Install both requirements files to ensure all dependencies are available
+RUN pip install --no-cache-dir -r requirements_fastapi.txt && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Install OpenVisus (required for TIFF to IDX conversions)
+# This is the heavy part that we want to cache in the base image
+RUN pip install --no-cache-dir OpenVisus==2.2.135 || \
+    (pip install --no-cache-dir openvisuspy && python3 -m OpenVisus configure || true)
+
+# Create necessary directories
+RUN mkdir -p /app/logs \
+    /app/config \
+    /mnt/visus_datasets/upload \
+    /mnt/visus_datasets/converted \
+    /mnt/visus_datasets/sync \
+    /mnt/visus_datasets/tmp
+
+# Create a non-root user for security
+RUN useradd --create-home --shell /bin/bash app && \
+    chown -R app:app /app /mnt/visus_datasets
+
+# Switch to non-root user
+USER app
+

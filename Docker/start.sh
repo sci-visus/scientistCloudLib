@@ -10,6 +10,7 @@ ENV_FILE=""
 COMPOSE_FILE="docker-compose.yml"
 SERVICES=""
 FORCE_CLEAN=true
+REBUILD_BASE=false
 
 # Colors for output
 RED='\033[0;31m'
@@ -54,6 +55,7 @@ show_usage() {
     echo "  --env-file FILE     Use specific environment file (optional if .env exists)"
     echo "  --services SERVICE  Start only specific services (comma-separated)"
     echo "  --force             Force clean without confirmation prompt"
+    echo "  --rebuild-base      Rebuild background service base image from scratch"
     echo "  --help              Show this help message"
     echo ""
     echo "Examples:"
@@ -61,6 +63,8 @@ show_usage() {
     echo "  $0 up --env-file env.local              # Use specific env file"
     echo "  $0 up --env-file env.production         # Use production env file"
     echo "  $0 up --services mongodb,fastapi        # Start specific services"
+    echo "  $0 up --rebuild-base                    # Rebuild base image from scratch"
+    echo "  $0 build --rebuild-base                 # Rebuild base image and services"
     echo "  $0 logs                                 # Use existing .env file"
     echo "  $0 clean                                # No env file needed"
     echo "  $0 clean --force                        # Force clean without confirmation"
@@ -87,6 +91,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --force)
             FORCE_CLEAN=true
+            shift
+            ;;
+        --rebuild-base)
+            REBUILD_BASE=true
             shift
             ;;
         --help)
@@ -176,12 +184,38 @@ if [ -n "$SERVICES" ]; then
     COMPOSE_CMD="$COMPOSE_CMD $SERVICES"
 fi
 
+# Function to check if base image exists
+check_base_image_exists() {
+    docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^sclib_background_service_base:latest$"
+}
+
+# Function to build base image
+build_base_image() {
+    local rebuild_flag=$1
+    local base_image_name="sclib_background_service_base:latest"
+    
+    if [ "$rebuild_flag" = true ]; then
+        print_info "Rebuilding background service base image from scratch (this may take a while - OpenVisus is large)..."
+        docker-compose -f $COMPOSE_FILE --profile base-images build --no-cache background-service-base
+        print_success "Base image rebuilt successfully"
+    elif check_base_image_exists; then
+        print_info "Base image exists, skipping build (use --rebuild-base to rebuild)"
+    else
+        print_info "Base image not found, building it now (this may take a while - OpenVisus is large)..."
+        docker-compose -f $COMPOSE_FILE --profile base-images build background-service-base
+        print_success "Base image built successfully"
+    fi
+}
+
 # Execute commands
 case $COMMAND in
     up)
         print_info "Starting ScientistCloud services..."
         print_info "Environment: $ENV_FILE"
         print_info "Services: ${SERVICES:-all}"
+        
+        # Build base image if needed
+        build_base_image $REBUILD_BASE
         
         # Build the services first
         print_info "Building services..."
@@ -230,6 +264,11 @@ case $COMMAND in
         
     build)
         print_info "Building services..."
+        
+        # Build base image if needed
+        build_base_image $REBUILD_BASE
+        
+        # Build main services
         $COMPOSE_CMD build --no-cache auth fastapi background-service
         print_success "Build completed!"
         ;;
@@ -252,6 +291,13 @@ case $COMMAND in
         $COMPOSE_CMD rm -f auth fastapi background-service redis
         # Remove only SCLib volumes (not all volumes)
         docker volume rm docker_fastapi_logs docker_auth_logs docker_bg_service_logs docker_redis_data 2>/dev/null || true
+        
+        # Optionally remove base image if requested
+        if [ "$REBUILD_BASE" = true ]; then
+            print_info "Removing base image..."
+            docker rmi sclib_background_service_base:latest 2>/dev/null || print_warning "Base image not found or already removed"
+        fi
+        
         print_success "SCLib cleanup completed!"
         ;;
         
