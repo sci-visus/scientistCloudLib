@@ -743,7 +743,8 @@ scope = drive
                     "name": job_config.dataset_name,
                     "slug": dataset_slug,
                     "id": dataset_id,
-                    "user": job_config.user_email,
+                    "user": job_config.user_email,  # Primary field - user email
+                    "user_id": job_config.user_email,  # Also set user_id for compatibility with existing queries
                     "sensor": job_config.sensor.value,
                     "convert": job_config.convert,
                     "is_public": job_config.is_public,
@@ -766,6 +767,7 @@ scope = drive
                         {
                             "$set": {
                                 "status": "uploading",
+                                "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
                                 "updated_at": datetime.utcnow()
                             },
                             "$push": {
@@ -779,7 +781,7 @@ scope = drive
                             }
                         }
                     )
-                    logger.info(f"Added file to existing dataset: {job_config.dataset_uuid}")
+                    logger.info(f"Added file to existing dataset: {job_config.dataset_uuid} (user: {job_config.user_email})")
                 else:
                     # Create new dataset entry
                     dataset_doc["files"] = [{
@@ -789,11 +791,11 @@ scope = drive
                         "total_size_bytes": job_config.total_size_bytes,
                         "created_at": job_config.created_at
                     }]
-                    collection.insert_one(dataset_doc)
-                    logger.info(f"Created dataset entry: {job_config.dataset_uuid}")
+                    result = collection.insert_one(dataset_doc)
+                    logger.info(f"Created dataset entry: {job_config.dataset_uuid} (user: {job_config.user_email}, inserted_id: {result.inserted_id})")
                     
         except Exception as e:
-            logger.error(f"Error creating/updating dataset entry: {e}")
+            logger.error(f"Error creating/updating dataset entry for {job_config.dataset_uuid}: {e}", exc_info=True)
     
     def _format_data_size(self, size_bytes: int) -> str:
         """Format data size in the same format as existing schema."""
