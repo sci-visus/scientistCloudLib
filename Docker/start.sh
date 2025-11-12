@@ -185,7 +185,7 @@ case $COMMAND in
         
         # Build the services first
         print_info "Building services..."
-        $COMPOSE_CMD build --no-cache auth fastapi
+        $COMPOSE_CMD build --no-cache auth fastapi background-service
         
         # Start services
         $COMPOSE_CMD up -d
@@ -195,6 +195,7 @@ case $COMMAND in
         print_info "Auth API Documentation: http://localhost:8001/docs"
         print_info "FastAPI API: http://localhost:5001"
         print_info "API Documentation: http://localhost:5001/docs"
+        print_info "Background Service: Processing datasets with 'conversion queued' status"
         print_info "MongoDB: localhost:27017"
         print_info "Redis: localhost:6379"
         print_info "Nginx: http://localhost (if enabled)"
@@ -202,7 +203,7 @@ case $COMMAND in
         
     down)
         print_info "Stopping ScientistCloud services..."
-        $COMPOSE_CMD down auth fastapi redis
+        $COMPOSE_CMD down auth fastapi background-service redis
         # Clean up the .env file
         if [ -f ".env" ]; then
             rm -f .env
@@ -213,23 +214,23 @@ case $COMMAND in
         
     restart)
         print_info "Restarting ScientistCloud services..."
-        $COMPOSE_CMD restart auth fastapi redis
+        $COMPOSE_CMD restart auth fastapi background-service redis
         print_success "SCLib services restarted successfully!"
         ;;
         
     logs)
         print_info "Showing logs for ScientistCloud services..."
-        $COMPOSE_CMD logs -f auth fastapi redis
+        $COMPOSE_CMD logs -f auth fastapi background-service redis
         ;;
         
     status)
         print_info "Status of ScientistCloud services:"
-        $COMPOSE_CMD ps auth fastapi redis
+        $COMPOSE_CMD ps auth fastapi background-service redis
         ;;
         
     build)
         print_info "Building services..."
-        $COMPOSE_CMD build --no-cache auth fastapi
+        $COMPOSE_CMD build --no-cache auth fastapi background-service
         print_success "Build completed!"
         ;;
         
@@ -247,10 +248,10 @@ case $COMMAND in
         
         print_info "Cleaning up SCLib Docker resources..."
         # Stop and remove only SCLib containers
-        $COMPOSE_CMD stop auth fastapi redis
-        $COMPOSE_CMD rm -f auth fastapi redis
+        $COMPOSE_CMD stop auth fastapi background-service redis
+        $COMPOSE_CMD rm -f auth fastapi background-service redis
         # Remove only SCLib volumes (not all volumes)
-        docker volume rm docker_fastapi_logs docker_auth_logs docker_redis_data 2>/dev/null || true
+        docker volume rm docker_fastapi_logs docker_auth_logs docker_bg_service_logs docker_redis_data 2>/dev/null || true
         print_success "SCLib cleanup completed!"
         ;;
         

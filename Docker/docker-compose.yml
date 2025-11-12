@@ -173,6 +173,47 @@ services:
   #     timeout: 10s
   #     retries: 3
 
+  # SCLib Background Service
+  # Processes datasets with status 'conversion queued' from visstoredatas collection
+  background-service:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.background-service
+    container_name: sclib_background_service
+    restart: unless-stopped
+    networks:
+      - docker_visstore_web
+    environment:
+      # Database connection
+      MONGO_URL: ${MONGO_URL}
+      DB_NAME: ${DB_NAME}
+      DB_PASS: ${DB_PASS}
+      DB_HOST: ${DB_HOST}
+      
+      # Paths (container paths)
+      VISUS_DATASETS: /mnt/visus_datasets
+      JOB_IN_DATA_DIR: /mnt/visus_datasets/upload
+      JOB_OUT_DATA_DIR: /mnt/visus_datasets/converted
+      JOB_SYNC_DATA_DIR: /mnt/visus_datasets/sync
+      
+      # SCLib Environment
+      SCLIB_HOME: /app
+      SCLIB_CODE_HOME: /app/scientistCloudLib
+      SCLIB_ENV_FILE: /app/.env
+    volumes:
+      - ../:/app/scientistCloudLib
+      - ${VISUS_DATASETS}:/mnt/visus_datasets
+      - bg_service_logs:/app/logs
+    depends_on:
+      - fastapi
+    healthcheck:
+      test: ["CMD", "pgrep", "-f", "SCLib_BackgroundService"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    init: true
+
   # Redis for background tasks (Optional)
   redis:
     image: redis:7-alpine
@@ -196,6 +237,8 @@ volumes:
   fastapi_logs:
     driver: local
   auth_logs:
+    driver: local
+  bg_service_logs:
     driver: local
   nginx_logs:
     driver: local

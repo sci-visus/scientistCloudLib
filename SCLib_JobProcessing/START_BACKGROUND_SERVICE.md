@@ -14,9 +14,29 @@ docker logs sclib_fastapi | grep -i "background\|conversion\|processing"
 
 ## Start the Background Service
 
-The background service needs to be started manually or added to your Docker startup script.
+### Option 1: Use Docker Container (Recommended)
 
-### Option 1: Run in FastAPI Container (Temporary)
+A dedicated Docker container is available for the background service. It's already configured in `docker-compose.yml`.
+
+**Start the container:**
+```bash
+cd /path/to/ScientistCloud2.0/scientistCloudLib/Docker
+docker-compose up -d background-service
+```
+
+**Check if it's running:**
+```bash
+docker ps | grep background-service
+docker logs sclib_background_service
+```
+
+**Rebuild if needed:**
+```bash
+docker-compose build background-service
+docker-compose up -d background-service
+```
+
+### Option 2: Run in FastAPI Container (Temporary/Testing)
 
 ```bash
 # Get into the container
@@ -33,10 +53,6 @@ EOF
 cd /app/scientistCloudLib/SCLib_JobProcessing
 python3 SCLib_BackgroundService.py /tmp/bg_service_settings.json
 ```
-
-### Option 2: Add to Docker Startup (Permanent)
-
-Add this to your Docker startup script or docker-compose.yml to run the background service automatically.
 
 ## Verify It's Working
 
