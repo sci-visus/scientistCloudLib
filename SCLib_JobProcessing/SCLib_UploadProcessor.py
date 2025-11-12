@@ -275,7 +275,12 @@ class SCLib_UploadProcessor:
             "--log-file", f"/tmp/rclone_{job_id}.log"
         ]
         
-        self._run_command_with_progress(job_id, cmd, job_config)
+        try:
+            self._run_command_with_progress(job_id, cmd, job_config)
+            # Clean up temp files from shared temp directory after successful copy
+            self._cleanup_temp_file(source_path)
+        except Exception as e:
+            raise
     
     def _upload_with_rsync(self, job_id: str, source_path: str, dest_path: str, job_config: UploadJobConfig):
         """Upload using rsync with progress tracking."""
@@ -284,7 +289,26 @@ class SCLib_UploadProcessor:
             source_path, dest_path
         ]
         
-        self._run_command_with_progress(job_id, cmd, job_config)
+        try:
+            self._run_command_with_progress(job_id, cmd, job_config)
+            # Clean up temp files from shared temp directory after successful copy
+            self._cleanup_temp_file(source_path)
+        except Exception as e:
+            raise
+    
+    def _cleanup_temp_file(self, source_path: str):
+        """Clean up temp files from shared temp directory after successful copy."""
+        if source_path.startswith('/mnt/visus_datasets/tmp/'):
+            try:
+                if os.path.isfile(source_path):
+                    os.unlink(source_path)
+                    logger.info(f"Cleaned up temp file after successful copy: {source_path}")
+                elif os.path.isdir(source_path):
+                    shutil.rmtree(source_path)
+                    logger.info(f"Cleaned up temp directory after successful copy: {source_path}")
+            except Exception as cleanup_error:
+                # Log but don't fail the job if cleanup fails
+                logger.warning(f"Failed to clean up temp file {source_path}: {cleanup_error}")
     
     def _upload_with_copy(self, job_id: str, source_path: str, dest_path: str, job_config: UploadJobConfig):
         """Simple file copy fallback."""
@@ -308,6 +332,9 @@ class SCLib_UploadProcessor:
                 shutil.copytree(source_path, dest_path, dirs_exist_ok=True)
             
             self._update_job_progress(job_id, 100.0, job_config.total_size_bytes, job_config.total_size_bytes)
+            
+            # Clean up temp files from shared temp directory after successful copy
+            self._cleanup_temp_file(source_path)
             
         except Exception as e:
             raise RuntimeError(f"Copy failed: {e}")
