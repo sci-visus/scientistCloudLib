@@ -24,6 +24,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libjpeg-dev \
     libpng-dev \
     zlib1g-dev \
+    libssl-dev \
+    pkg-config \
+    patchelf \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
@@ -37,8 +40,11 @@ RUN pip install --no-cache-dir -r requirements_fastapi.txt && \
 
 # Install OpenVisus (required for TIFF to IDX conversions)
 # This is the heavy part that we want to cache in the base image
-RUN pip install --no-cache-dir OpenVisus==2.2.135 || \
-    (pip install --no-cache-dir openvisuspy && python3 -m OpenVisus configure || true)
+# Follow the pattern from ag-explorer-base: uninstall first, then install both packages
+RUN pip uninstall -y OpenVisus OpenVisusNoGui openvisuspy || true && \
+    pip install --no-cache-dir OpenVisus==2.2.135 && \
+    pip install --no-cache-dir openvisuspy && \
+    CODE_SIGN=$(which codesign 2>/dev/null || echo "") python3 -m OpenVisus configure || true
 
 # Create necessary directories
 RUN mkdir -p /app/logs \
