@@ -217,9 +217,16 @@ case $COMMAND in
         # Build base image if needed
         build_base_image $REBUILD_BASE
         
-        # Build the services first
+        # Build the services first (build individually to avoid one failure canceling others)
         print_info "Building services..."
-        $COMPOSE_CMD build --no-cache auth fastapi background-service
+        print_info "Building auth service..."
+        $COMPOSE_CMD build --no-cache auth || print_warning "Auth build failed, continuing..."
+        
+        print_info "Building fastapi service..."
+        $COMPOSE_CMD build --no-cache fastapi || print_warning "FastAPI build failed, continuing..."
+        
+        print_info "Building background-service..."
+        $COMPOSE_CMD build --no-cache background-service || print_warning "Background service build failed, continuing..."
         
         # Start services
         $COMPOSE_CMD up -d
@@ -269,7 +276,16 @@ case $COMMAND in
         build_base_image $REBUILD_BASE
         
         # Build main services
-        $COMPOSE_CMD build --no-cache auth fastapi background-service
+        # Build services individually to avoid one failure canceling others
+        print_info "Building auth service..."
+        $COMPOSE_CMD build --no-cache auth || print_warning "Auth build failed, continuing..."
+        
+        print_info "Building fastapi service..."
+        $COMPOSE_CMD build --no-cache fastapi || print_warning "FastAPI build failed, continuing..."
+        
+        print_info "Building background-service..."
+        $COMPOSE_CMD build --no-cache background-service || print_warning "Background service build failed, continuing..."
+        
         print_success "Build completed!"
         ;;
         
