@@ -173,13 +173,15 @@ services:
   #     timeout: 10s
   #     retries: 3
 
-  # Base image for background service (contains OpenVisus and dependencies)
+  # Base image for background service (contains OpenVisus, dependencies, and VisoarAgExplorer)
   # Build this first to cache heavy dependencies
   # Note: This service is only used for building the base image, not running
   background-service-base:
     build:
       context: ..
       dockerfile: Docker/Dockerfile.background-service-base
+      args:
+        D_GIT_TOKEN: ${D_GIT_TOKEN:-}
     image: sclib_background_service_base:latest
     profiles:
       - base-images

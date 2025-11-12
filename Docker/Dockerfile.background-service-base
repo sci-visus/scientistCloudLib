@@ -4,10 +4,14 @@
 
 FROM python:3.11-slim
 
+# Build arguments
+ARG D_GIT_TOKEN
+ARG INSTALL_HOME=/home/ViSOAR
+
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app:/app/scientistCloudLib \
+    PYTHONPATH=/app:/app/scientistCloudLib:${INSTALL_HOME}/VisoarAgExplorer \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
@@ -27,6 +31,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     pkg-config \
     patchelf \
+    # Git for cloning repositories (VisoarAgExplorer for slampy)
+    git \
     # Additional libraries for rasterio and image processing
     libgdal-dev \
     gdal-bin \
@@ -96,6 +102,18 @@ RUN python3 -c "import OpenVisus; from OpenVisus import VisusKernelPy; print('âœ
      echo "This is a critical error - OpenVisus native extension is not available." && \
      echo "Check OpenVisus installation logs above for details." && \
      exit 1)
+
+# Clone VisoarAgExplorer repository (contains slampy module needed for RGB DRONE and MapIR DRONE conversions)
+# Use token if provided, otherwise try public clone
+RUN mkdir -p ${INSTALL_HOME} && \
+    if [ -n "$D_GIT_TOKEN" ]; then \
+        git clone -b dataportal https://${D_GIT_TOKEN}@github.com/sci-visus/VisoarAgExplorer.git ${INSTALL_HOME}/VisoarAgExplorer || \
+        git clone -b dataportal https://github.com/sci-visus/VisoarAgExplorer.git ${INSTALL_HOME}/VisoarAgExplorer; \
+    else \
+        git clone -b dataportal https://github.com/sci-visus/VisoarAgExplorer.git ${INSTALL_HOME}/VisoarAgExplorer || \
+        echo "Warning: Could not clone VisoarAgExplorer. slampy may not be available."; \
+    fi && \
+    chown -R app:app ${INSTALL_HOME}
 
 # Create necessary directories
 RUN mkdir -p /app/logs \
