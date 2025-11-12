@@ -729,6 +729,7 @@ scope = drive
     def _create_or_update_dataset_entry(self, job_config: UploadJobConfig):
         """Create or update dataset entry in visstoredatas collection."""
         try:
+            logger.info(f"Creating/updating dataset entry: uuid={job_config.dataset_uuid}, name={job_config.dataset_name}, user={job_config.user_email}")
             
             with mongo_collection_by_type_context('visstoredatas') as collection:
                 # Check if dataset already exists
@@ -762,7 +763,7 @@ scope = drive
                 
                 if existing_dataset:
                     # Update existing dataset - add new file information
-                    collection.update_one(
+                    update_result = collection.update_one(
                         {"uuid": job_config.dataset_uuid},
                         {
                             "$set": {
@@ -781,7 +782,10 @@ scope = drive
                             }
                         }
                     )
-                    logger.info(f"Added file to existing dataset: {job_config.dataset_uuid} (user: {job_config.user_email})")
+                    if update_result.modified_count > 0:
+                        logger.info(f"✅ Updated existing dataset: {job_config.dataset_uuid} (user: {job_config.user_email})")
+                    else:
+                        logger.warning(f"⚠️  Dataset update returned modified_count=0: {job_config.dataset_uuid}")
                 else:
                     # Create new dataset entry
                     dataset_doc["files"] = [{
@@ -792,10 +796,23 @@ scope = drive
                         "created_at": job_config.created_at
                     }]
                     result = collection.insert_one(dataset_doc)
-                    logger.info(f"Created dataset entry: {job_config.dataset_uuid} (user: {job_config.user_email}, inserted_id: {result.inserted_id})")
+                    if result.inserted_id:
+                        logger.info(f"✅ Created dataset entry: {job_config.dataset_uuid} (user: {job_config.user_email}, inserted_id: {result.inserted_id})")
+                        
+                        # Verify the dataset was actually created
+                        verify_dataset = collection.find_one({"uuid": job_config.dataset_uuid})
+                        if verify_dataset:
+                            logger.info(f"✅ Verified dataset exists in MongoDB: {job_config.dataset_uuid}")
+                        else:
+                            logger.error(f"❌ CRITICAL: Dataset was not found after insertion! UUID: {job_config.dataset_uuid}")
+                    else:
+                        logger.error(f"❌ CRITICAL: Dataset insertion returned no inserted_id! UUID: {job_config.dataset_uuid}")
                     
         except Exception as e:
-            logger.error(f"Error creating/updating dataset entry for {job_config.dataset_uuid}: {e}", exc_info=True)
+            logger.error(f"❌ CRITICAL ERROR creating/updating dataset entry for {job_config.dataset_uuid}: {e}", exc_info=True)
+            # Re-raise the exception so the caller knows it failed
+            # This is critical - dataset must exist for the system to work
+            raise RuntimeError(f"Failed to create dataset entry in MongoDB: {e}") from e
     
     def _format_data_size(self, size_bytes: int) -> str:
         """Format data size in the same format as existing schema."""
@@ -911,16 +928,20 @@ scope = drive
                 logger.error(f"Dataset not found for conversion job: {dataset_uuid}")
                 return
             
-            # Import job queue manager
+            # Import job queue manager (use same pattern as top-level imports)
             try:
                 from .SCLib_JobQueueManager import SCLib_JobQueueManager
             except ImportError:
                 from SCLib_JobQueueManager import SCLib_JobQueueManager
             
-            # Get MongoDB connection
-            from .SCLib_MongoConnection import get_mongo_connection
+            # Get MongoDB connection (use same pattern as top-level imports)
+            try:
+                from .SCLib_MongoConnection import get_mongo_connection
+            except ImportError:
+                from SCLib_MongoConnection import get_mongo_connection
+            
             mongo_client = get_mongo_connection()
-            db_name = get_database_name()
+            db_name = get_database_name()  # Already imported at top of file
             
             # Create job queue manager
             job_queue = SCLib_JobQueueManager(mongo_client, db_name)
