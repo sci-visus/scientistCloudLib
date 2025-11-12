@@ -52,13 +52,15 @@ class DatasetConverter:
         
         # Map common sensor type variations to standard types
         sensor_type_mapping = {
-            'RGB': 'TIFF_RGB',  # RGB is typically TIFF RGB
+            'RGB': 'RGB DRONE',  # RGB should use RGB DRONE (slampy) conversion, not TIFF_RGB
+            'MAPIR': 'MAPIR DRONE',  # MapIR should use MapIR DRONE conversion
             'TIFF RGB': 'TIFF_RGB',
             'TIFFRGB': 'TIFF_RGB',
         }
         if self.sensor_type in sensor_type_mapping:
+            original_type = self.sensor_type
             self.sensor_type = sensor_type_mapping[self.sensor_type]
-            logger.info(f"Mapped sensor type '{sensor_type}' to '{self.sensor_type}'")
+            logger.info(f"Mapped sensor type '{original_type}' to '{self.sensor_type}'")
         
         self.conversion_params = conversion_params or {}
         self.upload_to_aws = upload_to_aws

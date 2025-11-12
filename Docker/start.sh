@@ -189,6 +189,60 @@ check_base_image_exists() {
     docker images --format "{{.Repository}}:{{.Tag}}" | grep -q "^sclib_background_service_base:latest$"
 }
 
+# Function to check if base image Dockerfile is newer than the image
+check_base_image_needs_rebuild() {
+    local dockerfile_path="SCLib_JobProcessing/Docker/Dockerfile.background-service-base"
+    local requirements_path="SCLib_JobProcessing/requirements_conversion.txt"
+    
+    if ! check_base_image_exists; then
+        return 0  # Needs build if image doesn't exist
+    fi
+    
+    # Get image creation time (ISO 8601 format)
+    local image_time=$(docker inspect -f '{{ .Created }}' sclib_background_service_base:latest 2>/dev/null || echo "")
+    if [ -z "$image_time" ]; then
+        return 0  # Needs build if we can't get image time
+    fi
+    
+    # Convert image time to Unix timestamp (handle both Linux and macOS)
+    local image_timestamp
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # macOS uses BSD date
+        image_timestamp=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${image_time%.*}" +%s 2>/dev/null || echo "0")
+    else
+        # Linux uses GNU date
+        image_timestamp=$(date -d "$image_time" +%s 2>/dev/null || echo "0")
+    fi
+    
+    # Check if Dockerfile or requirements files are newer
+    # Use stat with platform-specific flags
+    if [ -f "$dockerfile_path" ]; then
+        local dockerfile_timestamp
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            dockerfile_timestamp=$(stat -f %m "$dockerfile_path" 2>/dev/null || echo "0")
+        else
+            dockerfile_timestamp=$(stat -c %Y "$dockerfile_path" 2>/dev/null || echo "0")
+        fi
+        if [ "$dockerfile_timestamp" -gt "$image_timestamp" ]; then
+            return 0  # Dockerfile is newer, needs rebuild
+        fi
+    fi
+    
+    if [ -f "$requirements_path" ]; then
+        local req_timestamp
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            req_timestamp=$(stat -f %m "$requirements_path" 2>/dev/null || echo "0")
+        else
+            req_timestamp=$(stat -c %Y "$requirements_path" 2>/dev/null || echo "0")
+        fi
+        if [ "$req_timestamp" -gt "$image_timestamp" ]; then
+            return 0  # Requirements file is newer, needs rebuild
+        fi
+    fi
+    
+    return 1  # No rebuild needed
+}
+
 # Function to build base image
 build_base_image() {
     local rebuild_flag=$1
@@ -198,8 +252,12 @@ build_base_image() {
         print_info "Rebuilding background service base image from scratch (this may take a while - OpenVisus is large)..."
         docker-compose -f $COMPOSE_FILE --profile base-images build --no-cache background-service-base
         print_success "Base image rebuilt successfully"
+    elif check_base_image_needs_rebuild; then
+        print_info "Base image Dockerfile or requirements have changed, rebuilding base image (this may take a while - OpenVisus is large)..."
+        docker-compose -f $COMPOSE_FILE --profile base-images build --no-cache background-service-base
+        print_success "Base image rebuilt successfully"
     elif check_base_image_exists; then
-        print_info "Base image exists, skipping build (use --rebuild-base to rebuild)"
+        print_info "Base image exists and is up to date, skipping build (use --rebuild-base to force rebuild)"
     else
         print_info "Base image not found, building it now (this may take a while - OpenVisus is large)..."
         docker-compose -f $COMPOSE_FILE --profile base-images build background-service-base
@@ -214,7 +272,7 @@ case $COMMAND in
         print_info "Environment: $ENV_FILE"
         print_info "Services: ${SERVICES:-all}"
         
-        # Build base image if needed
+        # Build base image if needed (automatically detects if Dockerfile changed)
         build_base_image $REBUILD_BASE
         
         # Build the services first (build individually to avoid one failure canceling others)
@@ -225,7 +283,7 @@ case $COMMAND in
         print_info "Building fastapi service..."
         $COMPOSE_CMD build --no-cache fastapi || print_warning "FastAPI build failed, continuing..."
         
-        print_info "Building background-service..."
+        print_info "Building background-service (depends on base image)..."
         $COMPOSE_CMD build --no-cache background-service || print_warning "Background service build failed, continuing..."
         
         # Start services
@@ -240,6 +298,7 @@ case $COMMAND in
         print_info "MongoDB: localhost:27017"
         print_info "Redis: localhost:6379"
         print_info "Nginx: http://localhost (if enabled)"
+        print_info "Note: If you modified conversion dependencies, the base image was automatically rebuilt"
         ;;
         
     down)
@@ -272,7 +331,7 @@ case $COMMAND in
     build)
         print_info "Building services..."
         
-        # Build base image if needed
+        # Build base image if needed (automatically detects if Dockerfile changed)
         build_base_image $REBUILD_BASE
         
         # Build main services
@@ -283,10 +342,11 @@ case $COMMAND in
         print_info "Building fastapi service..."
         $COMPOSE_CMD build --no-cache fastapi || print_warning "FastAPI build failed, continuing..."
         
-        print_info "Building background-service..."
+        print_info "Building background-service (depends on base image)..."
         $COMPOSE_CMD build --no-cache background-service || print_warning "Background service build failed, continuing..."
         
         print_success "Build completed!"
+        print_info "Note: If you modified conversion dependencies, the base image was automatically rebuilt"
         ;;
         
     clean)

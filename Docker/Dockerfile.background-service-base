@@ -14,7 +14,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (including build tools for OpenVisus)
+# Install system dependencies (including build tools for OpenVisus and image processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     procps \
@@ -27,24 +27,75 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libssl-dev \
     pkg-config \
     patchelf \
+    # Additional libraries for rasterio and image processing
+    libgdal-dev \
+    gdal-bin \
+    libproj-dev \
+    libgeos-dev \
+    libtiff-dev \
+    libwebp-dev \
+    libopenjp2-7-dev \
+    # Scientific computing libraries (HDF5, NetCDF)
+    libhdf5-serial-dev \
+    netcdf-bin \
+    libnetcdf-dev \
+    # Cairo for matplotlib and plotting
+    libcairo2-dev \
+    # Additional build dependencies
+    libffi-dev \
+    # XML processing libraries (for lxml and other XML parsers)
+    libxml2-dev \
+    libxslt1-dev \
+    # Spatial database support
+    libspatialite-dev \
+    # File operations utilities
+    rclone \
+    rsync \
+    p7zip-full \
+    unzip \
+    # SSH operations
+    sshpass \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
 COPY SCLib_JobProcessing/requirements_fastapi.txt /app/requirements_fastapi.txt
 COPY SCLib_JobProcessing/requirements.txt /app/requirements.txt
+COPY SCLib_JobProcessing/requirements_conversion.txt /app/requirements_conversion.txt
 
 # Install Python dependencies
-# Install both requirements files to ensure all dependencies are available
+# Install all requirements files to ensure all dependencies are available
+# Note: Install GDAL first (specific version) before rasterio for compatibility
 RUN pip install --no-cache-dir -r requirements_fastapi.txt && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    # Install GDAL first (compatible with libgdal 3.8.4)
+    pip install --no-cache-dir "gdal==3.8.4" && \
+    # Then install conversion requirements (which includes rasterio and large-image)
+    pip install --no-cache-dir -r requirements_conversion.txt
 
 # Install OpenVisus (required for TIFF to IDX conversions)
 # This is the heavy part that we want to cache in the base image
-# Follow the pattern from ag-explorer-base: uninstall first, then install both packages
+# Follow the pattern from ag-explorer-base: install Panel ecosystem first, then OpenVisus
+# The Panel ecosystem packages may be needed for OpenVisus to configure properly
+RUN pip install --no-cache-dir \
+        param>=2.0.0 \
+        panel>=1.0.0 \
+        holoviews>=1.16.0 \
+        bokeh==3.8.0
+
+# Now install OpenVisus (uninstall any existing versions first)
 RUN pip uninstall -y OpenVisus OpenVisusNoGui openvisuspy || true && \
     pip install --no-cache-dir OpenVisus==2.2.135 && \
     pip install --no-cache-dir openvisuspy && \
+    # Configure OpenVisus - this may fail but we continue
     CODE_SIGN=$(which codesign 2>/dev/null || echo "") python3 -m OpenVisus configure || true
+
+# Verify OpenVisus installation - fail the build if VisusKernelPy is not available
+# This ensures we catch installation issues early
+RUN python3 -c "import OpenVisus; from OpenVisus import VisusKernelPy; print('✅ OpenVisus.VisusKernelPy imported successfully')" || \
+    (echo "❌ ERROR: OpenVisus.VisusKernelPy import failed!" && \
+     echo "This is a critical error - OpenVisus native extension is not available." && \
+     echo "Check OpenVisus installation logs above for details." && \
+     exit 1)
 
 # Create necessary directories
 RUN mkdir -p /app/logs \
