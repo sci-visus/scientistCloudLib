@@ -49,9 +49,7 @@ RUN mkdir -p /app/logs \
     /mnt/visus_datasets/tmp
 
 # Create a non-root user for security
+# Note: Don't switch to app user here - let the service Dockerfile do it after setup
 RUN useradd --create-home --shell /bin/bash app && \
     chown -R app:app /app /mnt/visus_datasets
-
-# Switch to non-root user
-USER app
 

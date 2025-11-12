@@ -7,9 +7,13 @@ FROM sclib_background_service_base:latest
 # Set work directory
 WORKDIR /app
 
-# Copy startup script
+# Copy startup script (as root, before switching to app user)
 COPY Docker/start_background_service.sh /app/start_background_service.sh
-RUN chmod +x /app/start_background_service.sh
+RUN chmod +x /app/start_background_service.sh && \
+    chown app:app /app/start_background_service.sh
+
+# Switch to non-root user for security
+USER app
 
 # Health check - verify the service is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
