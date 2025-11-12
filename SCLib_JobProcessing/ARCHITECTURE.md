@@ -1,69 +1,84 @@
 # ScientistCloud Job Processing Architecture
 
-## Core Principle: UUID-Based Job Processing
+## Core Principle: Status-Based Processing (No Jobs Collection)
 
-**All job processing revolves around dataset UUID, not user email.**
+**All job processing revolves around dataset status in `visstoredatas` collection.**
 
-- **Job Processing Layer**: Works exclusively with `dataset_uuid`
+- **No separate jobs collection needed** - dataset status is the source of truth
+- **Job Processing Layer**: Queries `visstoredatas` directly by `status` field
 - **UI/Portal Layer**: Filters by `user_email` for display purposes only
-- **Background Service**: Processes all jobs regardless of user
+- **Background Service**: Processes all datasets regardless of user
 
-## Architecture Layers
+## Simplified Architecture
 
-### 1. Job Creation (UUID-Based)
+### 1. Dataset Status Management (UUID-Based)
 
-**Location**: `SCLib_JobQueueManager.create_job()`
+**Location**: `SCLib_UploadProcessor._update_dataset_status()`
 
+When a dataset needs conversion:
 ```python
-job = {
-    'job_id': str(uuid.uuid4()),
-    'dataset_uuid': dataset_uuid,  # ← Primary identifier
-    'job_type': job_type,
-    'status': 'pending',
-    'parameters': {...}  # Job-specific parameters (no user_email)
-}
-```
-
-**Key Points**:
-- Jobs are created with `dataset_uuid` only
-- No `user_email` field in job documents
-- Jobs are not restricted to any user
-
-### 2. Job Processing (UUID-Based)
-
-**Location**: `SCLib_BackgroundService._process_jobs()`
-
-```python
-# Get next job - NO user filtering
-job = self.job_queue.get_next_job(self.worker_id)
-```
-
-**Key Points**:
-- `get_next_job()` queries by `status: 'pending'` only
-- No user filtering in job retrieval
-- Background service processes all jobs regardless of user
-
-### 3. Dataset Management (UUID-Based)
-
-**Location**: `SCLib_UploadProcessor._create_conversion_job()`
-
-```python
-job_id = job_queue.create_job(
-    dataset_uuid=dataset_uuid,  # ← Uses UUID only
-    job_type='dataset_conversion',
-    parameters={
-        'input_path': input_path,
-        'output_path': output_path,
-        'sensor_type': sensor,
-        # No user_email in parameters
-    }
+# Set status to "conversion queued" - that's it!
+collection.update_one(
+    {'uuid': dataset_uuid},
+    {'$set': {'status': 'conversion queued'}}
 )
 ```
 
 **Key Points**:
-- Conversion jobs use `dataset_uuid` to identify the dataset
-- Job parameters contain paths and sensor type, not user info
-- Jobs can process datasets from any user
+- No job creation needed - just update dataset status
+- Status field in `visstoredatas` is the single source of truth
+- Simple and direct - no intermediate job records
+
+### 2. Job Processing (Status-Based Query)
+
+**Location**: `SCLib_BackgroundService._process_jobs()`
+
+```python
+# Query datasets directly by status - NO jobs collection needed
+datasets_to_convert = datasets_collection.find({
+    'status': 'conversion queued'  # ← Direct status query
+}).limit(1)
+
+dataset = next(datasets_to_convert, None)
+if dataset:
+    self._process_dataset_conversion(dataset)
+```
+
+**Key Points**:
+- Background service queries `visstoredatas` collection directly
+- Finds datasets with `status: 'conversion queued'`
+- No user filtering - processes all datasets regardless of user
+- Updates dataset status directly: `conversion queued` → `converting` → `done`
+
+### 3. Conversion Processing (Direct Dataset Processing)
+
+**Location**: `SCLib_BackgroundService._process_dataset_conversion()`
+
+```python
+# Process dataset directly - no job wrapper
+dataset_uuid = dataset['uuid']
+sensor = dataset.get('sensor', 'OTHER')
+
+# Update status to "converting"
+datasets_collection.update_one(
+    {'uuid': dataset_uuid},
+    {'$set': {'status': 'converting'}}
+)
+
+# Run conversion
+result = self._handle_dataset_conversion_direct(...)
+
+# Update status to "done"
+datasets_collection.update_one(
+    {'uuid': dataset_uuid},
+    {'$set': {'status': 'done'}}
+)
+```
+
+**Key Points**:
+- Processes dataset directly from `visstoredatas` collection
+- Updates status in place: `conversion queued` → `converting` → `done`
+- No intermediate job records needed
 
 ### 4. UI/Portal Layer (User-Filtered)
 
@@ -89,59 +104,81 @@ $datasets = $datasets_collection->find([
 
 ### Upload Flow:
 1. User uploads file → Creates dataset entry with `uuid` and `user` fields
-2. Upload completes → Creates conversion job with `dataset_uuid` only
-3. Background service → Picks up job by `dataset_uuid` (no user filtering)
-4. Job processes → Updates dataset status by `uuid`
+2. Upload completes → Sets dataset `status: 'conversion queued'` (no job creation)
+3. Background service → Queries `visstoredatas` for `status: 'conversion queued'`
+4. Background service → Processes dataset directly and updates status
 
-### Job Processing Flow:
-1. Background service calls `get_next_job()` → Returns any pending job
-2. Job contains `dataset_uuid` → Used to find dataset in `visstoredatas`
-3. Dataset lookup → `collection.find_one({"uuid": dataset_uuid})`
-4. Process job → Update dataset status by `uuid`
+### Conversion Processing Flow:
+1. Background service queries: `datasets_collection.find({'status': 'conversion queued'})`
+2. Gets dataset → Contains all needed info (uuid, sensor, paths)
+3. Updates status: `conversion queued` → `converting`
+4. Runs conversion script
+5. Updates status: `converting` → `done` (or `conversion failed` on error)
 
 ## Important Distinctions
 
-### Jobs Collection (`jobs`)
-- **Primary Key**: `dataset_uuid`
-- **No user filtering** in job processing
-- Jobs are processed by UUID, not user
+### No Jobs Collection Needed
+- **Simplified Architecture**: Dataset status in `visstoredatas` is the source of truth
+- **No intermediate records**: No need to create/update/delete job records
+- **Direct processing**: Background service queries datasets directly by status
 
 ### Datasets Collection (`visstoredatas`)
 - **Primary Key**: `uuid`
+- **Status Field**: `status` - values: `uploading`, `conversion queued`, `converting`, `done`, `conversion failed`
 - **User Field**: `user` (email) - for UI filtering only
-- Status updates use `uuid`, not user email
+- **Status updates**: Use `uuid`, not user email
 
 ### UI Queries
 - Filter by `user_email` to show user's datasets
+- Query by `status` to show conversion progress
 - This is **presentation layer only**
 - Does not restrict job processing
+
+## Status Transitions
+
+```
+uploading → conversion queued → converting → done
+                              ↓
+                         conversion failed
+```
+
+- **uploading**: Files are being uploaded
+- **conversion queued**: Upload complete, waiting for conversion
+- **converting**: Conversion in progress
+- **done**: Conversion complete
+- **conversion failed**: Conversion failed after max retries
 
 ## Verification
 
 To verify the architecture is correct:
 
-1. **Check job creation**:
+1. **Check dataset status update**:
    ```python
-   # Should only have dataset_uuid, no user_email
-   job = job_queue.create_job(dataset_uuid="...", ...)
+   # Should set status directly, no job creation
+   collection.update_one(
+       {'uuid': dataset_uuid},
+       {'$set': {'status': 'conversion queued'}}
+   )
    ```
 
-2. **Check job retrieval**:
+2. **Check background service query**:
    ```python
-   # Should not filter by user
-   job = job_queue.get_next_job(worker_id)
+   # Should query visstoredatas directly by status
+   datasets = datasets_collection.find({'status': 'conversion queued'})
    ```
 
 3. **Check dataset updates**:
    ```python
    # Should use uuid, not user_email
-   collection.update_one({"uuid": dataset_uuid}, {...})
+   collection.update_one({"uuid": dataset_uuid}, {"$set": {"status": "done"}})
    ```
 
 ## Summary
 
-✅ **Job Processing**: UUID-based, no user restrictions  
-✅ **Dataset Management**: UUID-based, user field for UI only  
+✅ **Simplified Architecture**: No jobs collection - dataset status is source of truth  
+✅ **Direct Processing**: Background service queries `visstoredatas` by status  
+✅ **UUID-Based**: All processing uses `dataset_uuid`, not user email  
+✅ **Status-Driven**: Status transitions: `conversion queued` → `converting` → `done`  
 ✅ **UI Layer**: User-filtered for display, doesn't affect processing  
-✅ **Background Service**: Processes all jobs regardless of user
+✅ **Background Service**: Processes all datasets regardless of user
 

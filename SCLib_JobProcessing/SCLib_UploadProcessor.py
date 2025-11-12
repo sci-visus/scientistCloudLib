@@ -920,65 +920,27 @@ scope = drive
             logger.error(f"Error updating dataset status: {e}")
     
     def _create_conversion_job(self, dataset_uuid: str, job_config: UploadJobConfig, collection):
-        """Create a conversion job for a dataset that needs conversion."""
+        """
+        Mark dataset as ready for conversion.
+        
+        NOTE: We no longer create entries in the jobs collection.
+        The background service queries visstoredatas directly by status.
+        This simplifies the architecture - dataset status is the source of truth.
+        """
         try:
-            # Get dataset to determine paths
+            # Verify dataset exists
             dataset = collection.find_one({"uuid": dataset_uuid})
             if not dataset:
-                logger.error(f"Dataset not found for conversion job: {dataset_uuid}")
+                logger.error(f"Dataset not found for conversion: {dataset_uuid}")
                 return
             
-            # Import job queue manager (use same pattern as top-level imports)
-            try:
-                from .SCLib_JobQueueManager import SCLib_JobQueueManager
-            except ImportError:
-                from SCLib_JobQueueManager import SCLib_JobQueueManager
-            
-            # Get MongoDB connection (use same pattern as top-level imports)
-            try:
-                from .SCLib_MongoConnection import get_mongo_connection
-            except ImportError:
-                from SCLib_MongoConnection import get_mongo_connection
-            
-            mongo_client = get_mongo_connection()
-            db_name = get_database_name()  # Already imported at top of file
-            
-            # Create job queue manager
-            job_queue = SCLib_JobQueueManager(mongo_client, db_name)
-            
-            # Determine input and output paths
-            config = get_config()
-            input_dir = config.job_processing.in_data_dir if hasattr(config, 'job_processing') else f"{config.server.visus_datasets}/upload"
-            output_dir = config.job_processing.out_data_dir if hasattr(config, 'job_processing') else f"{config.server.visus_datasets}/converted"
-            
-            input_path = os.path.join(input_dir, dataset_uuid)
-            output_path = os.path.join(output_dir, dataset_uuid)
-            
-            # Get sensor type from dataset or job config
-            sensor = dataset.get('sensor', job_config.sensor.value)
-            
-            # Get conversion parameters if any
-            conversion_params = dataset.get('conversion_parameters', {})
-            
-            # Create conversion job
-            job_id = job_queue.create_job(
-                dataset_uuid=dataset_uuid,
-                job_type='dataset_conversion',
-                parameters={
-                    'input_path': input_path,
-                    'output_path': output_path,
-                    'sensor_type': sensor,
-                    'conversion_params': conversion_params
-                },
-                priority=1  # High priority for conversion jobs
-            )
-            
-            logger.info(f"Created conversion job {job_id} for dataset {dataset_uuid}")
+            # Dataset status is already set to "conversion queued" by _update_dataset_status()
+            # The background service will pick it up by querying visstoredatas for status="conversion queued"
+            logger.info(f"Dataset {dataset_uuid} marked for conversion - background service will process it")
             
         except Exception as e:
-            logger.error(f"Error creating conversion job for dataset {dataset_uuid}: {e}")
-            # Don't raise - we don't want to fail the upload if job creation fails
-            # The migration utility can pick it up later
+            logger.error(f"Error preparing dataset for conversion: {dataset_uuid}: {e}")
+            # Don't raise - we don't want to fail the upload if this fails
     
     def _map_upload_status_to_dataset_status(self, upload_status: UploadStatus, job_config: Optional[UploadJobConfig] = None) -> str:
         """Map upload status to dataset status."""
