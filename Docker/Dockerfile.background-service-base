@@ -115,12 +115,27 @@ COPY SCLib_JobProcessing/Docker/requirements/ /tmp/requirements/
 # Install platform-specific requirements (OpenVisus)
 # This matches the pattern from ag-explorer-bg-service-base
 ARG PYTHON_REQUIREMENTS_FILE=ubuntu-python310-requirements.txt
-RUN python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} && \
+RUN echo "=========================================" && \
+    echo "Installing OpenVisus from requirements file..." && \
+    echo "Requirements file: /tmp/requirements/${PYTHON_REQUIREMENTS_FILE}" && \
+    cat /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} && \
+    echo "=========================================" && \
+    echo "Python version:" && python3 --version && \
+    echo "pip version:" && python3 -m pip --version && \
+    echo "=========================================" && \
+    python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} && \
+    echo "=========================================" && \
+    echo "Checking installed OpenVisus packages..." && \
+    python3 -m pip list | grep -i openvisus || echo "No OpenVisus packages found!" && \
+    echo "=========================================" && \
     echo "Verifying OpenVisus installation..." && \
     python3 -c "import OpenVisus; print('✅ OpenVisus base module imported successfully')" || \
     (echo "❌ Failed to import OpenVisus after installation!" && \
      echo "Python version:" && python3 --version && \
+     echo "Python path:" && python3 -c "import sys; print('\n'.join(sys.path))" && \
      echo "Installed packages:" && python3 -m pip list | grep -i openvisus && \
+     echo "Checking if OpenVisus files exist:" && \
+     find /usr -name "*OpenVisus*" 2>/dev/null | head -10 || echo "No OpenVisus files found" && \
      exit 1) && \
     # Configure OpenVisus - this may fail but we continue
     CODE_SIGN=$(which codesign 2>/dev/null || echo "") python3 -m OpenVisus configure || echo "⚠️  OpenVisus configure failed, but continuing..."
