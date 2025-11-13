@@ -34,10 +34,11 @@ RUN mkdir -p /app/logs
 # Set proper permissions
 RUN chmod +x /app/start_auth_server.py
 
-# Create a non-root user for security
-RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app
-USER app
+# Use www-data user/group to match PHP/Apache service permissions
+# This ensures consistent permissions across all services
+# Note: www-data user already exists in Ubuntu base image
+RUN chown -R www-data:www-data /app
+USER www-data
 
 # Expose the port
 EXPOSE 8001
