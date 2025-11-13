@@ -1,0 +1,7 @@
+{
+  "db_name": "SCLib_Test",
+  "in_data_dir": "/Users/amygooch/GIT/VisStoreDataTemp/upload",
+  "out_data_dir": "/Users/amygooch/GIT/VisStoreDataTemp/converted",
+  "sync_data_dir": "/Users/amygooch/GIT/VisStoreDataTemp/sync",
+  "auth_dir": "/Users/amygooch/GIT/VisStoreDataTemp/auth"
+}

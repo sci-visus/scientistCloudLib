@@ -1,0 +1,10 @@
+{
+  "input_file": null,
+  "input_dir":"/Users/amygooch/GIT/SCI/DATA/small/tinyTaylorGrant",
+  "output_dir": "/tmp/test_conversion_output",
+  "sensor_type": "RGB DRONE",
+  "conversion_params": {},
+  "upload_to_aws": false,
+  "cleanup_output": true
+}
+

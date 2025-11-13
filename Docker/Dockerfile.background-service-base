@@ -86,13 +86,16 @@ RUN pip install --no-cache-dir \
         param>=2.0.0 \
         panel>=1.0.0 \
         holoviews>=1.16.0 \
-        bokeh==3.8.0
-
+        bokeh==3.8.0 \ 
+        pymap3d
+        
 # Now install OpenVisus (uninstall any existing versions first)
-# Using version 2.2.135 to match Dockerfile.ag-explorer-base (background service uses this version)
+# Try installing both OpenVisus and OpenVisusNoGui - one of them should have the native extension
+# Using versions from ubuntu-python310-requirements.txt (2.2.141) which the old bg-service uses
 RUN pip uninstall -y OpenVisus OpenVisusNoGui openvisuspy || true && \
-    pip install --no-cache-dir OpenVisus==2.2.135 && \
-    pip install --no-cache-dir openvisuspy && \
+    pip install --no-cache-dir OpenVisus==2.2.141 && \
+    pip install --no-cache-dir OpenVisusNoGui==2.2.141 && \
+    pip install --no-cache-dir openvisuspy==1.0.71 && \
     # Configure OpenVisus - this may fail but we continue
     CODE_SIGN=$(which codesign 2>/dev/null || echo "") python3 -m OpenVisus configure || true
 

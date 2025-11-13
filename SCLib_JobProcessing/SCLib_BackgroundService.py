@@ -109,6 +109,13 @@ class SCLib_BackgroundService:
                 self._process_dataset_conversion(dataset)
             else:
                 # No datasets need processing, do maintenance
+                # Only log every 12 iterations (once per minute) to reduce noise
+                if not hasattr(self, '_check_counter'):
+                    self._check_counter = 0
+                self._check_counter += 1
+                if self._check_counter >= 12:
+                    print(f"⏳ No datasets queued for conversion (checked {self._check_counter * 5}s ago)")
+                    self._check_counter = 0
                 self._cleanup_old_datasets()
                 
         except Exception as e:

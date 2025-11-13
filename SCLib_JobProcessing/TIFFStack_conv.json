@@ -1,0 +1,10 @@
+{
+  "input_file": null,
+  "input_dir":"/Users/amygooch/GIT/SCI/DATA/Trimmed_cell3-2/Trimmed_cell3/SmallTrimmedCell",
+  "output_dir": "/tmp/test_conversion_output",
+  "sensor_type": "TIFF",
+  "conversion_params": {},
+  "upload_to_aws": false,
+  "cleanup_output": true
+}
+

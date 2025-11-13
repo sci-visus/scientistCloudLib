@@ -1,0 +1,10 @@
+{
+  "input_file": "/Users/amygooch/GIT/SCI/DATA/Sampad/1161_Panel2_7_12.tif",
+  "input_dir": null,
+  "output_dir": "/tmp/test_conversion_output",
+  "sensor_type": "TIFF RGB",
+  "conversion_params": {},
+  "upload_to_aws": false,
+  "cleanup_output": true
+}
+
