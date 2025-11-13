@@ -1,15 +1,18 @@
 # Base Image for SCLib Background Service
 # Contains system packages, Python dependencies, and OpenVisus
 # This base image is built separately and cached for faster builds
+# Matches the configuration from Dockerfile.ag-explorer-bg-service-base for OpenVisus compatibility
 
-FROM python:3.11-slim
+FROM ubuntu:24.04
 
 # Build arguments
 ARG D_GIT_TOKEN
 ARG INSTALL_HOME=/home/ViSOAR
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1 \
+# Environment Variables
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=America/Chicago \
+    PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONPATH=/app:/app/scientistCloudLib:${INSTALL_HOME}/VisoarAgExplorer \
     PIP_NO_CACHE_DIR=1 \
@@ -18,49 +21,64 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # Set work directory
 WORKDIR /app
 
-# Install system dependencies (including build tools for OpenVisus and image processing)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    procps \
-    build-essential \
-    cmake \
-    python3-dev \
-    libjpeg-dev \
-    libpng-dev \
-    zlib1g-dev \
-    libssl-dev \
-    pkg-config \
-    patchelf \
-    # Git for cloning repositories (VisoarAgExplorer for slampy)
-    git \
-    # Additional libraries for rasterio and image processing
-    libgdal-dev \
-    gdal-bin \
-    libproj-dev \
-    libgeos-dev \
-    libtiff-dev \
-    libwebp-dev \
-    libopenjp2-7-dev \
-    # Scientific computing libraries (HDF5, NetCDF)
-    libhdf5-serial-dev \
-    netcdf-bin \
-    libnetcdf-dev \
-    # Cairo for matplotlib and plotting
-    libcairo2-dev \
-    # Additional build dependencies
-    libffi-dev \
-    # XML processing libraries (for lxml and other XML parsers)
-    libxml2-dev \
-    libxslt1-dev \
-    # Spatial database support
-    libspatialite-dev \
-    # File operations utilities
-    rclone \
-    rsync \
-    p7zip-full \
-    unzip \
-    # SSH operations
-    sshpass \
+# Set timezone and install system dependencies (matching ag-explorer-bg-service-base)
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && \
+    echo $TZ > /etc/timezone && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        # Core system packages
+        git \
+        curl \
+        tar \
+        gzip \
+        unzip \
+        sshpass \
+        rclone \
+        rsync \
+        p7zip-full \
+        # Python and development (using python3.12 like the old Dockerfile)
+        python3.12 \
+        python3-pip \
+        python3-dev \
+        build-essential \
+        cmake \
+        # Image processing dependencies
+        zlib1g \
+        zlib1g-dev \
+        libjpeg-dev \
+        libimage-exiftool-perl \
+        libzbar0 \
+        libnss3 \
+        libcairo2-dev \
+        # Scientific computing
+        libhdf5-serial-dev \
+        netcdf-bin \
+        libnetcdf-dev \
+        # PyQt5 system packages (for Python 3.12 compatibility)
+        python3-pyqt5 \
+        # Build tools
+        patchelf \
+        libssl-dev \
+        libffi-dev \
+        pkg-config \
+        # XML processing libraries for lxml
+        libxml2-dev \
+        libxslt1-dev \
+        # Additional dependencies for large-image and rasterio
+        libgdal-dev \
+        gdal-bin \
+        libproj-dev \
+        libgeos-dev \
+        libtiff-dev \
+        libwebp-dev \
+        libopenjp2-7-dev \
+        # Spatial database support
+        libspatialite-dev \
+        # Process management
+        procps \
+        # Note: python3-opencv removed to avoid conflicts with pip opencv
+    && ln -s -f /usr/bin/python3.12 /usr/bin/python3 \
+    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better Docker layer caching
@@ -69,46 +87,57 @@ COPY SCLib_JobProcessing/requirements.txt /app/requirements.txt
 COPY SCLib_JobProcessing/requirements_conversion.txt /app/requirements_conversion.txt
 
 # Install Python dependencies
+# Use --break-system-packages flag (required for Ubuntu 24.04 with system Python)
 # Install all requirements files to ensure all dependencies are available
 # Note: Install GDAL first (specific version) before rasterio for compatibility
-RUN pip install --no-cache-dir -r requirements_fastapi.txt && \
-    pip install --no-cache-dir -r requirements.txt && \
+RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements_fastapi.txt && \
+    python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt && \
     # Install GDAL first (compatible with libgdal 3.8.4)
-    pip install --no-cache-dir "gdal==3.8.4" && \
+    python3 -m pip install --no-cache-dir --break-system-packages "gdal==3.8.4" && \
     # Then install conversion requirements (which includes rasterio and large-image)
-    pip install --no-cache-dir -r requirements_conversion.txt
+    python3 -m pip install --no-cache-dir --break-system-packages -r requirements_conversion.txt
 
-# Install OpenVisus (required for TIFF to IDX conversions)
-# This is the heavy part that we want to cache in the base image
-# Follow the pattern from ag-explorer-base: install Panel ecosystem first, then OpenVisus
-# The Panel ecosystem packages may be needed for OpenVisus to configure properly
-RUN pip install --no-cache-dir \
+# Install Panel ecosystem first (may be needed for OpenVisus to configure properly)
+RUN python3 -m pip install --no-cache-dir --break-system-packages \
         param>=2.0.0 \
         panel>=1.0.0 \
         holoviews>=1.16.0 \
-        bokeh==3.8.0 \ 
+        bokeh==3.8.0 \
         pymap3d
         
-# Now install OpenVisus (uninstall any existing versions first)
-# Try installing both OpenVisus and OpenVisusNoGui - one of them should have the native extension
-# Using versions from ubuntu-python310-requirements.txt (2.2.141) which the old bg-service uses
-RUN pip uninstall -y OpenVisus OpenVisusNoGui openvisuspy || true && \
-    pip install --no-cache-dir OpenVisus==2.2.141 && \
-    pip install --no-cache-dir OpenVisusNoGui==2.2.141 && \
-    pip install --no-cache-dir openvisuspy==1.0.71 && \
-    # Configure OpenVisus - this may fail but we continue
-    CODE_SIGN=$(which codesign 2>/dev/null || echo "") python3 -m OpenVisus configure || true
+# Copy requirements files for platform-specific OpenVisus installation (matching old Dockerfile)
+# Build context is .. (scientistCloudLib), so path is relative to that
+COPY SCLib_JobProcessing/Docker/requirements/ /tmp/requirements/
 
-# Verify OpenVisus installation - warn if VisusKernelPy is not available
-# Note: OpenVisus native extension may not be available on all platforms
-# This is a warning, not a fatal error, so the build can continue
-# TIFF conversions that don't require OpenVisus will still work
-RUN python3 -c "import OpenVisus; from OpenVisus import VisusKernelPy; print('✅ OpenVisus.VisusKernelPy imported successfully')" || \
+# Install platform-specific requirements (OpenVisus)
+# This matches the pattern from ag-explorer-bg-service-base
+ARG PYTHON_REQUIREMENTS_FILE=ubuntu-python310-requirements.txt
+RUN python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} && \
+    echo "Verifying OpenVisus installation..." && \
+    python3 -c "import OpenVisus; print('✅ OpenVisus base module imported successfully')" || \
+    (echo "❌ Failed to import OpenVisus after installation!" && \
+     echo "Python version:" && python3 --version && \
+     echo "Installed packages:" && python3 -m pip list | grep -i openvisus && \
+     exit 1) && \
+    # Configure OpenVisus - this may fail but we continue
+    CODE_SIGN=$(which codesign 2>/dev/null || echo "") python3 -m OpenVisus configure || echo "⚠️  OpenVisus configure failed, but continuing..."
+
+# Verify OpenVisus installation - check if base module is available (required for all conversions)
+# Fail the build if OpenVisus base module is not available
+RUN python3 -c "import OpenVisus; print('✅ OpenVisus base module is available')" || \
+    (echo "❌ ERROR: OpenVisus base module is not available!" && \
+     echo "The OpenVisus installation failed. This is required for conversions." && \
+     echo "Checking pip list..." && \
+     pip list | grep -i openvisus || echo "No OpenVisus packages found in pip list" && \
+     exit 1)
+
+# Check if VisusKernelPy is available (native extension)
+# This is a warning, not a fatal error, as some conversions may work without it
+RUN python3 -c "from OpenVisus import VisusKernelPy; print('✅ OpenVisus.VisusKernelPy imported successfully')" || \
     (echo "⚠️  WARNING: OpenVisus.VisusKernelPy import failed!" && \
      echo "OpenVisus base module is available, but native extension may not be built." && \
      echo "TIFF conversions using OpenVisus may fail, but other conversions will work." && \
-     echo "This is a known issue on some platforms - continuing build..." && \
-     python3 -c "import OpenVisus; print('OpenVisus base module is available')" || true)
+     echo "This is a known issue on some platforms - continuing build...")
 
 # Create necessary directories
 RUN mkdir -p /app/logs \

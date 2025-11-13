@@ -1,0 +1,7 @@
+# Ubuntu 24.04 Python 3.12 specific requirements
+# OpenVisus - latest version available on Ubuntu 24.04
+# Note: File name says python310 but this is used for python3.12 as well
+OpenVisus==2.2.141
+OpenVisusNoGui==2.2.141
+openvisuspy==1.0.71
+
