@@ -10,22 +10,17 @@ WORKDIR /app
 # Ensure we're running as root for file operations
 USER root
 
-# Temporarily fix /app ownership to root so we can modify files
-# (Base image sets /app to app:app, but we need root access for setup)
-RUN chown root:root /app
-
-# Copy startup script (as root, before switching to app user)
+# Copy startup script (as root, before switching to www-data user)
 COPY Docker/start_background_service.sh /app/start_background_service.sh
 
 # Set permissions and ownership (must be done as root)
+# Use www-data:www-data to match PHP/Apache service permissions
 RUN chmod +x /app/start_background_service.sh && \
-    chown app:app /app/start_background_service.sh
+    chown www-data:www-data /app/start_background_service.sh && \
+    chown -R www-data:www-data /app
 
-# Restore /app ownership to app user for security
-RUN chown -R app:app /app
-
-# Switch to non-root user for security
-USER app
+# Switch to www-data user for security (matches PHP/Apache service)
+USER www-data
 
 # Health check - verify the service is running
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \

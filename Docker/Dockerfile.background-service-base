@@ -169,14 +169,13 @@ RUN mkdir -p /app/logs \
     /mnt/visus_datasets/sync \
     /mnt/visus_datasets/tmp
 
-# Create a non-root user for security
-# Note: Don't switch to app user here - let the service Dockerfile do it after setup
-RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app /mnt/visus_datasets
+# Use www-data user/group to match PHP/Apache service permissions
+# This ensures files created by PHP (www-data) can be accessed by the background service
+# Note: www-data user already exists in Ubuntu base image
+RUN chown -R www-data:www-data /app /mnt/visus_datasets
 
 # Clone VisoarAgExplorer repository (contains slampy module needed for RGB DRONE and MapIR DRONE conversions)
 # Use token if provided, otherwise try public clone
-# Do this after creating the app user so we can set ownership
 RUN mkdir -p ${INSTALL_HOME} && \
     if [ -n "$D_GIT_TOKEN" ]; then \
         git clone -b dataportal https://${D_GIT_TOKEN}@github.com/sci-visus/VisoarAgExplorer.git ${INSTALL_HOME}/VisoarAgExplorer || \
@@ -185,5 +184,5 @@ RUN mkdir -p ${INSTALL_HOME} && \
         git clone -b dataportal https://github.com/sci-visus/VisoarAgExplorer.git ${INSTALL_HOME}/VisoarAgExplorer || \
         echo "Warning: Could not clone VisoarAgExplorer. slampy may not be available."; \
     fi && \
-    chown -R app:app ${INSTALL_HOME}
+    chown -R www-data:www-data ${INSTALL_HOME}
 

@@ -41,10 +41,11 @@ RUN mkdir -p /app/logs /mnt/visus_datasets/upload /mnt/visus_datasets/converted 
 RUN chmod +x /app/start_fastapi_server.py && \
     chmod 755 /tmp/scientistcloud_logs
 
-# Create a non-root user for security
-RUN useradd --create-home --shell /bin/bash app && \
-    chown -R app:app /app /mnt/visus_datasets /tmp/scientistcloud_logs
-USER app
+# Use www-data user/group to match PHP/Apache service permissions
+# This ensures files created by PHP (www-data) can be accessed by FastAPI
+# Note: www-data user already exists in Ubuntu base image
+RUN chown -R www-data:www-data /app /mnt/visus_datasets /tmp/scientistcloud_logs
+USER www-data
 
 # Expose the port
 EXPOSE 5001
