@@ -108,24 +108,26 @@ RUN python3 -m pip install --no-cache-dir --break-system-packages \
         bokeh==3.8.0 \
         pymap3d
         
-# Copy requirements files for platform-specific OpenVisus installation (matching old Dockerfile)
+# Copy OpenVisus requirements file directly (simpler than /tmp/requirements/)
 # Build context is .. (scientistCloudLib), so path is relative to that
-COPY SCLib_JobProcessing/Docker/requirements/ /tmp/requirements/
+COPY SCLib_JobProcessing/Docker/requirements/ubuntu-python310-requirements.txt /tmp/openvisus_requirements.txt
 
-# Install platform-specific requirements (OpenVisus)
-# This matches the pattern from ag-explorer-bg-service-base
-ARG PYTHON_REQUIREMENTS_FILE=ubuntu-python310-requirements.txt
+# Install OpenVisus (required for TIFF to IDX conversions)
 RUN echo "=========================================" && \
-    echo "Installing OpenVisus from requirements file..." && \
-    echo "Requirements file: /tmp/requirements/${PYTHON_REQUIREMENTS_FILE}" && \
-    cat /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} && \
+    echo "Installing OpenVisus..." && \
+    echo "Requirements file contents:" && \
+    cat /tmp/openvisus_requirements.txt && \
     echo "=========================================" && \
     echo "Python version:" && python3 --version && \
     echo "pip version:" && python3 -m pip --version && \
     echo "=========================================" && \
-    python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} 2>&1 | tee /tmp/openvisus_install.log && \
-    echo "Pip install exit code: $?" && \
-    cat /tmp/openvisus_install.log && \
+    python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/openvisus_requirements.txt || \
+    (echo "❌ Pip install failed!" && \
+     echo "Trying to install packages individually..." && \
+     python3 -m pip install --no-cache-dir --break-system-packages OpenVisus==2.2.141 || \
+     (echo "❌ OpenVisus==2.2.141 failed, trying without version..." && \
+      python3 -m pip install --no-cache-dir --break-system-packages OpenVisus || \
+      (echo "❌ All OpenVisus installation attempts failed!" && exit 1))) && \
     echo "=========================================" && \
     echo "Checking installed OpenVisus packages..." && \
     python3 -m pip list | grep -i openvisus || echo "No OpenVisus packages found!" && \

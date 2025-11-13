@@ -30,6 +30,21 @@ class ConversionError(Exception):
     pass
 
 
+def safe_chmod(path: Path, mode: int) -> None:
+    """Safely change file/directory permissions, ignoring permission errors.
+    
+    This is useful when running as a non-root user in Docker containers where
+    we may not have permission to change permissions on mounted volumes.
+    """
+    try:
+        os.chmod(path, mode)
+        logger.debug(f"Changed permissions on {path} to {oct(mode)}")
+    except PermissionError:
+        logger.warning(f"Could not change permissions on {path} (operation not permitted, continuing anyway)")
+    except OSError as e:
+        logger.warning(f"Could not change permissions on {path}: {e} (continuing anyway)")
+
+
 class DatasetConverter:
     """Main class for dataset conversion operations."""
     
@@ -74,7 +89,7 @@ class DatasetConverter:
         
         # Create output directory if it doesn't exist
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        os.chmod(self.output_dir, 0o777)
+        safe_chmod(self.output_dir, 0o777)
     
     def convert(self) -> None:
         """Run the conversion process."""
@@ -97,7 +112,10 @@ class DatasetConverter:
             elif self.sensor_type == "TIFF_RGB":
                 self._convert_tiff_rgb()
             elif self.sensor_type in ("4D_NEXUS", "NEXUS"):
-                self._convert_4d_nexus()
+                # 4D Nexus conversion is currently disabled
+                # Just copy files to output directory without conversion
+                logger.info("4D NEXUS conversion is disabled - copying files only")
+                self._copy_files_only()
             elif self.sensor_type == "HDF5":
                 self._convert_hdf5()
             elif self.sensor_type == "NETCDF":
@@ -108,7 +126,7 @@ class DatasetConverter:
             # Fix permissions
             self._fix_permissions(self.input_dir)
             self._fix_permissions(self.output_dir)
-            os.chmod(self.output_dir, 0o777)
+            safe_chmod(self.output_dir, 0o777)
             
             # Upload to AWS if requested
             if self.upload_to_aws:
@@ -400,7 +418,7 @@ class DatasetConverter:
         """Convert TIFF stacks to IDX."""
         logger.info("Converting TIFF stacks")
         
-        os.chmod(self.input_dir, 0o777)
+        safe_chmod(self.input_dir, 0o777)
         
         # List all tif files
         extensions = ["tif", "tiff", "TIFF", "TIF"]
@@ -484,45 +502,41 @@ class DatasetConverter:
                 item.unlink()
     
     def _convert_4d_nexus(self) -> None:
-        """Convert 4D NEXUS files to IDX."""
-        logger.info("Converting 4D NEXUS files")
+        """Convert 4D NEXUS files to IDX.
         
-        os.chmod(self.input_dir, 0o777)
+        NOTE: This method is currently disabled. Use _copy_files_only() instead.
+        """
+        # DISABLED: 4D Nexus conversion is not being used right now
+        logger.warning("4D NEXUS conversion is disabled - this method should not be called")
+        self._copy_files_only()
+    
+    def _copy_files_only(self) -> None:
+        """Copy files from input to output directory without conversion."""
+        logger.info("Copying files from input to output directory (no conversion)")
         
-        # List all nexus files
+        safe_chmod(self.input_dir, 0o777)
+        
+        # List all nexus files for logging
         extensions = ["nxs", "h5", "hdf5", "hdf"]
         for ext in extensions:
             for file in self.input_dir.glob(f"*.{ext}"):
-                logger.info(f"Found NEXUS file: {file}")
+                logger.info(f"Found NEXUS file (will copy without conversion): {file}")
         
-        # Run conversion script
-        convert_script = self.script_dir / "convert_4dnexus_to_idx.py"
-        if not convert_script.exists():
-            convert_script = self.script_dir.parent / "convert_4dnexus_to_idx.py"
-        
-        if convert_script.exists():
-            cmd = ["python3", str(convert_script), str(self.input_dir)]
-            
-            # Add conversion parameters if provided
-            if self.conversion_params:
-                params_str = json.dumps(self.conversion_params)
-                cmd.extend(["--params", params_str])
-            
-            subprocess.run(cmd, check=True)
-        else:
-            raise ConversionError(f"Conversion script not found: convert_4dnexus_to_idx.py")
-        
-        # Copy all files to output
+        # Copy all files to output (no conversion)
         for item in self.input_dir.iterdir():
             if item.name.startswith('.'):
                 continue
             dest = self.output_dir / item.name
             if item.is_file():
                 shutil.copy2(item, dest)
+                logger.debug(f"Copied file: {item.name}")
             elif item.is_dir():
                 if dest.exists():
                     shutil.rmtree(dest)
                 shutil.copytree(item, dest)
+                logger.debug(f"Copied directory: {item.name}")
+        
+        logger.info("Files copied successfully (no conversion performed)")
     
     def _convert_hdf5(self) -> None:
         """Convert HDF5 files to IDX."""
@@ -607,22 +621,26 @@ class DatasetConverter:
             raise ConversionError(f"Conversion script not found: convert_netcdf_to_idx.py")
     
     def _fix_permissions(self, directory: Path) -> None:
-        """Fix permissions for a directory and its contents."""
+        """Fix permissions for a directory and its contents.
+        
+        This method safely handles permission errors that may occur when running
+        as a non-root user in Docker containers with mounted volumes.
+        """
         logger.info(f"Fixing permissions for: {directory}")
         
         if not directory.exists():
             logger.warning(f"Directory does not exist: {directory}")
             return
         
-        # Fix directory permissions
+        # Fix directory permissions (safely handle permission errors)
         for root, dirs, files in os.walk(directory):
-            os.chmod(root, 0o755)
+            safe_chmod(Path(root), 0o755)
             for d in dirs:
-                os.chmod(Path(root) / d, 0o755)
+                safe_chmod(Path(root) / d, 0o755)
             for f in files:
-                os.chmod(Path(root) / f, 0o644)
+                safe_chmod(Path(root) / f, 0o644)
         
-        os.chmod(directory, 0o755)
+        safe_chmod(directory, 0o755)
     
     def _upload_to_aws(self, directory: Path) -> None:
         """Upload directory to AWS S3."""

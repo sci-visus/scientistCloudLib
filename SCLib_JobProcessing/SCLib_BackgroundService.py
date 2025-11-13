@@ -10,9 +10,14 @@ import json
 import subprocess
 import traceback
 import psutil
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from pymongo import MongoClient
+
+# Helper for timezone-aware UTC datetime (replaces deprecated datetime.utcnow())
+def utc_now():
+    """Get current UTC datetime (timezone-aware)."""
+    return datetime.now(timezone.utc)
 
 # Import our job queue manager
 try:
@@ -159,7 +164,7 @@ class SCLib_BackgroundService:
             
             datasets_collection.update_one(
                 {'uuid': dataset_uuid},
-                {'$set': {'status': 'converting', 'updated_at': datetime.utcnow()}}
+                {'$set': {'status': 'converting', 'updated_at': utc_now()}}
             )
             
             # Get paths from dataset or environment
@@ -294,7 +299,7 @@ class SCLib_BackgroundService:
                         'status': 'conversion queued',
                         'conversion_retry_count': retry_count + 1,
                         'conversion_last_error': str(error),
-                        'updated_at': datetime.utcnow()
+                        'updated_at': utc_now()
                     }}
                 )
                 print(f"Dataset {dataset_uuid} will be retried (attempt {retry_count + 1}/{max_retries})")
@@ -305,7 +310,7 @@ class SCLib_BackgroundService:
                     {'$set': {
                         'status': 'conversion failed',
                         'conversion_last_error': str(error),
-                        'updated_at': datetime.utcnow()
+                        'updated_at': utc_now()
                     }}
                 )
                 print(f"Dataset {dataset_uuid} conversion failed after {max_retries} attempts")
@@ -320,7 +325,7 @@ class SCLib_BackgroundService:
             db = self.mongo_client[db_name]
             datasets_collection = db['visstoredatas']
             
-            two_hours_ago = datetime.utcnow() - timedelta(hours=2)
+            two_hours_ago = utc_now() - timedelta(hours=2)
             
             stale_datasets = datasets_collection.find({
                 'status': 'converting',
