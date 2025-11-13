@@ -123,7 +123,9 @@ RUN echo "=========================================" && \
     echo "Python version:" && python3 --version && \
     echo "pip version:" && python3 -m pip --version && \
     echo "=========================================" && \
-    python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} && \
+    python3 -m pip install --no-cache-dir --break-system-packages -r /tmp/requirements/${PYTHON_REQUIREMENTS_FILE} 2>&1 | tee /tmp/openvisus_install.log && \
+    echo "Pip install exit code: $?" && \
+    cat /tmp/openvisus_install.log && \
     echo "=========================================" && \
     echo "Checking installed OpenVisus packages..." && \
     python3 -m pip list | grep -i openvisus || echo "No OpenVisus packages found!" && \
