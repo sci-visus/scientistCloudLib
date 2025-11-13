@@ -90,12 +90,15 @@ COPY SCLib_JobProcessing/requirements_conversion.txt /app/requirements_conversio
 # Use --break-system-packages flag (required for Ubuntu 24.04 with system Python)
 # Install all requirements files to ensure all dependencies are available
 # Note: Install GDAL first (specific version) before rasterio for compatibility
+# Use --ignore-installed for packages that conflict with system packages (like numpy)
 RUN python3 -m pip install --no-cache-dir --break-system-packages -r requirements_fastapi.txt && \
     python3 -m pip install --no-cache-dir --break-system-packages -r requirements.txt && \
     # Install GDAL first (compatible with libgdal 3.8.4)
     python3 -m pip install --no-cache-dir --break-system-packages "gdal==3.8.4" && \
     # Then install conversion requirements (which includes rasterio and large-image)
-    python3 -m pip install --no-cache-dir --break-system-packages -r requirements_conversion.txt
+    # Use --ignore-installed to handle conflicts with system-installed packages like numpy
+    # This tells pip to ignore already-installed packages and install/upgrade as needed
+    python3 -m pip install --no-cache-dir --break-system-packages --ignore-installed -r requirements_conversion.txt
 
 # Install Panel ecosystem first (may be needed for OpenVisus to configure properly)
 RUN python3 -m pip install --no-cache-dir --break-system-packages \
