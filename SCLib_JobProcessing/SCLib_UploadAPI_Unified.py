@@ -706,19 +706,36 @@ async def get_dataset_info(identifier: str, processor: Any = Depends(get_process
 
 # Portal-specific dataset endpoints
 @app.get("/api/datasets")
-async def get_user_datasets(user_id: str, processor: Any = Depends(get_processor)):
-    """Get user's datasets for the portal."""
+async def get_user_datasets(
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    processor: Any = Depends(get_processor)
+):
+    """
+    Get user's datasets for the portal.
+    Accepts either user_id (legacy) or user_email (preferred).
+    visstoredatas collection uses 'user' field (email like "amy@visus.net"), not 'user_id' or 'user_email'.
+    user_profile collection uses 'email' field (email like "amy.a.gooch@gmail.com").
+    """
     try:
-        # Get user's own datasets
+        # Prefer user_email, fallback to user_id for backward compatibility
+        user_identifier = user_email or user_id
+        if not user_identifier:
+            raise HTTPException(status_code=400, detail="Either user_id or user_email must be provided")
+        
+        # Get user's own datasets - visstoredatas uses 'user' field (email like "amy@visus.net")
         with mongo_collection_by_type_context('visstoredatas') as collection:
-            user_datasets = list(collection.find({'user_id': user_id}))
+            user_datasets = list(collection.find({'user': user_identifier}))
             
-            # Get shared datasets
-            shared_datasets = list(collection.find({'shared_with': user_id}))
+            # Get shared datasets - shared_with may contain email
+            shared_datasets = list(collection.find({
+                'shared_with': user_identifier
+            }))
             
             # Get team datasets (if user has team_id)
+            # user_profile uses 'email' field (email like "amy.a.gooch@gmail.com")
             with mongo_collection_by_type_context('user_profile') as user_collection:
-                user_profile = user_collection.find_one({'user_id': user_id})
+                user_profile = user_collection.find_one({'email': user_identifier})
                 
             team_datasets = []
             if user_profile and user_profile.get('team_id'):
@@ -740,25 +757,43 @@ async def get_user_datasets(user_id: str, processor: Any = Depends(get_processor
                 'datasets': list(unique_datasets.values())
             }
             
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to get user datasets: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/dataset/{dataset_id}")
-async def get_dataset_details(dataset_id: str, user_id: str, processor: Any = Depends(get_processor)):
-    """Get detailed information about a specific dataset."""
+async def get_dataset_details(
+    dataset_id: str,
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    processor: Any = Depends(get_processor)
+):
+    """
+    Get detailed information about a specific dataset.
+    Accepts either user_id (legacy) or user_email (preferred) for access control.
+    visstoredatas collection uses 'user' field (email like "amy@visus.net"), not 'user_id' or 'user_email'.
+    """
     try:
+        # Prefer user_email, fallback to user_id for backward compatibility
+        user_identifier = user_email or user_id
+        
         with mongo_collection_by_type_context('visstoredatas') as collection:
             dataset = collection.find_one({'_id': ObjectId(dataset_id)})
             
             if not dataset:
                 raise HTTPException(status_code=404, detail="Dataset not found")
             
-            # Check access permissions
-            if (dataset.get('user_id') != user_id and 
-                user_id not in dataset.get('shared_with', []) and
-                dataset.get('team_id') != user_id):
-                raise HTTPException(status_code=403, detail="Access denied")
+            # Check access permissions - visstoredatas uses 'user' field (email), not 'user_id' or 'user_email'
+            if user_identifier:
+                has_access = (
+                    dataset.get('user') == user_identifier or
+                    user_identifier in dataset.get('shared_with', []) or
+                    dataset.get('team_id') == user_identifier
+                )
+                if not has_access:
+                    raise HTTPException(status_code=403, detail="Access denied")
             
             # Convert ObjectId to string for JSON serialization
             if '_id' in dataset:
@@ -776,20 +811,36 @@ async def get_dataset_details(dataset_id: str, user_id: str, processor: Any = De
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/dataset/{dataset_id}/status")
-async def get_dataset_status(dataset_id: str, user_id: str, processor: Any = Depends(get_processor)):
-    """Get the current status of a dataset."""
+async def get_dataset_status(
+    dataset_id: str,
+    user_id: Optional[str] = None,
+    user_email: Optional[str] = None,
+    processor: Any = Depends(get_processor)
+):
+    """
+    Get the current status of a dataset.
+    Accepts either user_id (legacy) or user_email (preferred) for access control.
+    visstoredatas collection uses 'user' field (email like "amy@visus.net"), not 'user_id' or 'user_email'.
+    """
     try:
+        # Prefer user_email, fallback to user_id for backward compatibility
+        user_identifier = user_email or user_id
+        
         with mongo_collection_by_type_context('visstoredatas') as collection:
             dataset = collection.find_one({'_id': ObjectId(dataset_id)})
             
             if not dataset:
                 raise HTTPException(status_code=404, detail="Dataset not found")
             
-            # Check access permissions
-            if (dataset.get('user_id') != user_id and 
-                user_id not in dataset.get('shared_with', []) and
-                dataset.get('team_id') != user_id):
-                raise HTTPException(status_code=403, detail="Access denied")
+            # Check access permissions - visstoredatas uses 'user' field (email), not 'user_id' or 'user_email'
+            if user_identifier:
+                has_access = (
+                    dataset.get('user') == user_identifier or
+                    user_identifier in dataset.get('shared_with', []) or
+                    dataset.get('team_id') == user_identifier
+                )
+                if not has_access:
+                    raise HTTPException(status_code=403, detail="Access denied")
             
             return {
                 'success': True,
