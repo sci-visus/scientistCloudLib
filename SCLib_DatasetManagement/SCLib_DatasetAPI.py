@@ -889,7 +889,11 @@ def _should_exclude_file(filename: str, excluded_patterns: List[str] = None) -> 
     return False
 
 def _scan_directory_tree(directory: Path, base_path: str = '', excluded_patterns: List[str] = None) -> List[Dict]:
-    """Recursively scan directory and return hierarchical file structure."""
+    """Recursively scan directory and return hierarchical file structure.
+    
+    Directories are always included (even if they only contain excluded files),
+    but excluded files (like .bin) are hidden from the listing.
+    """
     result = []
     
     if not directory.exists() or not directory.is_dir():
@@ -901,6 +905,10 @@ def _scan_directory_tree(directory: Path, base_path: str = '', excluded_patterns
         logger.warning(f"Permission denied accessing directory: {directory}")
         return result
     
+    # Track if directory has excluded files (for UI indication)
+    excluded_file_count = 0
+    visible_file_count = 0
+    
     for item in items:
         if item.name.startswith('.'):
             continue
@@ -910,19 +918,39 @@ def _scan_directory_tree(directory: Path, base_path: str = '', excluded_patterns
         if item.is_dir():
             # Recursively scan subdirectory
             children = _scan_directory_tree(item, relative_path, excluded_patterns)
-            # Only include directory if it has children (after filtering)
-            if len(children) > 0:
-                result.append({
-                    'name': item.name,
-                    'type': 'directory',
-                    'path': relative_path,
-                    'children': children
-                })
+            
+            # Count excluded files in this directory (only direct files, not in subdirectories)
+            dir_excluded_count = 0
+            try:
+                for child_item in item.iterdir():
+                    if child_item.is_file() and not child_item.name.startswith('.'):
+                        if _should_exclude_file(child_item.name, excluded_patterns):
+                            dir_excluded_count += 1
+            except (OSError, PermissionError):
+                pass  # Ignore permission errors when counting
+            
+            # Always include directory, even if it only has excluded files
+            # This ensures users can see directories that contain .bin files
+            dir_info = {
+                'name': item.name,
+                'type': 'directory',
+                'path': relative_path,
+                'children': children
+            }
+            
+            # Add metadata if directory has excluded files
+            if dir_excluded_count > 0:
+                dir_info['has_excluded_files'] = True
+                dir_info['excluded_file_count'] = dir_excluded_count
+            
+            result.append(dir_info)
         elif item.is_file():
             # Check if file should be excluded
             if _should_exclude_file(item.name, excluded_patterns):
+                excluded_file_count += 1
                 continue
             
+            visible_file_count += 1
             try:
                 stat = item.stat()
                 result.append({
@@ -935,6 +963,12 @@ def _scan_directory_tree(directory: Path, base_path: str = '', excluded_patterns
             except (OSError, PermissionError) as e:
                 logger.warning(f"Error accessing file {item}: {e}")
                 continue
+    
+    # If this directory has excluded files but no visible children, add metadata
+    # This helps indicate to users that the directory contains hidden files
+    if excluded_file_count > 0 and visible_file_count == 0 and len(result) == 0:
+        # This case is handled by parent directory adding has_excluded_files
+        pass
     
     # Sort: directories first, then files, both alphabetically
     result.sort(key=lambda x: (x['type'] != 'directory', x['name'].lower()))
