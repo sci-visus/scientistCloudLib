@@ -352,6 +352,7 @@ async def upload_file(
 async def upload_file_by_path(
     background_tasks: BackgroundTasks,
     file_path: str = Form(..., description="Path to the file to upload"),
+    original_filename: Optional[str] = Form(None, description="Original filename to preserve (if different from file_path basename)"),
     user_email: EmailStr = Form(..., description="User email address"),
     dataset_name: str = Form(..., min_length=1, max_length=255, description="Name of the dataset"),
     sensor: SensorType = Form(..., description="Sensor type"),
@@ -385,7 +386,8 @@ async def upload_file_by_path(
         
         # Get file info
         file_size = os.path.getsize(file_path)
-        filename = os.path.basename(file_path)
+        # Use original_filename if provided (to preserve original names), otherwise use basename of file_path
+        filename = original_filename if original_filename else os.path.basename(file_path)
         
         # Resolve dataset identifier to UUID if provided
         upload_uuid = None
