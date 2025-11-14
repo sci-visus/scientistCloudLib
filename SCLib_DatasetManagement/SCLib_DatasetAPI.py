@@ -5,7 +5,7 @@ Enhanced dataset management with user-friendly identifiers and comprehensive ope
 """
 
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, Dict, Any, List
@@ -976,9 +976,9 @@ async def list_dataset_files(
         # Excluded file patterns (default to .bin files)
         excluded_patterns = getattr(config, 'excluded_file_patterns', ['.bin']) if hasattr(config, 'excluded_file_patterns') else ['.bin']
         
-        # Scan both directories
-        upload_files = _scan_directory_tree(upload_path, 'upload', excluded_patterns)
-        converted_files = _scan_directory_tree(converted_path, 'converted', excluded_patterns)
+        # Scan both directories (base_path is empty string so paths are relative to dataset directory)
+        upload_files = _scan_directory_tree(upload_path, '', excluded_patterns)
+        converted_files = _scan_directory_tree(converted_path, '', excluded_patterns)
         
         return {
             "success": True,
@@ -1007,6 +1007,215 @@ async def list_dataset_files(
         raise
     except Exception as e:
         logger.error(f"Failed to list files: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/datasets/{identifier}/file-content")
+async def get_file_content(
+    identifier: str,
+    file_path: str,
+    directory: str,  # 'upload' or 'converted'
+    user_email: Optional[EmailStr] = None,
+    processor: Any = Depends(get_processor)
+):
+    """Get file content for text files or image URL for image files.
+    
+    Returns:
+    - For text files: {"content": "...", "type": "text", "mime_type": "..."}
+    - For image files: {"url": "...", "type": "image", "mime_type": "..."}
+    """
+    try:
+        # Resolve identifier to UUID
+        dataset_uuid = _resolve_dataset_identifier(identifier)
+        
+        # Get dataset
+        dataset = _get_dataset_by_uuid(dataset_uuid)
+        
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+        
+        # Check access if user_email provided
+        if user_email and not _check_dataset_access(dataset, user_email):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Validate directory
+        if directory not in ['upload', 'converted']:
+            raise HTTPException(status_code=400, detail="Directory must be 'upload' or 'converted'")
+        
+        # Get directory paths from config
+        config = get_config()
+        base_dir = config.job_processing.in_data_dir if directory == 'upload' else config.job_processing.out_data_dir
+        if not base_dir:
+            base_dir = f"{config.server.visus_datasets}/{directory}"
+        
+        # Build full file path
+        full_path = Path(base_dir) / dataset_uuid / file_path
+        
+        # Security: Ensure file is within the dataset directory (prevent path traversal)
+        dataset_dir = Path(base_dir) / dataset_uuid
+        try:
+            full_path.resolve().relative_to(dataset_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Invalid file path")
+        
+        if not full_path.exists():
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        if not full_path.is_file():
+            raise HTTPException(status_code=400, detail="Path is not a file")
+        
+        # Determine file type
+        file_ext = full_path.suffix.lower()
+        
+        # Text file extensions
+        text_extensions = {'.txt', '.json', '.idx', '.log', '.xml', '.csv', '.md', '.yaml', '.yml', '.ini', '.conf', '.cfg'}
+        # Image file extensions
+        image_extensions = {'.tiff', '.tif', '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg'}
+        
+        # Get MIME type
+        if file_ext in text_extensions:
+            mime_type = {
+                '.txt': 'text/plain',
+                '.json': 'application/json',
+                '.idx': 'text/plain',
+                '.log': 'text/plain',
+                '.xml': 'application/xml',
+                '.csv': 'text/csv',
+                '.md': 'text/markdown',
+                '.yaml': 'text/yaml',
+                '.yml': 'text/yaml',
+                '.ini': 'text/plain',
+                '.conf': 'text/plain',
+                '.cfg': 'text/plain'
+            }.get(file_ext, 'text/plain')
+            
+            # Read text file content
+            try:
+                with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                    content = f.read()
+                
+                return {
+                    "success": True,
+                    "type": "text",
+                    "mime_type": mime_type,
+                    "content": content,
+                    "file_path": file_path,
+                    "file_name": full_path.name
+                }
+            except Exception as e:
+                logger.error(f"Failed to read text file: {e}")
+                raise HTTPException(status_code=500, detail=f"Failed to read file: {str(e)}")
+        
+        elif file_ext in image_extensions:
+            mime_type = {
+                '.tiff': 'image/tiff',
+                '.tif': 'image/tiff',
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.gif': 'image/gif',
+                '.bmp': 'image/bmp',
+                '.webp': 'image/webp',
+                '.svg': 'image/svg+xml'
+            }.get(file_ext, 'image/jpeg')
+            
+            # For images, return a URL that can be used to serve the file
+            # In production, you might want to use a proper file serving endpoint
+            # For now, we'll return a path that the PHP proxy can serve
+            file_url = f"/api/dataset-file-serve.php?dataset_uuid={dataset_uuid}&file_path={file_path}&directory={directory}"
+            
+            return {
+                "success": True,
+                "type": "image",
+                "mime_type": mime_type,
+                "url": file_url,
+                "file_path": file_path,
+                "file_name": full_path.name
+            }
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"File type not supported: {file_ext}")
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get file content: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/datasets/{identifier}/file-serve")
+async def serve_file(
+    identifier: str,
+    file_path: str,
+    directory: str,  # 'upload' or 'converted'
+    user_email: Optional[EmailStr] = None,
+    processor: Any = Depends(get_processor)
+):
+    """Serve image files directly."""
+    try:
+        # Resolve identifier to UUID
+        dataset_uuid = _resolve_dataset_identifier(identifier)
+        
+        # Get dataset
+        dataset = _get_dataset_by_uuid(dataset_uuid)
+        
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+        
+        # Check access if user_email provided
+        if user_email and not _check_dataset_access(dataset, user_email):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Validate directory
+        if directory not in ['upload', 'converted']:
+            raise HTTPException(status_code=400, detail="Directory must be 'upload' or 'converted'")
+        
+        # Get directory paths from config
+        config = get_config()
+        base_dir = config.job_processing.in_data_dir if directory == 'upload' else config.job_processing.out_data_dir
+        if not base_dir:
+            base_dir = f"{config.server.visus_datasets}/{directory}"
+        
+        # Build full file path
+        full_path = Path(base_dir) / dataset_uuid / file_path
+        
+        # Security: Ensure file is within the dataset directory
+        dataset_dir = Path(base_dir) / dataset_uuid
+        try:
+            full_path.resolve().relative_to(dataset_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Invalid file path")
+        
+        if not full_path.exists() or not full_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        # Determine MIME type
+        file_ext = full_path.suffix.lower()
+        mime_types = {
+            '.tiff': 'image/tiff',
+            '.tif': 'image/tiff',
+            '.jpg': 'image/jpeg',
+            '.jpeg': 'image/jpeg',
+            '.png': 'image/png',
+            '.gif': 'image/gif',
+            '.bmp': 'image/bmp',
+            '.webp': 'image/webp',
+            '.svg': 'image/svg+xml'
+        }
+        media_type = mime_types.get(file_ext, 'application/octet-stream')
+        
+        return FileResponse(
+            path=str(full_path),
+            media_type=media_type,
+            filename=full_path.name
+        )
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/api/v1/datasets/{identifier}/files/{file_id}")
