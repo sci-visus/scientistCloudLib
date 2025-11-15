@@ -21,11 +21,13 @@ class Process4dNexus:
         self.preview_picked = None
         self.probe_x_coords_picked = None
         self.probe_y_coords_picked = None
+        self.plot1_single_dataset_picked = None  # For Plot1 single dataset mode
 
         # Optional duplicate plot selections
         self.volume_picked_b = None
         self.presample_picked_b = None
         self.postsample_picked_b = None
+        self.plot1b_single_dataset_picked = None  # For Plot1B single dataset mode
         self.probe_x_coords_picked_b = None
         self.probe_y_coords_picked_b = None
         
@@ -446,18 +448,23 @@ class Process4dNexus:
         
         return data
 
-    def load_probe_coordinates(self):
-        """Load probe coordinates from the nexus file"""
-        if not self.probe_x_coords_picked:
+    def load_probe_coordinates(self, use_b=False):
+        """Load probe coordinates from the nexus file
+        
+        Args:
+            use_b: If True, use probe_x_coords_picked_b instead of probe_x_coords_picked
+        """
+        coord_path = getattr(self, 'probe_x_coords_picked_b', None) if use_b else self.probe_x_coords_picked
+        if not coord_path:
             return None
             
         try:
             with h5py.File(self.nexus_filename, "r") as f:
-                probe_coords = np.array(f.get(self.probe_x_coords_picked))
+                probe_coords = np.array(f.get(coord_path))
                 print(f"✅ Loaded probe coordinates: {probe_coords.shape}, range: {probe_coords.min():.3f} to {probe_coords.max():.3f}")
                 return probe_coords
         except Exception as e:
-            print(f"❌ Failed to load probe coordinates from {self.probe_x_coords_picked}: {e}")
+            print(f"❌ Failed to load probe coordinates from {coord_path}: {e}")
             return None
 
     def load_nexus_data(self):
@@ -468,17 +475,22 @@ class Process4dNexus:
             self.x_coords_picked = "map_mi_sic_0p33mm_002/data/samx"
         if self.y_coords_picked is None:
             self.y_coords_picked = "map_mi_sic_0p33mm_002/data/samz"
-        if self.presample_picked is None:
-            self.presample_picked = "map_mi_sic_0p33mm_002/scalar_data/presample_intensity"
-        if self.postsample_picked is None:
-            self.postsample_picked = "map_mi_sic_0p33mm_002/scalar_data/postsample_intensity"
+        # Only set presample/postsample defaults if not in single dataset mode
+        if getattr(self, 'plot1_single_dataset_picked', None) is None:
+            if self.presample_picked is None:
+                self.presample_picked = "map_mi_sic_0p33mm_002/scalar_data/presample_intensity"
+            if self.postsample_picked is None:
+                self.postsample_picked = "map_mi_sic_0p33mm_002/scalar_data/postsample_intensity"
 
         print(f"----> LOAD_NEX_DATA: nexus_filename: {self.nexus_filename}")
         print(f"\t volume_picked: {self.volume_picked}")
         print(f"\t x_coords_picked: {self.x_coords_picked}")
         print(f"\t y_coords_picked: {self.y_coords_picked}")
-        print(f"\t presample_picked: {self.presample_picked}")
-        print(f"\t postsample_picked: {self.postsample_picked}")   
+        if getattr(self, 'plot1_single_dataset_picked', None):
+            print(f"\t plot1_single_dataset_picked: {self.plot1_single_dataset_picked}")
+        else:
+            print(f"\t presample_picked: {self.presample_picked}")
+            print(f"\t postsample_picked: {self.postsample_picked}")   
             
         # Open HDF5 file and keep it open if we're using direct HDF5 access
         # Store file handle in self so it doesn't close
@@ -493,10 +505,43 @@ class Process4dNexus:
                 self.volume_dataset_b = f[self.volume_picked_b]
             except Exception as _e:
                 print(f"WARNING: unable to open volume_picked_b '{self.volume_picked_b}': {_e}")
-        self.x_coords_dataset = np.array(f.get(self.x_coords_picked))
-        self.y_coords_dataset = np.array(f.get(self.y_coords_picked))
-        self.presample_dataset = np.array(f.get(self.presample_picked))
-        self.postsample_dataset = np.array(f.get(self.postsample_picked))
+        # Load coordinate datasets and ensure they're at least 1D
+        x_coords_raw = np.array(f.get(self.x_coords_picked))
+        y_coords_raw = np.array(f.get(self.y_coords_picked))
+        
+        # Ensure arrays are at least 1D (handle scalar or 0D arrays)
+        if x_coords_raw.ndim == 0:
+            self.x_coords_dataset = np.array([x_coords_raw])
+        else:
+            self.x_coords_dataset = np.atleast_1d(x_coords_raw)
+            
+        if y_coords_raw.ndim == 0:
+            self.y_coords_dataset = np.array([y_coords_raw])
+        else:
+            self.y_coords_dataset = np.atleast_1d(y_coords_raw)
+        
+        print(f"  Loaded x_coords: shape={self.x_coords_dataset.shape}, ndim={self.x_coords_dataset.ndim}")
+        print(f"  Loaded y_coords: shape={self.y_coords_dataset.shape}, ndim={self.y_coords_dataset.ndim}")
+        
+        # Check if we're in single dataset mode for Plot1
+        if getattr(self, 'plot1_single_dataset_picked', None):
+            # Single dataset mode: use the selected dataset directly for preview
+            print(f"Using single dataset for preview: {self.plot1_single_dataset_picked}")
+            try:
+                self.single_dataset = np.array(f.get(self.plot1_single_dataset_picked))
+                print(f"  Successfully loaded single dataset, shape: {self.single_dataset.shape}, dtype: {self.single_dataset.dtype}")
+            except Exception as e:
+                print(f"ERROR loading single dataset '{self.plot1_single_dataset_picked}': {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+            self.presample_dataset = None  # Not used in single dataset mode
+            self.postsample_dataset = None  # Not used in single dataset mode
+        else:
+            # Ratio mode: use presample/postsample
+            self.single_dataset = None  # Not used in ratio mode
+            self.presample_dataset = np.array(f.get(self.presample_picked))
+            self.postsample_dataset = np.array(f.get(self.postsample_picked))
 
         shape = self.volume_dataset.shape
         dtype = np.dtype("float32" if self.cached_cast_float else self.volume_dataset.dtype)
@@ -530,47 +575,98 @@ class Process4dNexus:
             # For now, we'll return the dataset itself and let the dashboard handle it
             volume_memmap = self.volume_dataset  # Return HDF5 dataset reference, not a memmap
     
-        assert self.volume_dataset.shape[0] == len(self.x_coords_dataset)
-        assert self.volume_dataset.shape[1] == len(self.y_coords_dataset)
+        # Verify coordinate dimensions match volume dimensions
+        print(f"  Volume shape: {self.volume_dataset.shape}")
+        print(f"  X coords length: {len(self.x_coords_dataset) if hasattr(self.x_coords_dataset, '__len__') else 'N/A (scalar)'}")
+        print(f"  Y coords length: {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'N/A (scalar)'}")
+        
+        if not hasattr(self.x_coords_dataset, '__len__') or len(self.x_coords_dataset) != self.volume_dataset.shape[0]:
+            raise ValueError(
+                f"X coordinates dimension mismatch: volume has {self.volume_dataset.shape[0]} elements in first dimension, "
+                f"but x_coords has {len(self.x_coords_dataset) if hasattr(self.x_coords_dataset, '__len__') else 'scalar'} elements"
+            )
+        if not hasattr(self.y_coords_dataset, '__len__') or len(self.y_coords_dataset) != self.volume_dataset.shape[1]:
+            raise ValueError(
+                f"Y coordinates dimension mismatch: volume has {self.volume_dataset.shape[1]} elements in second dimension, "
+                f"but y_coords has {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'scalar'} elements"
+            )
 
         self.target_x = self.x_coords_dataset.shape[0]
         self.target_y = self.y_coords_dataset.shape[0]
         self.target_size = self.target_x * self.target_y
 
-        assert self.presample_dataset.size == self.target_x * self.target_y
-        assert self.postsample_dataset.size == self.target_x * self.target_y
-        presample_rect = np.reshape( self.presample_dataset, (self.target_x, self.target_y))
-        postsample_rect = np.reshape( self.postsample_dataset, (self.target_x, self.target_y))
+        # Create preview based on mode
+        if getattr(self, 'plot1_single_dataset_picked', None):
+            # Single dataset mode: use the dataset directly
+            try:
+                print(f"  Single dataset shape: {self.single_dataset.shape}, size: {self.single_dataset.size}")
+                print(f"  Target size: {self.target_x} x {self.target_y} = {self.target_x * self.target_y}")
+                
+                # Flatten the dataset if it's not already 1D
+                if self.single_dataset.ndim > 1:
+                    single_dataset_flat = self.single_dataset.flatten()
+                else:
+                    single_dataset_flat = self.single_dataset
+                
+                if single_dataset_flat.size != self.target_x * self.target_y:
+                    raise ValueError(
+                        f"Single dataset size mismatch: dataset has {single_dataset_flat.size} elements, "
+                        f"but expected {self.target_x * self.target_y} (from {self.target_x} x {self.target_y} coords)"
+                    )
+                preview_rect = np.reshape(single_dataset_flat, (self.target_x, self.target_y))
+                
+                # Clean the data - replace any inf and nan values
+                self.preview = np.nan_to_num(preview_rect, nan=0.0, posinf=0.0, neginf=0.0)
+                
+                # Normalize the data for rendering
+                if np.max(self.preview) > np.min(self.preview):
+                    self.preview = (self.preview - np.min(self.preview)) / (
+                        np.max(self.preview) - np.min(self.preview)
+                    )
+                
+                self.preview = self.preview.astype(np.float32)
+                print(f"  Successfully created preview from single dataset, shape: {self.preview.shape}")
+            except Exception as e:
+                print(f"ERROR creating preview from single dataset: {e}")
+                import traceback
+                traceback.print_exc()
+                raise
+        else:
+            # Ratio mode: use presample/postsample ratio
+            assert self.presample_dataset.size == self.target_x * self.target_y
+            assert self.postsample_dataset.size == self.target_x * self.target_y
+            presample_rect = np.reshape( self.presample_dataset, (self.target_x, self.target_y))
+            postsample_rect = np.reshape( self.postsample_dataset, (self.target_x, self.target_y))
 
-        # Check for zeros in the data
-        self.presample_zeros = np.sum(presample_rect == 0)
-        self.postsample_zeros = np.sum(postsample_rect == 0)
+            # Check for zeros in the data
+            self.presample_zeros = np.sum(presample_rect == 0)
+            self.postsample_zeros = np.sum(postsample_rect == 0)
 
-        # Condition the data to avoid zeros
-        # Add small epsilon to avoid division by zero
-        epsilon = 1e-10
-        self.presample_conditioned = np.where(
-            presample_rect == 0, epsilon, presample_rect
-        )
-        self.postsample_conditioned = np.where(
-            postsample_rect == 0, epsilon, postsample_rect
-        )
+            # Condition the data to avoid zeros
+            # Add small epsilon to avoid division by zero
+            epsilon = 1e-10
+            self.presample_conditioned = np.where(
+                presample_rect == 0, epsilon, presample_rect
+            )
+            self.postsample_conditioned = np.where(
+                postsample_rect == 0, epsilon, postsample_rect
+            )
 
-        # Calculate preview with conditioned data
-        self.preview = self.presample_conditioned / self.postsample_conditioned
+            # Calculate preview with conditioned data
+            self.preview = self.presample_conditioned / self.postsample_conditioned
 
-        # Clean the data - replace any remaining inf and nan values
-        self.preview = np.nan_to_num(self.preview, nan=0.0, posinf=1.0, neginf=0.0)
+            # Clean the data - replace any remaining inf and nan values
+            self.preview = np.nan_to_num(self.preview, nan=0.0, posinf=1.0, neginf=0.0)
 
-        # Normalize the data for rendering
-        # # Avoid division by zero
-        # Min-Max normalization to [0, 256] range
-        if np.max(self.preview) > np.min(self.preview):
-            self.preview = (self.preview - np.min(self.preview)) / (
-                np.max(self.preview) - np.min(self.preview)
-            )  # * 255
+            # Normalize the data for rendering
+            # # Avoid division by zero
+            # Min-Max normalization to [0, 256] range
+            if np.max(self.preview) > np.min(self.preview):
+                self.preview = (self.preview - np.min(self.preview)) / (
+                    np.max(self.preview) - np.min(self.preview)
+                )  # * 255
 
-        self.preview = self.preview.astype(np.float32)
+            self.preview = self.preview.astype(np.float32)
 
             # # Load the volume data - try memmap first, then HDF5, then synthetic data
             # volume_memmap = None  # Initialize variable
@@ -616,10 +712,21 @@ class Process4dNexus:
         print(f"  Volume shape: {volume_memmap.shape}")
         print(f"  X coords shape: {self.x_coords_dataset.shape}")
         print(f"  Y coords shape: {self.y_coords_dataset.shape}")
+        print(f"  Preview shape: {self.preview.shape if self.preview is not None else 'None'}")
     
-        print(f"  Presample shape: {self.presample_dataset.shape}")
-        print(f"  Postsample shape: {self.postsample_dataset.shape}")   
+        if self.presample_dataset is not None and self.postsample_dataset is not None:
+            print(f"  Presample shape: {self.presample_dataset.shape}")
+            print(f"  Postsample shape: {self.postsample_dataset.shape}")
+        else:
+            print(f"  Using single dataset mode (presample/postsample not used)")
+            if hasattr(self, 'single_dataset') and self.single_dataset is not None:
+                print(f"  Single dataset shape: {self.single_dataset.shape}")
 
+        # Verify preview was created
+        if self.preview is None:
+            raise ValueError("Preview was not created! Check preview creation logic.")
+        
+        print(f"  Returning from load_nexus_data: volume={type(volume_memmap)}, presample={type(self.presample_dataset)}, postsample={type(self.postsample_dataset)}, preview={type(self.preview)}")
         return volume_memmap, self.presample_dataset, self.postsample_dataset, self.x_coords_dataset, self.y_coords_dataset, self.preview
     
     def create_memmap_cache_background(self):
