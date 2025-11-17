@@ -2,6 +2,7 @@
 Main dashboard utilities combining auth, MongoDB, and parameter parsing
 """
 import os
+from pathlib import Path
 
 def initialize_dashboard(request=None, status_callback=None):
     """
@@ -159,3 +160,46 @@ def initialize_dashboard(request=None, status_callback=None):
             'dataset_path': None,
             'error': error_msg
         }
+
+
+def find_visus_idx_file(uuid):
+    """
+    Recursively search for visus.idx file given a UUID in either:
+    - /mnt/visus_datasets/converted/{uuid}/visus.idx
+    - /mnt/visus_datasets/upload/{uuid}/visus.idx
+    
+    Args:
+        uuid: UUID string to search for
+        
+    Returns:
+        str or None: Full path to visus.idx file if found, None otherwise
+    """
+    if not uuid:
+        return None
+    
+    # Define the two base directories to search
+    base_dirs = [
+        f"/mnt/visus_datasets/converted/{uuid}",
+        f"/mnt/visus_datasets/upload/{uuid}"
+    ]
+    
+    # First, check the direct paths (non-recursive)
+    for base_dir in base_dirs:
+        direct_path = os.path.join(base_dir, "visus.idx")
+        if os.path.isfile(direct_path):
+            return direct_path
+    
+    # If not found directly, search recursively in both directories
+    for base_dir in base_dirs:
+        if not os.path.isdir(base_dir):
+            continue
+        
+        # Use pathlib for recursive search
+        base_path = Path(base_dir)
+        for idx_file in base_path.rglob("visus.idx"):
+            if idx_file.is_file():
+                # Resolve to absolute path to ensure we return full path
+                return str(idx_file.resolve())
+    
+    # File not found in either location
+    return None
