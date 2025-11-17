@@ -266,11 +266,12 @@ class DatasetConverter:
             logger.info(f"Moving visus.idx to top level: {found_idx}")
             shutil.move(str(found_idx), str(self.output_dir / "visus.idx"))
         
-        # Move visus directory to top level if found buried
-        found_visus = next(self.output_dir.rglob("visus"), None)
-        if found_visus and found_visus.is_dir() and found_visus.parent != self.output_dir:
-            logger.info(f"Moving visus directory to top level: {found_visus}")
-            shutil.move(str(found_visus), str(self.output_dir / "visus"))
+        # Don't do this.. the idx file has links to the directory of data, no need to rename it, visus.idx points to the real .idx, which points to the directory. 
+        # COmment out, AAG: 2025-11-17: Move visus directory to top level if found buried
+        # found_visus = next(self.output_dir.rglob("visus"), None)
+        # if found_visus and found_visus.is_dir() and found_visus.parent != self.output_dir:
+        #     logger.info(f"Moving visus directory to top level: {found_visus}")
+        #     shutil.move(str(found_visus), str(self.output_dir / "visus"))
         
         # Handle .idx files with matching directories
         for idx_file in self.output_dir.rglob("*.idx"):
@@ -283,18 +284,54 @@ class DatasetConverter:
             
             if corresponding_dir.exists() and corresponding_dir.is_dir():
                 logger.info(f"Found matching pair: {idx_file} and {corresponding_dir}")
-                # Copy idx to visus.idx
-                shutil.copy2(idx_file, self.output_dir / "visus.idx")
-                # Move directory to visus
-                if (self.output_dir / "visus").exists():
-                    shutil.rmtree(self.output_dir / "visus")
-                shutil.move(str(corresponding_dir), str(self.output_dir / "visus"))
+                
+                # Determine top-level destination paths
+                top_level_idx = self.output_dir / idx_file.name
+                top_level_dir = self.output_dir / corresponding_dir.name
+                
+                # Move .idx file to top level (if not already there)
+                if idx_file.parent != self.output_dir:
+                    if top_level_idx.exists():
+                        logger.warning(f"Target .idx file already exists at top level: {top_level_idx}, removing old one")
+                        top_level_idx.unlink()
+                    logger.info(f"Moving {idx_file} to {top_level_idx}")
+                    shutil.move(str(idx_file), str(top_level_idx))
+                    idx_file = top_level_idx
+                else:
+                    logger.info(f".idx file already at top level: {idx_file}")
+                
+                # Move directory to top level (if not already there, and keep original name)
+                if corresponding_dir.parent != self.output_dir:
+                    if top_level_dir.exists():
+                        logger.warning(f"Target directory already exists at top level: {top_level_dir}, removing old one")
+                        shutil.rmtree(top_level_dir)
+                    logger.info(f"Moving {corresponding_dir} to {top_level_dir} (keeping original name)")
+                    shutil.move(str(corresponding_dir), str(top_level_dir))
+                else:
+                    logger.info(f"Directory already at top level: {corresponding_dir}")
+                
+                # Create symbolic link from visus.idx to the actual .idx file
+                visus_idx_link = self.output_dir / "visus.idx"
+                if visus_idx_link.exists():
+                    if visus_idx_link.is_symlink():
+                        visus_idx_link.unlink()
+                    else:
+                        logger.warning(f"visus.idx exists and is not a symlink, removing: {visus_idx_link}")
+                        visus_idx_link.unlink()
+                
+                # Create relative symlink (relative to output_dir)
+                relative_idx_path = idx_file.name
+                logger.info(f"Creating symlink: {visus_idx_link} -> {relative_idx_path}")
+                visus_idx_link.symlink_to(relative_idx_path)
+                
                 # Fix permissions
-                os.chmod(self.output_dir / "visus.idx", 0o644)
-                os.chmod(self.output_dir / "visus", 0o755)
-                for file in (self.output_dir / "visus").rglob("*"):
-                    if file.is_file():
-                        os.chmod(file, 0o644)
+                if idx_file.exists():
+                    os.chmod(idx_file, 0o644)
+                if top_level_dir.exists():
+                    os.chmod(top_level_dir, 0o755)
+                    for file in top_level_dir.rglob("*"):
+                        if file.is_file():
+                            os.chmod(file, 0o644)
                 break
     
     def _convert_rgb_drone(self) -> None:
