@@ -354,20 +354,46 @@ async def list_user_teams(
 ):
     """Get all teams for a user (owned or member of)."""
     try:
+        # Normalize email to lowercase for consistent matching
+        user_email_lower = user_email.lower().strip()
+        
         with mongo_collection_by_type_context('teams') as collection:
-            # Find teams where user is owner or member
-            teams = list(collection.find({
-                "$or": [
-                    {"owner": user_email},
-                    {"emails": user_email}
-                ]
-            }))
+            # Get all teams and filter in Python for case-insensitive matching
+            # This ensures we catch all teams regardless of email case variations
+            all_teams = list(collection.find({}))
+            
+            matched_teams = []
+            for team in all_teams:
+                # Normalize owner email for comparison
+                owner = team.get("owner", "")
+                if isinstance(owner, str):
+                    owner_lower = owner.lower().strip()
+                else:
+                    owner_lower = str(owner).lower().strip()
+                
+                # Normalize emails array for comparison
+                emails = team.get("emails", [])
+                emails_lower = []
+                for email in emails:
+                    if isinstance(email, str):
+                        emails_lower.append(email.lower().strip())
+                    else:
+                        emails_lower.append(str(email).lower().strip())
+                
+                # Check if user is owner or in emails array (case-insensitive)
+                if owner_lower == user_email_lower or user_email_lower in emails_lower:
+                    matched_teams.append(team)
         
         # Format teams
         formatted_teams = []
-        for team in teams:
+        for team in matched_teams:
             if '_id' in team:
                 team['_id'] = str(team['_id'])
+            
+            # Determine if user is owner (case-insensitive)
+            owner = team.get("owner", "")
+            owner_lower = owner.lower().strip() if isinstance(owner, str) else str(owner).lower().strip()
+            is_owner = owner_lower == user_email_lower
             
             formatted_teams.append({
                 "uuid": team.get("uuid"),
@@ -376,8 +402,10 @@ async def list_user_teams(
                 "emails": team.get("emails", []),
                 "parents": team.get("parents", []),
                 "created_at": team.get("created_at"),
-                "is_owner": team.get("owner") == user_email
+                "is_owner": is_owner
             })
+        
+        logger.info(f"Found {len(formatted_teams)} team(s) for user {user_email_lower} (normalized from {user_email})")
         
         return {
             "success": True,
