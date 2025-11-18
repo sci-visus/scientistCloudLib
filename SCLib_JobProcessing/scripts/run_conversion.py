@@ -565,8 +565,23 @@ class DatasetConverter:
                 continue
             dest = self.output_dir / item.name
             if item.is_file():
-                shutil.copy2(item, dest)
-                logger.debug(f"Copied file: {item.name}")
+                try:
+                    # Try copy2 first (preserves metadata)
+                    shutil.copy2(item, dest)
+                    logger.debug(f"Copied file: {item.name}")
+                except PermissionError:
+                    # If permission error (can't set timestamps), fall back to copy (content only)
+                    logger.warning(f"Could not preserve metadata for {item.name}, copying content only")
+                    shutil.copy(item, dest)
+                    logger.debug(f"Copied file (content only): {item.name}")
+                except OSError as e:
+                    # Handle other OS errors
+                    logger.warning(f"Could not copy {item.name}: {e}, trying content-only copy")
+                    try:
+                        shutil.copy(item, dest)
+                        logger.debug(f"Copied file (content only): {item.name}")
+                    except Exception as e2:
+                        raise ConversionError(f"Failed to copy {item.name}: {e2}")
             elif item.is_dir():
                 if dest.exists():
                     shutil.rmtree(dest)
