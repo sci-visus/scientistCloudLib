@@ -175,6 +175,20 @@ class SCLib_BackgroundService:
             input_path = os.path.join(input_dir, dataset_uuid)
             output_path = os.path.join(output_dir, dataset_uuid)
             
+            # Check if input directory exists - if not, mark as failed and skip
+            if not os.path.exists(input_path):
+                print(f"⚠️ Input directory does not exist for dataset {dataset_uuid}: {input_path}")
+                print(f"   Dataset may have been deleted. Marking as failed.")
+                datasets_collection.update_one(
+                    {'uuid': dataset_uuid},
+                    {'$set': {
+                        'status': 'conversion failed',
+                        'conversion_last_error': f'Input directory does not exist: {input_path}',
+                        'updated_at': utc_now()
+                    }}
+                )
+                return
+            
             # Get sensor type from dataset
             sensor = dataset.get('sensor', 'OTHER')
             conversion_params = dataset.get('conversion_parameters', {})
@@ -320,30 +334,47 @@ class SCLib_BackgroundService:
     def _cleanup_old_datasets(self):
         """Clean up old processing locks and check for stale conversions."""
         try:
-            # Check for datasets stuck in "converting" status for too long (>2 hours)
+            # Check for datasets stuck in "converting" status for too long (30 minutes)
+            # Reduced from 2 hours to catch stuck jobs faster
             db_name = self.settings.get('db_name', 'scientistcloud')
             db = self.mongo_client[db_name]
             datasets_collection = db['visstoredatas']
             
-            two_hours_ago = utc_now() - timedelta(hours=2)
+            thirty_minutes_ago = utc_now() - timedelta(minutes=30)
             
             stale_datasets = datasets_collection.find({
                 'status': 'converting',
-                'updated_at': {'$lt': two_hours_ago}
+                'updated_at': {'$lt': thirty_minutes_ago}
             })
             
             for dataset in stale_datasets:
                 dataset_uuid = dataset['uuid']
-                print(f"Found stale conversion for dataset {dataset_uuid}, resetting to queued")
                 
-                # Reset to queued so it can be retried
-                datasets_collection.update_one(
-                    {'uuid': dataset_uuid},
-                    {'$set': {
-                        'status': 'conversion queued',
-                        'updated_at': datetime.utcnow()
-                    }}
-                )
+                # Check if input directory exists
+                input_dir = os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')
+                input_path = os.path.join(input_dir, dataset_uuid)
+                
+                if not os.path.exists(input_path):
+                    # Dataset directory doesn't exist - mark as failed
+                    print(f"Found stale conversion for dataset {dataset_uuid}, but input directory doesn't exist. Marking as failed.")
+                    datasets_collection.update_one(
+                        {'uuid': dataset_uuid},
+                        {'$set': {
+                            'status': 'conversion failed',
+                            'conversion_last_error': f'Stale job: input directory does not exist: {input_path}',
+                            'updated_at': utc_now()
+                        }}
+                    )
+                else:
+                    # Directory exists - reset to queued for retry
+                    print(f"Found stale conversion for dataset {dataset_uuid}, resetting to queued")
+                    datasets_collection.update_one(
+                        {'uuid': dataset_uuid},
+                        {'$set': {
+                            'status': 'conversion queued',
+                            'updated_at': utc_now()
+                        }}
+                    )
                 
                 # Remove lock file if it exists
                 lock_file = f"/tmp/sc_conversion_{dataset_uuid}.lock"
