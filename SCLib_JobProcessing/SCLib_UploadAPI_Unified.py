@@ -989,8 +989,40 @@ async def internal_error_handler(request, exc):
         content={"error": "Internal server error", "detail": "An unexpected error occurred"}
     )
 
+# Include Sharing and Team API routes FIRST (before mounting Dataset API)
+# This ensures teams routes are registered before any mount operations
+try:
+    from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
+    # Include the router from the sharing API app (routes already have /api/v1 prefix)
+    app.include_router(sharing_api_app.router)
+    logger.info("✅ Sharing and Team API routes included (routes at /api/v1/*)")
+except ImportError:
+    try:
+        # Fallback for direct import (when running from /app in Docker)
+        import sys
+        from pathlib import Path
+        possible_paths = [
+            Path('/app/scientistCloudLib/SCLib_Sharing_and_Team'),
+            Path(__file__).parent.parent.parent / 'SCLib_Sharing_and_Team',
+        ]
+        for sharing_path in possible_paths:
+            if sharing_path.exists():
+                sharing_parent = str(sharing_path.parent)
+                if sharing_parent not in sys.path:
+                    sys.path.insert(0, sharing_parent)
+                try:
+                    from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
+                    app.include_router(sharing_api_app.router)
+                    logger.info(f"✅ Sharing and Team API routes included from {sharing_path}")
+                    break
+                except ImportError:
+                    continue
+    except Exception as e:
+        logger.warning(f"⚠️ Could not include Sharing and Team API routes: {e}")
+        logger.warning("   Sharing and team endpoints will not be available")
+
 # Include Dataset Management API router
-# Mount AFTER all upload routes are defined to avoid route conflicts
+# Mount AFTER all upload routes and Sharing API routes are defined to avoid route conflicts
 # Note: Dataset API routes are already prefixed with /api/v1, so mount at root
 try:
     from ..SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app
@@ -1021,37 +1053,6 @@ except ImportError:
     except Exception as e:
         logger.warning(f"⚠️ Could not mount Dataset Management API: {e}")
         logger.warning("   Upload endpoints will work, but dataset management endpoints will not be available")
-
-# Include Sharing and Team API routes
-try:
-    from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
-    # Include the router from the sharing API app (routes already have /api/v1 prefix)
-    app.include_router(sharing_api_app.router)
-    logger.info("✅ Sharing and Team API routes included (routes at /api/v1/*)")
-except ImportError:
-    try:
-        # Fallback for direct import (when running from /app in Docker)
-        import sys
-        from pathlib import Path
-        possible_paths = [
-            Path('/app/scientistCloudLib/SCLib_Sharing_and_Team'),
-            Path(__file__).parent.parent.parent / 'SCLib_Sharing_and_Team',
-        ]
-        for sharing_path in possible_paths:
-            if sharing_path.exists():
-                sharing_parent = str(sharing_path.parent)
-                if sharing_parent not in sys.path:
-                    sys.path.insert(0, sharing_parent)
-                try:
-                    from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
-                    app.include_router(sharing_api_app.router)
-                    logger.info(f"✅ Sharing and Team API routes included from {sharing_path}")
-                    break
-                except ImportError:
-                    continue
-    except Exception as e:
-        logger.warning(f"⚠️ Could not include Sharing and Team API routes: {e}")
-        logger.warning("   Sharing and team endpoints will not be available")
 
 if __name__ == "__main__":
     import uvicorn
