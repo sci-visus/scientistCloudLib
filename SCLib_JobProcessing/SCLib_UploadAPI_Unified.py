@@ -1022,12 +1022,12 @@ except ImportError:
         logger.warning(f"⚠️ Could not mount Dataset Management API: {e}")
         logger.warning("   Upload endpoints will work, but dataset management endpoints will not be available")
 
-# Mount Sharing and Team API
+# Include Sharing and Team API routes
 try:
     from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
-    # Mount at root since Sharing API routes already have /api/v1 prefix
-    app.mount("/", sharing_api_app)
-    logger.info("✅ Sharing and Team API mounted (routes at /api/v1/*)")
+    # Include the router from the sharing API app (routes already have /api/v1 prefix)
+    app.include_router(sharing_api_app.router)
+    logger.info("✅ Sharing and Team API routes included (routes at /api/v1/*)")
 except ImportError:
     try:
         # Fallback for direct import (when running from /app in Docker)
@@ -1044,13 +1044,13 @@ except ImportError:
                     sys.path.insert(0, sharing_parent)
                 try:
                     from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
-                    app.mount("/", sharing_api_app)
-                    logger.info(f"✅ Sharing and Team API mounted from {sharing_path}")
+                    app.include_router(sharing_api_app.router)
+                    logger.info(f"✅ Sharing and Team API routes included from {sharing_path}")
                     break
                 except ImportError:
                     continue
     except Exception as e:
-        logger.warning(f"⚠️ Could not mount Sharing and Team API: {e}")
+        logger.warning(f"⚠️ Could not include Sharing and Team API routes: {e}")
         logger.warning("   Sharing and team endpoints will not be available")
 
 if __name__ == "__main__":
