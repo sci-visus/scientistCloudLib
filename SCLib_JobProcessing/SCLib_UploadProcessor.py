@@ -169,7 +169,11 @@ class SCLib_UploadProcessor:
             if job_config.source_type == UploadSourceType.LOCAL:
                 self._process_local_upload(job_id, job_config)
             elif job_config.source_type == UploadSourceType.GOOGLE_DRIVE:
-                self._process_google_drive_upload(job_id, job_config)
+                # Check if using OAuth (user_email in source_config) or service account
+                if job_config.source_config.get('use_oauth') or job_config.source_config.get('user_email'):
+                    self._process_google_drive_upload_oauth(job_id, job_config)
+                else:
+                    self._process_google_drive_upload(job_id, job_config)
             elif job_config.source_type == UploadSourceType.S3:
                 self._process_s3_upload(job_id, job_config)
             elif job_config.source_type == UploadSourceType.URL:
@@ -210,7 +214,7 @@ class SCLib_UploadProcessor:
             self._upload_with_copy(job_id, source_path, dest_path, job_config)
     
     def _process_google_drive_upload(self, job_id: str, job_config: UploadJobConfig):
-        """Process Google Drive upload using rclone."""
+        """Process Google Drive upload using rclone (service account)."""
         if not self._is_tool_available("rclone"):
             raise RuntimeError("rclone is required for Google Drive uploads")
         
@@ -225,6 +229,40 @@ class SCLib_UploadProcessor:
         
         # Download from Google Drive
         self._download_from_google_drive(job_id, file_id, job_config.destination_path, rclone_config)
+    
+    def _process_google_drive_upload_oauth(self, job_id: str, job_config: UploadJobConfig):
+        """Process Google Drive upload using OAuth tokens (user-based)."""
+        try:
+            from .SCLib_GoogleOAuth import get_google_drive_service
+        except ImportError:
+            from SCLib_GoogleOAuth import get_google_drive_service
+        
+        user_email = job_config.source_config.get("user_email") or job_config.user_email
+        file_id = job_config.source_config.get("file_id")
+        folder_link = job_config.source_config.get("folder_link")  # Optional: full Google Drive folder URL
+        
+        if not user_email:
+            raise ValueError("OAuth-based Google Drive upload requires user_email")
+        
+        if not file_id and not folder_link:
+            raise ValueError("OAuth-based Google Drive upload requires file_id or folder_link")
+        
+        # Extract file_id from folder_link if provided
+        if folder_link and not file_id:
+            import urllib.parse
+            u = urllib.parse.urlparse(folder_link)
+            file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0] or u.path.strip('/').split('/')[-1]
+        
+        if not file_id:
+            raise ValueError("Could not extract file_id from folder_link")
+        
+        logger.info(f"Starting OAuth-based Google Drive download for user {user_email}, file_id: {file_id}")
+        
+        # Get Google Drive service
+        service = get_google_drive_service(user_email)
+        
+        # Download file or folder recursively
+        self._download_from_google_drive_oauth(job_id, service, file_id, job_config.destination_path, user_email)
     
     def _process_s3_upload(self, job_id: str, job_config: UploadJobConfig):
         """Process S3 upload using AWS CLI or rclone."""
@@ -363,6 +401,187 @@ class SCLib_UploadProcessor:
             
         finally:
             os.unlink(config_file)
+    
+    def _download_from_google_drive_oauth(self, job_id: str, service, file_id: str, dest_path: str, user_email: str):
+        """Download from Google Drive using OAuth tokens with recursive folder support."""
+        import io
+        try:
+            from googleapiclient.http import MediaIoBaseDownload
+            import google.auth.exceptions
+        except ImportError:
+            raise ImportError("google-api-python-client is required for OAuth-based Google Drive downloads")
+        
+        # Ensure destination directory exists
+        os.makedirs(dest_path, exist_ok=True)
+        
+        def download_file(file_id, destination_path, mime_type):
+            """Download a single file from Google Drive."""
+            try:
+                if mime_type == 'application/vnd.google-apps.document':
+                    request = service.files().export_media(fileId=file_id, mimeType='application/pdf')
+                    if not destination_path.lower().endswith('.pdf'):
+                        destination_path += '.pdf'
+                elif mime_type == 'application/vnd.google-apps.spreadsheet':
+                    request = service.files().export_media(fileId=file_id,
+                        mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                    if not destination_path.lower().endswith(('.xlsx', '.xls')):
+                        destination_path += '.xlsx'
+                elif mime_type == 'application/vnd.google-apps.presentation':
+                    request = service.files().export_media(fileId=file_id,
+                        mimeType='application/vnd.openxmlformats-officedocument.presentationml.presentation')
+                    if not destination_path.lower().endswith('.pptx'):
+                        destination_path += '.pptx'
+                else:
+                    request = service.files().get_media(fileId=file_id)
+                
+                with io.FileIO(destination_path, 'wb') as fh:
+                    downloader = MediaIoBaseDownload(fh, request)
+                    done = False
+                    while not done:
+                        status, done = downloader.next_chunk()
+                        if status:
+                            # Update progress if we can estimate file size
+                            progress = (status.resumable_progress / status.total_size * 100) if status.total_size else 0
+                            # Note: This is per-file progress, overall progress would need to track all files
+                            logger.debug(f"Downloading {os.path.basename(destination_path)}: {progress:.1f}%")
+                
+                logger.info(f"Downloaded: {destination_path}")
+                return True
+            except Exception as e:
+                logger.error(f"Error downloading file {file_id} to {destination_path}: {e}")
+                # Write error to log file
+                error_log = os.path.join(dest_path, 'sync_errors.log')
+                with open(error_log, 'a') as log:
+                    log.write(f"{datetime.now()} - Error downloading file {file_id}: {e}\n")
+                return False
+        
+        def recursive_sync(local_dir, folder_id):
+            """Recursively sync a Google Drive folder."""
+            logger.info(f"Syncing folder {folder_id} to {local_dir}")
+            try:
+                # Get folder metadata
+                try:
+                    folder_meta = service.files().get(
+                        fileId=folder_id, 
+                        fields="id,name,mimeType",
+                        supportsAllDrives=True
+                    ).execute()
+                    logger.info(f"Folder: {folder_meta.get('name', 'Unknown')} (ID: {folder_id})")
+                except Exception as e:
+                    logger.warning(f"Could not get folder metadata: {e}")
+                
+                page_token = None
+                file_count = 0
+                
+                while True:
+                    try:
+                        # List files in folder
+                        response = service.files().list(
+                            q=f"'{folder_id}' in parents and trashed=false",
+                            supportsAllDrives=True,
+                            includeItemsFromAllDrives=True,
+                            fields="nextPageToken, files(id, name, mimeType, shortcutDetails)",
+                            pageToken=page_token
+                        ).execute()
+                    except google.auth.exceptions.RefreshError as e:
+                        if 'invalid_grant' in str(e):
+                            logger.error(f"Google refresh token expired for {user_email}")
+                            raise
+                        raise
+                    except Exception as e:
+                        logger.warning(f"File listing failed, trying without supportsAllDrives: {e}")
+                        try:
+                            response = service.files().list(
+                                q=f"'{folder_id}' in parents and trashed=false",
+                                fields="nextPageToken, files(id, name, mimeType, shortcutDetails)",
+                                pageToken=page_token
+                            ).execute()
+                        except Exception as e2:
+                            logger.error(f"File listing failed: {e2}")
+                            break
+                    
+                    files = response.get('files', [])
+                    file_count += len(files)
+                    
+                    if len(files) == 0:
+                        break
+                    
+                    for file in files:
+                        f_id = file['id']
+                        f_name = file['name']
+                        m_type = file['mimeType']
+                        
+                        # Handle shortcuts
+                        if m_type == 'application/vnd.google-apps.shortcut':
+                            shortcut_details = file.get('shortcutDetails', {})
+                            if shortcut_details:
+                                f_id = shortcut_details.get('targetId', f_id)
+                                try:
+                                    meta = service.files().get(
+                                        fileId=f_id,
+                                        fields="mimeType, name",
+                                        supportsAllDrives=True
+                                    ).execute()
+                                    f_name = meta.get('name', f_name)
+                                    m_type = meta.get('mimeType', m_type)
+                                except Exception as e:
+                                    logger.warning(f"Could not resolve shortcut {f_name}: {e}")
+                        
+                        # Handle folders recursively
+                        if m_type == 'application/vnd.google-apps.folder':
+                            new_dir = os.path.join(local_dir, f_name)
+                            os.makedirs(new_dir, exist_ok=True)
+                            if not recursive_sync(new_dir, f_id):
+                                return False
+                        else:
+                            # Download file
+                            file_path = os.path.join(local_dir, f_name)
+                            download_file(f_id, file_path, m_type)
+                    
+                    page_token = response.get('nextPageToken')
+                    if page_token is None:
+                        break
+                
+                logger.info(f"Completed syncing folder {folder_id} - {file_count} files processed")
+                return True
+                
+            except Exception as e:
+                logger.error(f"Error syncing folder {folder_id}: {e}")
+                error_log = os.path.join(local_dir, 'sync_errors.log')
+                with open(error_log, 'a') as log:
+                    log.write(f"{datetime.now()} - Error syncing folder {folder_id}: {e}\n")
+                return False
+        
+        # Check if file_id is a folder or file
+        try:
+            file_meta = service.files().get(
+                fileId=file_id,
+                fields="id,name,mimeType",
+                supportsAllDrives=True
+            ).execute()
+            
+            mime_type = file_meta.get('mimeType')
+            file_name = file_meta.get('name', 'unknown')
+            
+            if mime_type == 'application/vnd.google-apps.folder':
+                # Recursive folder sync
+                logger.info(f"Starting recursive folder sync: {file_name}")
+                success = recursive_sync(dest_path, file_id)
+            else:
+                # Single file download
+                logger.info(f"Downloading single file: {file_name}")
+                file_path = os.path.join(dest_path, file_name)
+                success = download_file(file_id, file_path, mime_type)
+            
+            if success:
+                logger.info(f"Google Drive download completed successfully")
+                self._update_job_progress(job_id, 100.0, 0, 0)  # Progress tracking for folders is complex
+            else:
+                raise RuntimeError("Google Drive download failed")
+                
+        except Exception as e:
+            logger.error(f"Error in Google Drive OAuth download: {e}")
+            raise
     
     def _download_from_s3_aws_cli(self, job_id: str, bucket_name: str, object_key: str, dest_path: str):
         """Download from S3 using AWS CLI."""

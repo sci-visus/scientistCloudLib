@@ -253,13 +253,14 @@ curl -X POST "http://localhost:5001/api/upload/initiate" \
   }'
 ```
 
-### 4. Google Drive Upload
+### 4. Google Drive Upload (Service Account)
 
 Upload from Google Drive using file ID and service account:
 
 ```bash
 curl -X POST "http://localhost:5001/api/upload/initiate" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{
     "source_type": "google_drive",
     "source_config": {
@@ -275,6 +276,65 @@ curl -X POST "http://localhost:5001/api/upload/initiate" \
     "team_uuid": "optional-team-uuid"
   }'
 ```
+
+### 4b. Google Drive Upload (OAuth - User-Based)
+
+Upload from Google Drive using OAuth tokens (stored in MongoDB for the user).
+This uses the user's own Google account credentials, supports recursive folder syncing,
+and works with files/folders the user has access to.
+
+**Using file_id:**
+```bash
+curl -X POST "http://localhost:5001/api/upload/initiate" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "source_type": "google_drive",
+    "source_config": {
+      "file_id": "1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+      "use_oauth": true
+    },
+    "user_email": "user@example.com",
+    "dataset_name": "Google Drive Dataset (OAuth)",
+    "sensor": "TIFF",
+    "convert": true,
+    "is_public": false,
+    "folder": "google_drive",
+    "team_uuid": "optional-team-uuid"
+  }'
+```
+
+**Using folder_link (full Google Drive URL):**
+```bash
+curl -X POST "http://localhost:5001/api/upload/initiate" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "source_type": "google_drive",
+    "source_config": {
+      "folder_link": "https://drive.google.com/drive/folders/1BxiMVs0XRA5nFMdKvBdBZjgmUUqptlbs74OgvE2upms",
+      "use_oauth": true
+    },
+    "user_email": "user@example.com",
+    "dataset_name": "Google Drive Folder (OAuth)",
+    "sensor": "TIFF",
+    "convert": true,
+    "is_public": false,
+    "folder": "google_drive",
+    "team_uuid": "optional-team-uuid"
+  }'
+```
+
+**Features of OAuth-based uploads:**
+- ✅ Uses user's own Google account (no service account needed)
+- ✅ Supports recursive folder syncing
+- ✅ Handles Google Workspace files (Docs, Sheets, Slides) with automatic conversion
+- ✅ Supports shortcuts and shared drives
+- ✅ Automatically refreshes expired tokens
+- ✅ Works with any file/folder the user has access to
+
+**Note:** The user must have authenticated with Google and have valid OAuth tokens stored in MongoDB.
+If tokens are expired, the user will need to re-authenticate.
 
 ### 5. S3 Upload
 

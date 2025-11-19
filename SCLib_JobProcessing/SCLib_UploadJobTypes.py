@@ -336,14 +336,29 @@ def create_google_drive_upload_job(
     user_email: str,
     dataset_name: str,
     sensor: SensorType,
-    service_account_file: str,
+    service_account_file: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
+    source_config_override: Optional[Dict[str, Any]] = None,
     **kwargs
 ) -> UploadJobConfig:
-    """Create a Google Drive upload job."""
+    """Create a Google Drive upload job.
+    
+    Supports both OAuth-based (user_email in source_config) and service account-based uploads.
+    If source_config_override is provided, it will be used instead of building from parameters.
+    """
+    # Use override config if provided (for OAuth), otherwise build from parameters
+    if source_config_override:
+        source_config = source_config_override
+    else:
+        source_config = {
+            "file_id": file_id
+        }
+        if service_account_file:
+            source_config["service_account_file"] = service_account_file
+    
     return create_upload_job_config(
         source_type=UploadSourceType.GOOGLE_DRIVE,
         source_path=file_id,
@@ -357,10 +372,7 @@ def create_google_drive_upload_job(
         is_public=is_public,
         folder=folder,
         team_uuid=team_uuid,
-        source_config={
-            "service_account_file": service_account_file,
-            "file_id": file_id
-        },
+        source_config=source_config,
         **kwargs
     )
 

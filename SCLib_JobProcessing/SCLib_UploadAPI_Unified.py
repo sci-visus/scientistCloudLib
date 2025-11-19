@@ -95,7 +95,12 @@ class UploadRequest(BaseModel):
     def validate_source_config(cls, v, values):
         source_type = values.get('source_type')
         if source_type == UploadSourceType.GOOGLE_DRIVE:
-            required_fields = ['file_id', 'service_account_file']
+            # OAuth-based uploads need user_email, service account needs service_account_file
+            use_oauth = v.get('use_oauth', False) or v.get('user_email') is not None
+            if use_oauth:
+                required_fields = ['file_id']  # user_email comes from request.user_email
+            else:
+                required_fields = ['file_id', 'service_account_file']
         elif source_type == UploadSourceType.S3:
             required_fields = ['bucket_name', 'object_key', 'access_key_id', 'secret_access_key']
         elif source_type == UploadSourceType.URL:
@@ -229,9 +234,39 @@ async def initiate_upload(
         
         # Create upload job based on source type
         if request.source_type == UploadSourceType.GOOGLE_DRIVE:
+            # Check if using OAuth or service account
+            use_oauth = request.source_config.get('use_oauth', False) or request.source_config.get('user_email') is not None
+            
+            if use_oauth:
+                # OAuth-based upload - user_email from request, file_id from config
+                # Also support folder_link for convenience
+                source_config = {
+                    'file_id': request.source_config.get('file_id'),
+                    'folder_link': request.source_config.get('folder_link'),  # Optional: full Google Drive URL
+                    'user_email': request.user_email,
+                    'use_oauth': True
+                }
+            else:
+                # Service account-based upload
+                source_config = {
+                    'file_id': request.source_config['file_id'],
+                    'service_account_file': request.source_config['service_account_file']
+                }
+            
+            # Get file_id from either source_config or folder_link
+            file_id = source_config.get('file_id')
+            if not file_id and source_config.get('folder_link'):
+                import urllib.parse
+                folder_link = source_config['folder_link']
+                u = urllib.parse.urlparse(folder_link)
+                file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0] or u.path.strip('/').split('/')[-1]
+            
+            if not file_id:
+                raise HTTPException(status_code=400, detail="file_id or folder_link is required for Google Drive upload")
+            
             job_config = create_google_drive_upload_job(
-                file_id=request.source_config['file_id'],
-                service_account_file=request.source_config['service_account_file'],
+                file_id=file_id,
+                service_account_file=source_config.get('service_account_file'),
                 dataset_uuid=str(uuid.uuid4()),
                 user_email=request.user_email,
                 dataset_name=request.dataset_name,
@@ -239,7 +274,8 @@ async def initiate_upload(
                 convert=request.convert,
                 is_public=request.is_public,
                 folder=request.folder,
-                team_uuid=request.team_uuid
+                team_uuid=request.team_uuid,
+                source_config_override=source_config  # Pass full config including OAuth flags
             )
             upload_type = "standard"
         elif request.source_type == UploadSourceType.S3:
