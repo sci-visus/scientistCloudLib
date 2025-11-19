@@ -98,19 +98,24 @@ class UploadRequest(BaseModel):
             # OAuth-based uploads need user_email, service account needs service_account_file
             use_oauth = v.get('use_oauth', False) or v.get('user_email') is not None
             if use_oauth:
-                required_fields = ['file_id']  # user_email comes from request.user_email
+                # For OAuth, accept either file_id OR folder_link
+                if 'file_id' not in v and 'folder_link' not in v:
+                    raise ValueError(f"Missing required field 'file_id' or 'folder_link' for OAuth-based Google Drive upload")
             else:
                 required_fields = ['file_id', 'service_account_file']
+                for field in required_fields:
+                    if field not in v:
+                        raise ValueError(f"Missing required field '{field}' for source type '{source_type}'")
         elif source_type == UploadSourceType.S3:
             required_fields = ['bucket_name', 'object_key', 'access_key_id', 'secret_access_key']
+            for field in required_fields:
+                if field not in v:
+                    raise ValueError(f"Missing required field '{field}' for source type '{source_type}'")
         elif source_type == UploadSourceType.URL:
             required_fields = ['url']
-        else:
-            return v
-        
-        for field in required_fields:
-            if field not in v:
-                raise ValueError(f"Missing required field '{field}' for source type '{source_type}'")
+            for field in required_fields:
+                if field not in v:
+                    raise ValueError(f"Missing required field '{field}' for source type '{source_type}'")
         return v
 
 class ChunkUploadRequest(BaseModel):
