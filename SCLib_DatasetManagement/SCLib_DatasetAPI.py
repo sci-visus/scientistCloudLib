@@ -386,21 +386,29 @@ async def get_user_datasets_organized(
             team_dataset_uuids = set()
             
             # Method 1: Get datasets from shared_team collection
-            if team_uuids:
+            if team_uuids or team_names:
                 with mongo_collection_by_type_context('shared_team') as shared_team_collection:
-                    team_pipeline = [
-                        {'$match': {'team_uuid': {'$in': team_uuids}}},
-                        {'$lookup': {
-                            'from': 'visstoredatas',
-                            'localField': 'uuid',
-                            'foreignField': 'uuid',
-                            'as': 'sharing_data'
-                        }}
-                    ]
-                    team_cursor = shared_team_collection.aggregate(team_pipeline)
-                    for doc in team_cursor:
-                        if doc.get('uuid'):
-                            team_dataset_uuids.add(doc['uuid'])
+                    # Build match conditions - check both team_uuid (UUID) and team (team name) fields
+                    match_conditions = []
+                    if team_uuids:
+                        match_conditions.append({'team_uuid': {'$in': team_uuids}})
+                    if team_names:
+                        match_conditions.append({'team': {'$in': team_names}})
+                    
+                    if match_conditions:
+                        team_pipeline = [
+                            {'$match': {'$or': match_conditions}},
+                            {'$lookup': {
+                                'from': 'visstoredatas',
+                                'localField': 'uuid',
+                                'foreignField': 'uuid',
+                                'as': 'sharing_data'
+                            }}
+                        ]
+                        team_cursor = shared_team_collection.aggregate(team_pipeline)
+                        for doc in team_cursor:
+                            if doc.get('uuid'):
+                                team_dataset_uuids.add(doc['uuid'])
             
             # Method 2: Get datasets that have team_uuid matching team UUIDs or team names
             # (datasets uploaded with team_uuid are stored directly in visstoredatas)
