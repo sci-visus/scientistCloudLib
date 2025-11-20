@@ -486,8 +486,33 @@ class SCLib_UploadProcessor:
         # Extract file_id from folder_link if provided
         if folder_link and not file_id:
             import urllib.parse
+            import re
             u = urllib.parse.urlparse(folder_link)
-            file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0] or u.path.strip('/').split('/')[-1]
+            
+            # Try to get id from query string first (for URLs like ?id=FILE_ID)
+            file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0]
+            
+            # If not in query, try to extract from path
+            # Google Drive URLs can be:
+            # - /file/d/FILE_ID/view (for files)
+            # - /drive/folders/FOLDER_ID (for folders)
+            # - /open?id=FILE_ID (legacy format)
+            if not file_id:
+                path = u.path.strip('/')
+                # Try to match /file/d/FILE_ID pattern
+                match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', path)
+                if match:
+                    file_id = match.group(1)
+                else:
+                    # Try to match /drive/folders/FOLDER_ID pattern
+                    match = re.search(r'/drive/folders/([a-zA-Z0-9_-]+)', path)
+                    if match:
+                        file_id = match.group(1)
+                    else:
+                        # Fallback: get last non-empty segment (but not 'view' or 'edit')
+                        segments = [s for s in path.split('/') if s and s not in ['view', 'edit', 'open']]
+                        if segments:
+                            file_id = segments[-1]
         
         if not file_id:
             raise ValueError("Could not extract file_id from folder_link")

@@ -262,9 +262,34 @@ async def initiate_upload(
             file_id = source_config.get('file_id')
             if not file_id and source_config.get('folder_link'):
                 import urllib.parse
+                import re
                 folder_link = source_config['folder_link']
                 u = urllib.parse.urlparse(folder_link)
-                file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0] or u.path.strip('/').split('/')[-1]
+                
+                # Try to get id from query string first (for URLs like ?id=FILE_ID)
+                file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0]
+                
+                # If not in query, try to extract from path
+                # Google Drive URLs can be:
+                # - /file/d/FILE_ID/view (for files)
+                # - /drive/folders/FOLDER_ID (for folders)
+                # - /open?id=FILE_ID (legacy format)
+                if not file_id:
+                    path = u.path.strip('/')
+                    # Try to match /file/d/FILE_ID pattern
+                    match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', path)
+                    if match:
+                        file_id = match.group(1)
+                    else:
+                        # Try to match /drive/folders/FOLDER_ID pattern
+                        match = re.search(r'/drive/folders/([a-zA-Z0-9_-]+)', path)
+                        if match:
+                            file_id = match.group(1)
+                        else:
+                            # Fallback: get last non-empty segment (but not 'view' or 'edit')
+                            segments = [s for s in path.split('/') if s and s not in ['view', 'edit', 'open']]
+                            if segments:
+                                file_id = segments[-1]
             
             if not file_id:
                 raise HTTPException(status_code=400, detail="file_id or folder_link is required for Google Drive upload")
