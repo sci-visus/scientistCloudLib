@@ -20,10 +20,7 @@ def utc_now():
     return datetime.now(timezone.utc)
 
 # Import our job queue manager
-try:
-    from .SCLib_JobQueueManager import SCLib_JobQueueManager
-except ImportError:
-    from SCLib_JobQueueManager import SCLib_JobQueueManager
+# SCLib_JobQueueManager removed - status-based processing uses visstoredatas directly
 
 
 class SCLib_BackgroundService:
@@ -41,7 +38,7 @@ class SCLib_BackgroundService:
         """
         self.settings = settings
         self.mongo_client = self._get_mongo_connection()
-        self.job_queue = SCLib_JobQueueManager(self.mongo_client, settings.get('db_name', 'scientistcloud'))
+        # job_queue removed - status-based processing uses visstoredatas directly
         self.worker_id = f"sc_worker_{os.getpid()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.running = False
         
@@ -207,8 +204,8 @@ class SCLib_BackgroundService:
                 {'uuid': dataset_uuid},
                 {'$set': {
                     'status': 'done',
-                    'updated_at': datetime.utcnow(),
-                    'completed_at': datetime.utcnow()
+                    'updated_at': utc_now(),
+                    'completed_at': utc_now()
                 }}
             )
             
@@ -566,28 +563,24 @@ class SCLib_BackgroundService:
         return extracted_files
     
     def _handle_job_failure(self, job: Dict[str, Any], error: Exception):
-        """Handle job failure with retry logic."""
-        job_id = job['job_id']
-        dataset_uuid = job['dataset_uuid']
+        """Handle job failure with retry logic (legacy method - not used in status-based processing)."""
+        # This method is deprecated - status-based processing handles failures directly in _process_dataset_conversion
+        dataset_uuid = job.get('dataset_uuid', job.get('uuid', 'unknown'))
+        print(f"Dataset {dataset_uuid} failed: {error}")
         
-        print(f"Job {job_id} failed: {error}")
+        # Update dataset status directly in visstoredatas
+        db_name = self.settings.get('db_name', 'scientistcloud')
+        db = self.mongo_client[db_name]
+        datasets_collection = db['visstoredatas']
         
-        # Log error
-        self.job_queue.update_job_status(
-            job_id, 'failed',
-            error=str(error),
-            log_message=f"Job failed: {str(error)}"
+        datasets_collection.update_one(
+            {'uuid': dataset_uuid},
+            {'$set': {
+                'status': 'conversion failed',
+                'conversion_last_error': str(error),
+                'updated_at': utc_now()
+            }}
         )
-        
-        # Try to retry
-        if self.job_queue.retry_job(job_id):
-            print(f"Job {job_id} will be retried")
-            # Update dataset status to indicate retry
-            self.job_queue.update_dataset_status(dataset_uuid, 'retrying')
-        else:
-            print(f"Job {job_id} has reached max retry attempts")
-            # Mark dataset as failed
-            self.job_queue.update_dataset_status(dataset_uuid, 'failed')
     
     def _cleanup_job(self, job: Dict[str, Any], lock_file: str):
         """Clean up job resources."""
@@ -623,13 +616,42 @@ class SCLib_BackgroundService:
         pass
     
     def get_queue_stats(self) -> Dict[str, Any]:
-        """Get current queue statistics."""
-        return self.job_queue.get_queue_stats()
+        """Get current queue statistics (status-based - queries visstoredatas)."""
+        db_name = self.settings.get('db_name', 'scientistcloud')
+        db = self.mongo_client[db_name]
+        datasets_collection = db['visstoredatas']
+        
+        # Count datasets by status
+        stats = {
+            'conversion_queued': datasets_collection.count_documents({'status': 'conversion queued'}),
+            'converting': datasets_collection.count_documents({'status': 'converting'}),
+            'uploading': datasets_collection.count_documents({'status': 'uploading'}),
+            'done': datasets_collection.count_documents({'status': 'done'}),
+            'failed': datasets_collection.count_documents({'status': {'$in': ['conversion failed', 'failed']}})
+        }
+        stats['total'] = sum(stats.values())
+        return stats
     
     def submit_job(self, dataset_uuid: str, job_type: str, parameters: Dict[str, Any], 
                    priority: int = 2) -> str:
-        """Submit a new job to the queue."""
-        return self.job_queue.create_job(dataset_uuid, job_type, parameters, priority)
+        """Submit a new job (status-based - updates visstoredatas status, no jobs collection)."""
+        db_name = self.settings.get('db_name', 'scientistcloud')
+        db = self.mongo_client[db_name]
+        datasets_collection = db['visstoredatas']
+        
+        # Update dataset status based on job type
+        if job_type == 'dataset_conversion':
+            datasets_collection.update_one(
+                {'uuid': dataset_uuid},
+                {'$set': {'status': 'conversion queued', 'updated_at': utc_now()}}
+            )
+        elif job_type == 'file_upload':
+            datasets_collection.update_one(
+                {'uuid': dataset_uuid},
+                {'$set': {'status': 'uploading', 'updated_at': utc_now()}}
+            )
+        
+        return f"job_{dataset_uuid}"  # Return synthetic job_id for backward compatibility
 
 
 def main():

@@ -12,7 +12,7 @@ from typing import Dict, Any, Optional, List
 import uuid
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import logging
 
@@ -436,16 +436,58 @@ async def list_upload_jobs(
     offset: int = 0,
     processor: Any = Depends(get_processor)
 ):
-    """List upload jobs for a user."""
+    """List upload jobs for a user (status-based - queries visstoredatas, not jobs collection)."""
     try:
         if not user_id:
             raise HTTPException(status_code=400, detail="user_id parameter is required")
         
-        jobs = processor.get_queued_jobs(user_id, status, limit, offset)
+        # Query visstoredatas for datasets with upload-related statuses
+        from SCLib_MongoConnection import mongo_collection_by_type_context
+        
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            # Build query for upload-related statuses
+            status_filter = {'status': {'$in': ['uploading', 'processing', 'completed', 'failed', 'cancelled']}}
+            if status:
+                # Map UploadStatus enum to string status
+                status_map = {
+                    UploadStatus.QUEUED: 'uploading',
+                    UploadStatus.UPLOADING: 'uploading',
+                    UploadStatus.PROCESSING: 'processing',
+                    UploadStatus.COMPLETED: 'completed',
+                    UploadStatus.FAILED: 'failed',
+                    UploadStatus.CANCELLED: 'cancelled'
+                }
+                status_filter['status'] = status_map.get(status, status.value)
+            
+            # Query datasets for this user
+            query = {'user': user_id, **status_filter}
+            datasets = list(collection.find(query).skip(offset).limit(limit))
+            total = collection.count_documents(query)
+            
+            # Convert datasets to job status responses
+            jobs = []
+            for dataset in datasets:
+                # Create a synthetic job_id from dataset uuid for backward compatibility
+                job_id = f"upload_{dataset.get('uuid', 'unknown')}"
+                jobs.append({
+                    'job_id': job_id,
+                    'status': UploadStatus.UPLOADING if dataset.get('status') == 'uploading' else 
+                             UploadStatus.PROCESSING if dataset.get('status') == 'processing' else
+                             UploadStatus.COMPLETED if dataset.get('status') == 'completed' else
+                             UploadStatus.FAILED if dataset.get('status') == 'failed' else
+                             UploadStatus.CANCELLED if dataset.get('status') == 'cancelled' else
+                             UploadStatus.QUEUED,
+                    'progress_percentage': 0.0,  # Could calculate from dataset if available
+                    'bytes_uploaded': dataset.get('total_size_bytes', 0),
+                    'bytes_total': dataset.get('total_size_bytes', 0),
+                    'message': f"Dataset: {dataset.get('name', 'Unknown')}",
+                    'created_at': dataset.get('created_at', datetime.now(timezone.utc)),
+                    'updated_at': dataset.get('updated_at', datetime.now(timezone.utc))
+                })
         
         return JobListResponse(
-            jobs=[JobStatusResponse(**job) for job in jobs['jobs']],
-            total=jobs['total'],
+            jobs=[JobStatusResponse(**job) for job in jobs],
+            total=total,
             limit=limit,
             offset=offset
         )

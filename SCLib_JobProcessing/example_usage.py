@@ -41,7 +41,7 @@ def main():
         
         # Get collection names
         print(f"\nCollection Names:")
-        collections = ['admins', 'teams', 'user_profile', 'visstoredatas', 'jobs']
+        collections = ['admins', 'teams', 'user_profile', 'visstoredatas']
         for collection_type in collections:
             try:
                 collection_name = get_collection_name(collection_type)
@@ -77,13 +77,11 @@ def main():
             datasets_collection = get_collection_by_type('visstoredatas')
             print(f"✅ Got datasets collection: {datasets_collection.name}")
             
-            # Get jobs collection
-            jobs_collection = get_collection_by_type('jobs')
-            print(f"✅ Got jobs collection: {jobs_collection.name}")
-            
             # Get teams collection
             teams_collection = get_collection_by_type('teams')
             print(f"✅ Got teams collection: {teams_collection.name}")
+            
+            # Note: Jobs collection is no longer used - status-based processing uses visstoredatas only
             
         except Exception as e:
             print(f"❌ Error accessing collections: {e}")
@@ -105,17 +103,18 @@ def main():
             for dataset in datasets:
                 print(f"   - {dataset.get('name', 'Unknown')} ({dataset.get('uuid', 'No UUID')[:8]}...) - {dataset.get('status', 'Unknown')}")
             
-            # Query jobs (if any exist)
-            print("\nQuerying jobs...")
-            jobs = execute_collection_query(
-                'jobs',
-                query={},
-                projection={'job_id': 1, 'job_type': 1, 'status': 1, '_id': 0},
+            # Note: Jobs collection queries removed - status-based processing uses visstoredatas
+            # Query datasets with upload-related statuses instead
+            print("\nQuerying datasets with upload statuses...")
+            upload_datasets = execute_collection_query(
+                'visstoredatas',
+                query={'status': {'$in': ['uploading', 'processing', 'completed', 'failed']}},
+                projection={'uuid': 1, 'name': 1, 'status': 1, 'source_type': 1, '_id': 0},
                 limit=5
             )
-            print(f"✅ Found {len(jobs)} jobs")
-            for job in jobs:
-                print(f"   - {job.get('job_id', 'Unknown')} - {job.get('job_type', 'Unknown')} - {job.get('status', 'Unknown')}")
+            print(f"✅ Found {len(upload_datasets)} datasets with upload statuses")
+            for ds in upload_datasets:
+                print(f"   - {ds.get('name', 'Unknown')} - {ds.get('status', 'Unknown')} - {ds.get('source_type', 'Unknown')}")
             
         except Exception as e:
             print(f"❌ Error querying collections: {e}")

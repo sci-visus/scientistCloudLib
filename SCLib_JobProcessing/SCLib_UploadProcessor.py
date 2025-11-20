@@ -54,11 +54,11 @@ class SCLib_UploadProcessor:
         """Start the upload processor."""
         if not self.running:
             self.running = True
-            # Restore active jobs from database
-            self._restore_active_jobs_from_db()
+            # No need to restore from jobs collection - status-based processing
+            # Datasets with status "uploading" will be picked up automatically
             self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
             self.worker_thread.start()
-            logger.info("Upload processor started")
+            logger.info("Upload processor started (status-based processing)")
     
     def stop(self):
         """Stop the upload processor."""
@@ -80,27 +80,66 @@ class SCLib_UploadProcessor:
         if job_id is None:
             job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         
-        # Store job in database
-        self._store_job_in_db(job_id, job_config)
+        # Create or update dataset entry in visstoredatas collection (status-based architecture)
+        # The dataset status will be set to "uploading" which triggers processing
+        # Store job_id in dataset entry for status lookups
+        self._create_or_update_dataset_entry(job_config, job_id)
         
-        # Create or update dataset entry in visstoredatas collection
-        self._create_or_update_dataset_entry(job_config)
-        
-        # Add to job manager
+        # Add to job manager for in-memory tracking
         self.job_manager.create_upload_job(job_id, job_config)
         
-        logger.info(f"Upload job submitted: {job_id} ({job_config.source_type.value})")
+        logger.info(f"Upload job submitted: {job_id} ({job_config.source_type.value}) - status-based processing")
         return job_id
     
     def get_job_status(self, job_id: str) -> Optional[UploadProgress]:
-        """Get the status of an upload job."""
+        """Get the status of an upload job.
+        
+        First checks in-memory cache, then looks up in visstoredatas by job_id.
+        """
         # First try in-memory cache
         progress = self.job_manager.get_progress(job_id)
         if progress:
             return progress
         
-        # If not in memory, get from database
-        return self._get_job_progress_from_db(job_id)
+        # If not in memory, look up dataset by job_id in visstoredatas
+        try:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                dataset = collection.find_one({'job_id': job_id})
+                if dataset:
+                    # Convert dataset status to UploadProgress
+                    status_str = dataset.get('status', 'unknown')
+                    status_map = {
+                        'uploading': UploadStatus.UPLOADING,
+                        'processing': UploadStatus.PROCESSING,
+                        'completed': UploadStatus.COMPLETED,
+                        'done': UploadStatus.COMPLETED,
+                        'failed': UploadStatus.FAILED,
+                        'cancelled': UploadStatus.CANCELLED,
+                        'conversion queued': UploadStatus.QUEUED,
+                        'converting': UploadStatus.PROCESSING
+                    }
+                    upload_status = status_map.get(status_str, UploadStatus.QUEUED)
+                    
+                    # Calculate progress if we have size info
+                    total_bytes = dataset.get('total_size_bytes', 0)
+                    bytes_uploaded = dataset.get('bytes_uploaded', 0)
+                    progress_pct = (bytes_uploaded / total_bytes * 100) if total_bytes > 0 else 0.0
+                    
+                    return UploadProgress(
+                        job_id=job_id,
+                        status=upload_status,
+                        progress_percentage=progress_pct,
+                        bytes_uploaded=bytes_uploaded,
+                        bytes_total=total_bytes,
+                        speed_mbps=0.0,  # Not tracked in dataset
+                        eta_seconds=0,  # Not tracked in dataset
+                        last_updated=dataset.get('updated_at', dataset.get('created_at', datetime.now(timezone.utc))),
+                        error_message=dataset.get('error_message')
+                    )
+        except Exception as e:
+            logger.error(f"Error looking up job status from visstoredatas: {e}")
+        
+        return None
     
     def cancel_job(self, job_id: str) -> bool:
         """Cancel an upload job."""
@@ -114,52 +153,187 @@ class SCLib_UploadProcessor:
                 process.kill()
             del self.active_jobs[job_id]
         
-        # Update status
+        # Update status in job manager
         success = self.job_manager.cancel_job(job_id)
         if success:
-            self._update_job_in_db(job_id, {"status": UploadStatus.CANCELLED.value})
+            # Update dataset status in visstoredatas if we have the config
+            job_config = self.job_manager.upload_configs.get(job_id)
+            if job_config:
+                self._update_dataset_status(job_config.dataset_uuid, "cancelled", "Upload cancelled by user", job_config)
             logger.info(f"Upload job cancelled: {job_id}")
         
         return success
     
     def _worker_loop(self):
-        """Main worker loop for processing upload jobs."""
+        """Main worker loop for processing upload jobs.
+        
+        Uses status-based processing - queries visstoredatas directly by status.
+        No jobs collection needed - dataset status is the source of truth.
+        """
         cleanup_counter = 0
         while self.running:
             try:
-                # Get queued jobs from database
-                queued_jobs = self._get_queued_jobs()
+                # Check visstoredatas for datasets with status "uploading" that need processing
+                # This is the only way we process uploads now - status-based architecture
+                self._process_status_based_uploads()
                 
-                for job_id in queued_jobs:
-                    if not self.running:
-                        break
-                    
-                    try:
-                        self._process_upload_job(job_id)
-                    except Exception as e:
-                        logger.error(f"Error processing upload job {job_id}: {e}")
-                        self._update_job_status(job_id, UploadStatus.FAILED, str(e))
-                
-                # Periodic cleanup of old stuck jobs (every 60 iterations = 5 minutes)
+                # Periodic cleanup of old stuck datasets (every 60 iterations = 5 minutes)
                 cleanup_counter += 1
                 if cleanup_counter >= 60:
                     cleanup_counter = 0
-                    self._cleanup_old_jobs()
+                    self._cleanup_old_datasets()
                 
-                time.sleep(5)  # Check for new jobs every 5 seconds
+                time.sleep(5)  # Check for new uploads every 5 seconds
                 
             except Exception as e:
                 logger.error(f"Error in upload worker loop: {e}")
                 time.sleep(10)
     
+    def _process_status_based_uploads(self):
+        """Process uploads from visstoredatas based on status (status-based architecture).
+        
+        Checks for datasets with status "uploading" that need to be processed.
+        This is the only way uploads are processed now - no jobs collection needed.
+        """
+        try:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                # Find datasets with status "uploading" that need processing
+                # Process all source types (google_drive, s3, url, local)
+                datasets_to_upload = collection.find({
+                    'status': 'uploading'
+                }).limit(1)  # Process one at a time
+                
+                dataset = next(datasets_to_upload, None)
+                if dataset:
+                    logger.info(f"Found dataset with status 'uploading' that needs processing: {dataset['uuid']}")
+                    # Reconstruct job config from dataset and process it
+                    self._process_dataset_upload_from_status(dataset)
+        except Exception as e:
+            logger.error(f"Error processing status-based uploads: {e}")
+    
+    def _process_dataset_upload_from_status(self, dataset: Dict[str, Any]):
+        """Process an upload from a dataset document (status-based architecture).
+        
+        Reconstructs the job config from the dataset and processes it.
+        """
+        try:
+            dataset_uuid = dataset['uuid']
+            source_type_str = dataset.get('source_type', '')
+            
+            # Convert string source type to enum
+            try:
+                source_type = UploadSourceType(source_type_str)
+            except ValueError:
+                logger.error(f"Unknown source type: {source_type_str}")
+                return
+            
+            # Reconstruct source_config from dataset
+            source_config = {}
+            if source_type == UploadSourceType.GOOGLE_DRIVE:
+                # For Google Drive, use OAuth if we have user_email
+                source_config = {
+                    'use_oauth': True,
+                    'user_email': dataset.get('user') or dataset.get('user_id'),
+                    'file_id': dataset.get('source_path', '')
+                }
+                # Add folder_link if we have google_drive_link
+                if dataset.get('google_drive_link'):
+                    source_config['folder_link'] = dataset['google_drive_link']
+                    # Extract file_id from folder_link if source_path is empty
+                    if not source_config['file_id']:
+                        import urllib.parse
+                        folder_link = dataset['google_drive_link']
+                        u = urllib.parse.urlparse(folder_link)
+                        file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0] or u.path.strip('/').split('/')[-1]
+                        if file_id and file_id not in ['folders', 'file', 'drive']:
+                            source_config['file_id'] = file_id
+            
+            # Reconstruct job config
+            # Import SensorType and job creation functions
+            from SCLib_UploadJobTypes import SensorType, create_google_drive_upload_job, create_s3_upload_job, create_url_upload_job, create_local_upload_job
+            
+            try:
+                sensor = SensorType(dataset.get('sensor', 'IDX'))
+            except ValueError:
+                sensor = SensorType.IDX
+            
+            if source_type == UploadSourceType.GOOGLE_DRIVE:
+                job_config = create_google_drive_upload_job(
+                    file_id=source_config.get('file_id', dataset.get('source_path', '')),
+                    dataset_uuid=dataset_uuid,
+                    user_email=dataset.get('user') or dataset.get('user_id', ''),
+                    dataset_name=dataset.get('name', ''),
+                    sensor=sensor,
+                    convert=dataset.get('convert', True),
+                    is_public=dataset.get('is_public', False),
+                    folder=dataset.get('folder_uuid'),
+                    team_uuid=dataset.get('team_uuid'),
+                    source_config_override=source_config
+                )
+            elif source_type == UploadSourceType.LOCAL:
+                # For local uploads, source_path should be the file path
+                job_config = create_local_upload_job(
+                    file_path=dataset.get('source_path', ''),
+                    dataset_uuid=dataset_uuid,
+                    user_email=dataset.get('user') or dataset.get('user_id', ''),
+                    dataset_name=dataset.get('name', ''),
+                    sensor=sensor,
+                    original_source_path=dataset.get('source_path', ''),
+                    convert=dataset.get('convert', True),
+                    is_public=dataset.get('is_public', False),
+                    folder=dataset.get('folder_uuid'),
+                    team_uuid=dataset.get('team_uuid')
+                )
+            elif source_type == UploadSourceType.S3:
+                # S3 would need access keys from somewhere - for now, skip
+                logger.warning(f"S3 upload retry not yet supported for dataset {dataset_uuid}")
+                return
+            elif source_type == UploadSourceType.URL:
+                # URL uploads - would need URL from dataset
+                logger.warning(f"URL upload retry not yet supported for dataset {dataset_uuid}")
+                return
+            else:
+                logger.warning(f"Unsupported source type for status-based upload: {source_type}")
+                return
+            
+            # Generate a job_id for in-memory tracking only (not stored in jobs collection)
+            job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            
+            # Add to job manager for in-memory tracking
+            self.job_manager.create_upload_job(job_id, job_config)
+            
+            # Process the upload job directly
+            logger.info(f"Processing status-based upload for dataset {dataset_uuid} (job_id: {job_id})")
+            self._process_upload_job_direct(job_id, job_config)
+            
+        except Exception as e:
+            logger.error(f"Error processing dataset upload from status: {e}", exc_info=True)
+            # Update dataset status to failed
+            try:
+                dataset_uuid_for_error = dataset.get('uuid', 'unknown')
+                with mongo_collection_by_type_context('visstoredatas') as collection:
+                    collection.update_one(
+                        {'uuid': dataset_uuid_for_error},
+                        {'$set': {'status': 'failed', 'error_message': str(e), 'updated_at': datetime.utcnow()}}
+                    )
+            except:
+                pass
+    
     def _process_upload_job(self, job_id: str):
-        """Process a single upload job."""
-        # Get job config from database (persistent storage)
-        job_config = self._get_job_config_from_db(job_id)
+        """Process a single upload job (legacy method - kept for compatibility).
+        
+        This method is deprecated. Use _process_upload_job_direct instead.
+        """
+        # Try to get job config from in-memory job manager
+        job_config = self.job_manager.upload_configs.get(job_id)
         if not job_config:
             logger.error(f"Job config not found for {job_id}")
             return
         
+        self._process_upload_job_direct(job_id, job_config)
+    
+    def _process_upload_job_direct(self, job_id: str, job_config: UploadJobConfig):
+        """Process a single upload job directly with provided config."""
         logger.info(f"Processing upload job: {job_id} ({job_config.source_type.value})")
         
         # Update status to initializing
@@ -728,7 +902,7 @@ class SCLib_UploadProcessor:
             pass
     
     def _update_job_status(self, job_id: str, status: UploadStatus, error_message: str = ""):
-        """Update job status in memory and database."""
+        """Update job status in memory and visstoredatas (status-based architecture)."""
         progress = self.job_manager.get_progress(job_id)
         if progress:
             progress.status = status
@@ -738,22 +912,15 @@ class SCLib_UploadProcessor:
             if status == UploadStatus.COMPLETED:
                 progress.progress_percentage = 100.0
         
-        # Update in database
-        self._update_job_in_db(job_id, {
-            "status": status.value,
-            "error_message": error_message,
-            "updated_at": datetime.utcnow()
-        })
-        
-        # Update dataset status in visstoredatas collection
-        job_config = self._get_job_config_from_db(job_id)
+        # Update dataset status in visstoredatas collection (no jobs collection)
+        job_config = self.job_manager.upload_configs.get(job_id)
         if job_config:
             # Map upload status to dataset status
             dataset_status = self._map_upload_status_to_dataset_status(status, job_config)
             self._update_dataset_status(job_config.dataset_uuid, dataset_status, error_message, job_config)
     
     def _update_job_progress(self, job_id: str, percentage: float, uploaded_bytes: int, total_bytes: int):
-        """Update job progress."""
+        """Update job progress (in-memory only, status-based architecture)."""
         progress = self.job_manager.get_progress(job_id)
         if progress:
             progress.progress_percentage = percentage
@@ -761,13 +928,8 @@ class SCLib_UploadProcessor:
             progress.bytes_total = total_bytes
             progress.last_updated = datetime.utcnow()
         
-        # Update in database
-        self._update_job_in_db(job_id, {
-            "progress_percentage": percentage,
-            "bytes_uploaded": uploaded_bytes,
-            "bytes_total": total_bytes,
-            "updated_at": datetime.utcnow()
-        })
+        # Progress is tracked in-memory only - no jobs collection needed
+        # Dataset status in visstoredatas is the source of truth
     
     def _is_tool_available(self, tool_name: str) -> bool:
         """Check if a tool is available in the system."""
@@ -789,175 +951,52 @@ service_account_file = {service_account_file}
 scope = drive
 """
     
-    def _store_job_in_db(self, job_id: str, job_config: UploadJobConfig):
-        """Store upload job in database."""
-        with mongo_collection_by_type_context('jobs') as collection:
-            # Convert config to BSON-serializable format
-            config_dict = job_config.__dict__.copy()
-            config_dict['source_type'] = job_config.source_type.value
-            config_dict['sensor'] = job_config.sensor.value
-            
-            job_doc = {
-                "job_id": job_id,
-                "job_type": "upload",
-                "source_type": job_config.source_type.value,
-                "source_path": job_config.source_path,
-                "destination_path": job_config.destination_path,
-                "dataset_uuid": job_config.dataset_uuid,
-                "user_email": job_config.user_email,
-                "status": UploadStatus.QUEUED.value,
-                "created_at": job_config.created_at,
-                "config": config_dict
-            }
-            collection.insert_one(job_doc)
-    
-    def _get_queued_jobs(self) -> List[str]:
-        """Get queued upload jobs from database."""
-        with mongo_collection_by_type_context('jobs') as collection:
-            jobs = collection.find({
-                "job_type": "upload",
-                "status": UploadStatus.QUEUED.value
-            }, {"job_id": 1})
-            return [job["job_id"] for job in jobs]
-    
-    def _get_job_config_from_db(self, job_id: str) -> Optional[UploadJobConfig]:
-        """Get job configuration from database."""
-        with mongo_collection_by_type_context('jobs') as collection:
-            job_doc = collection.find_one({"job_id": job_id})
-            if not job_doc:
-                return None
-            
-            # Reconstruct UploadJobConfig from database document
-            config_dict = job_doc.get('config', {})
-            
-            # Convert string enums back to enum objects
-            from SCLib_UploadJobTypes import UploadSourceType, SensorType
-            source_type = UploadSourceType(config_dict.get('source_type', 'local'))
-            sensor = SensorType(config_dict.get('sensor', 'TIFF'))
-            
-            return UploadJobConfig(
-                source_type=source_type,
-                source_path=config_dict.get('source_path', ''),
-                destination_path=config_dict.get('destination_path', ''),
-                dataset_uuid=config_dict.get('dataset_uuid', ''),
-                user_email=config_dict.get('user_email', ''),
-                dataset_name=config_dict.get('dataset_name', ''),
-                sensor=sensor,
-                convert=config_dict.get('convert', True),
-                is_public=config_dict.get('is_public', False),
-                folder=config_dict.get('folder'),
-                team_uuid=config_dict.get('team_uuid'),
-                total_size_bytes=config_dict.get('total_size_bytes', 0),
-                created_at=config_dict.get('created_at', datetime.utcnow())
-            )
-    
-    def _get_job_progress_from_db(self, job_id: str) -> Optional[UploadProgress]:
-        """Get job progress from database."""
-        with mongo_collection_by_type_context('jobs') as collection:
-            job_doc = collection.find_one({"job_id": job_id})
-            if not job_doc:
-                return None
-            
-            # Get job config to determine total size
-            job_config = self._get_job_config_from_db(job_id)
-            total_size = job_config.total_size_bytes if job_config else 0
-            
-            return UploadProgress(
-                job_id=job_id,
-                status=UploadStatus(job_doc.get('status', 'queued')),
-                progress_percentage=job_doc.get('progress_percentage', 0.0),
-                bytes_uploaded=job_doc.get('bytes_uploaded', 0),
-                bytes_total=total_size,
-                speed_mbps=job_doc.get('speed_mbps', 0.0),
-                eta_seconds=job_doc.get('eta_seconds', 0),
-                last_updated=job_doc.get('updated_at', job_doc.get('created_at', datetime.utcnow()))
-            )
-    
-    def _update_job_in_db(self, job_id: str, update_data: Dict[str, Any]):
-        """Update job in database."""
-        with mongo_collection_by_type_context('jobs') as collection:
-            collection.update_one(
-                {"job_id": job_id},
-                {"$set": update_data}
-            )
-    
-    def _cleanup_old_jobs(self):
-        """Clean up old stuck jobs from the database."""
+    def _cleanup_old_datasets(self):
+        """Clean up old stuck datasets with status 'uploading' that haven't progressed.
+        
+        This replaces the old _cleanup_old_jobs method - now we clean up datasets directly.
+        """
         try:
             from datetime import datetime, timedelta
             
-            # Clean up queued jobs older than 1 hour
+            # Clean up datasets with status 'uploading' older than 1 hour
             cutoff_time = datetime.utcnow() - timedelta(hours=1)
             
-            with mongo_collection_by_type_context('jobs') as collection:
-                old_jobs = collection.find({
-                    "job_type": "upload",
-                    "status": UploadStatus.QUEUED.value,
-                    "created_at": {"$lt": cutoff_time}
-                }, {"job_id": 1, "created_at": 1})
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                old_datasets = collection.find({
+                    "status": "uploading",
+                    "updated_at": {"$lt": cutoff_time}
+                }, {"uuid": 1, "updated_at": 1})
                 
-                old_job_ids = [job["job_id"] for job in old_jobs]
+                old_dataset_uuids = [ds["uuid"] for ds in old_datasets]
                 
-                if old_job_ids:
-                    # Delete old stuck jobs
-                    result = collection.delete_many({
-                        "job_id": {"$in": old_job_ids}
-                    })
-                    
-                    logger.info(f"Cleaned up {result.deleted_count} old stuck upload jobs")
-                    
-                    # Also remove from job manager
-                    for job_id in old_job_ids:
-                        if job_id in self.job_manager.upload_configs:
-                            del self.job_manager.upload_configs[job_id]
-                        if job_id in self.job_manager.progress_tracking:
-                            del self.job_manager.progress_tracking[job_id]
-                            
-        except Exception as e:
-            logger.error(f"Error during job cleanup: {e}")
-    
-    def _restore_active_jobs_from_db(self):
-        """Restore active jobs from database on startup."""
-        try:
-            with mongo_collection_by_type_context('jobs') as collection:
-                # Find jobs that were running when the system went down
-                active_jobs = collection.find({
-                    "job_type": "upload",
-                    "status": {"$in": ["initializing", "uploading", "processing"]}
-                })
-                
-                restored_count = 0
-                for job_doc in active_jobs:
-                    job_id = job_doc['job_id']
-                    
-                    # Reset status to queued so it can be reprocessed
-                    collection.update_one(
-                        {"job_id": job_id},
+                if old_dataset_uuids:
+                    # Reset status to allow retry, or mark as failed
+                    result = collection.update_many(
+                        {"uuid": {"$in": old_dataset_uuids}},
                         {
                             "$set": {
-                                "status": UploadStatus.QUEUED.value,
-                                "updated_at": datetime.utcnow(),
-                                "restored_at": datetime.utcnow()
+                                "status": "failed",
+                                "error_message": "Upload timed out - no progress for over 1 hour",
+                                "updated_at": datetime.utcnow()
                             }
                         }
                     )
                     
-                    # Restore job config in memory for faster access
-                    job_config = self._get_job_config_from_db(job_id)
-                    if job_config:
-                        self.job_manager.create_upload_job(job_id, job_config)
-                        restored_count += 1
-                
-                if restored_count > 0:
-                    logger.info(f"Restored {restored_count} active jobs from database")
-                    
+                    logger.info(f"Cleaned up {result.modified_count} old stuck upload datasets")
+                            
         except Exception as e:
-            logger.error(f"Error restoring active jobs from database: {e}")
+            logger.error(f"Error during dataset cleanup: {e}")
     
-    def _create_or_update_dataset_entry(self, job_config: UploadJobConfig):
-        """Create or update dataset entry in visstoredatas collection."""
+    def _create_or_update_dataset_entry(self, job_config: UploadJobConfig, job_id: Optional[str] = None):
+        """Create or update dataset entry in visstoredatas collection.
+        
+        Args:
+            job_config: The upload job configuration
+            job_id: Optional job ID to store in dataset for status lookups
+        """
         try:
-            logger.info(f"Creating/updating dataset entry: uuid={job_config.dataset_uuid}, name={job_config.dataset_name}, user={job_config.user_email}")
+            logger.info(f"Creating/updating dataset entry: uuid={job_config.dataset_uuid}, name={job_config.dataset_name}, user={job_config.user_email}, job_id={job_id}")
             
             with mongo_collection_by_type_context('visstoredatas') as collection:
                 # Check if dataset already exists
@@ -1009,6 +1048,10 @@ scope = drive
                     "updated_at": datetime.utcnow()
                 }
                 
+                # Store job_id for status lookups (allows curl scripts to check status by job_id)
+                if job_id:
+                    dataset_doc["job_id"] = job_id
+                
                 # Add google_drive_link if available
                 if google_drive_link:
                     dataset_doc["google_drive_link"] = google_drive_link
@@ -1016,21 +1059,25 @@ scope = drive
                 if existing_dataset:
                     # Update existing dataset - add new file information
                     update_data = {
-                        "$set": {
-                            "status": "uploading",
-                            "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
-                            "updated_at": datetime.utcnow()
-                        },
-                        "$push": {
-                            "files": {
-                                "source_path": job_config.source_path,
-                                "destination_path": job_config.destination_path,
-                                "source_type": job_config.source_type.value,
-                                "total_size_bytes": job_config.total_size_bytes,
-                                "created_at": job_config.created_at
+                            "$set": {
+                                "status": "uploading",
+                                "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
+                                "updated_at": datetime.utcnow()
+                            },
+                            "$push": {
+                                "files": {
+                                    "source_path": job_config.source_path,
+                                    "destination_path": job_config.destination_path,
+                                    "source_type": job_config.source_type.value,
+                                    "total_size_bytes": job_config.total_size_bytes,
+                                    "created_at": job_config.created_at
+                                }
                             }
                         }
-                    }
+                    
+                    # Store job_id for status lookups
+                    if job_id:
+                        update_data["$set"]["job_id"] = job_id
                     
                     # Add google_drive_link if available and not already set
                     if google_drive_link and not existing_dataset.get('google_drive_link'):
