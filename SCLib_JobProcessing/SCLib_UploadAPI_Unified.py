@@ -15,7 +15,7 @@ import os
 import tempfile
 import hashlib
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 import asyncio
 import logging
 import aiofiles
@@ -925,6 +925,22 @@ async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)
             if not status:
                 raise HTTPException(status_code=404, detail="Job not found")
             
+            # Ensure created_at is a valid datetime
+            created_at = getattr(status, 'created_at', None)
+            if not created_at or not isinstance(created_at, datetime):
+                created_at = datetime.now(timezone.utc)
+            # Ensure timezone-aware
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=timezone.utc)
+            
+            # Ensure updated_at is a valid datetime
+            updated_at = getattr(status, 'last_updated', None)
+            if not updated_at or not isinstance(updated_at, datetime):
+                updated_at = datetime.now(timezone.utc)
+            # Ensure timezone-aware
+            if updated_at.tzinfo is None:
+                updated_at = updated_at.replace(tzinfo=timezone.utc)
+            
             return JobStatusResponse(
                 job_id=status.job_id,
                 status=status.status,
@@ -933,8 +949,8 @@ async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)
                 bytes_total=status.bytes_total,
                 message=getattr(status, 'current_file', '') or f"Processing {status.status.value}",
                 error=getattr(status, 'error_message', None),
-                created_at=getattr(status, 'created_at', datetime.now()),
-                updated_at=status.last_updated
+                created_at=created_at,
+                updated_at=updated_at
             )
         
     except HTTPException:
