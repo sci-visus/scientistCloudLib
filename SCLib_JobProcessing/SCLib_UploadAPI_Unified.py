@@ -1033,9 +1033,11 @@ async def internal_error_handler(request, exc):
 # Include Sharing and Team API router FIRST (before mounting Dataset API)
 # This ensures teams routes are registered in the main app BEFORE any mounts
 # Router routes are checked before mounted apps in FastAPI
+# IMPORTANT: Include router with explicit prefix to ensure it's registered correctly
 try:
     from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import router as sharing_router
     # Include the router (routes already have /api/v1 prefix from router prefix)
+    # Don't add an extra prefix since router already has /api/v1
     app.include_router(sharing_router)
     logger.info("✅ Sharing and Team API router included (routes at /api/v1/*)")
 except ImportError:
