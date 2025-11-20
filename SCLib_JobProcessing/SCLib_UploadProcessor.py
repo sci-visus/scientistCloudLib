@@ -121,11 +121,30 @@ class SCLib_UploadProcessor:
                     upload_status = status_map.get(status_str, UploadStatus.QUEUED)
                     
                     # Calculate progress if we have size info
-                    total_bytes = dataset.get('total_size_bytes', 0)
-                    bytes_uploaded = dataset.get('bytes_uploaded', 0)
+                    total_bytes = dataset.get('total_size_bytes', 0) or 0
+                    bytes_uploaded = dataset.get('bytes_uploaded', 0) or 0
                     progress_pct = (bytes_uploaded / total_bytes * 100) if total_bytes > 0 else 0.0
                     
-                    return UploadProgress(
+                    # Handle datetime conversion from MongoDB
+                    def convert_datetime(dt):
+                        """Convert MongoDB datetime to Python datetime."""
+                        if dt is None:
+                            return datetime.now(timezone.utc)
+                        if isinstance(dt, datetime):
+                            # If already a datetime, ensure it's timezone-aware
+                            if dt.tzinfo is None:
+                                return dt.replace(tzinfo=timezone.utc)
+                            return dt
+                        # If it's a MongoDB datetime object, convert it
+                        try:
+                            return dt if isinstance(dt, datetime) else datetime.now(timezone.utc)
+                        except:
+                            return datetime.now(timezone.utc)
+                    
+                    created_at = convert_datetime(dataset.get('created_at'))
+                    updated_at = convert_datetime(dataset.get('updated_at', created_at))
+                    
+                    progress = UploadProgress(
                         job_id=job_id,
                         status=upload_status,
                         progress_percentage=progress_pct,
@@ -133,11 +152,45 @@ class SCLib_UploadProcessor:
                         bytes_total=total_bytes,
                         speed_mbps=0.0,  # Not tracked in dataset
                         eta_seconds=0,  # Not tracked in dataset
-                        last_updated=dataset.get('updated_at', dataset.get('created_at', datetime.now(timezone.utc))),
-                        error_message=dataset.get('error_message')
+                        last_updated=updated_at,
+                        error_message=dataset.get('error_message', ''),
+                        current_file=dataset.get('name', '')  # Use dataset name as current file
                     )
+                    # Add created_at attribute for API compatibility (UploadProgress doesn't have it by default)
+                    progress.created_at = created_at
+                    return progress
+                else:
+                    # Dataset not found by job_id - might be a new upload that hasn't been stored yet
+                    # Return a queued status to indicate the job exists but hasn't started processing
+                    logger.debug(f"Dataset not found for job_id {job_id}, returning queued status")
+                    progress = UploadProgress(
+                        job_id=job_id,
+                        status=UploadStatus.QUEUED,
+                        progress_percentage=0.0,
+                        bytes_uploaded=0,
+                        bytes_total=0,
+                        speed_mbps=0.0,
+                        eta_seconds=0,
+                        last_updated=datetime.now(timezone.utc)
+                    )
+                    progress.created_at = datetime.now(timezone.utc)
+                    return progress
         except Exception as e:
-            logger.error(f"Error looking up job status from visstoredatas: {e}")
+            logger.error(f"Error looking up job status from visstoredatas: {e}", exc_info=True)
+            # Return a queued status on error rather than None, to avoid 404
+            progress = UploadProgress(
+                job_id=job_id,
+                status=UploadStatus.QUEUED,
+                progress_percentage=0.0,
+                bytes_uploaded=0,
+                bytes_total=0,
+                speed_mbps=0.0,
+                eta_seconds=0,
+                last_updated=datetime.now(timezone.utc),
+                error_message=f"Error checking status: {str(e)}"
+            )
+            progress.created_at = datetime.now(timezone.utc)
+            return progress
         
         return None
     
