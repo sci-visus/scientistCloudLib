@@ -396,6 +396,7 @@ async def root():
             "refresh": "POST /api/auth/refresh",
             "me": "GET /api/auth/me",
             "status": "GET /api/auth/status",
+            "validate": "GET /api/auth/validate",
             "authorize": "GET /api/auth/authorize",
             "create-user": "POST /api/auth/create-user",
             "user-by-email": "GET /api/auth/user-by-email?email=..."
@@ -665,6 +666,53 @@ async def get_authorization_url(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get authorization URL: {e}"
+        )
+
+@app.get("/api/auth/validate")
+async def validate_token(request: Request):
+    """
+    Validate a JWT token from Authorization header.
+    
+    Returns:
+        Token validation result with payload
+    """
+    try:
+        # Extract token from Authorization header
+        authorization = request.headers.get("Authorization")
+        if not authorization:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Authorization header missing"
+            )
+        
+        try:
+            scheme, token = authorization.split()
+            if scheme.lower() != "bearer":
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication scheme"
+                )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authorization header format"
+            )
+        
+        # Validate token using JWTManager static method
+        payload = JWTManager.validate_token(token)
+        
+        return {
+            "valid": True,
+            "payload": payload
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Token validation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"Token validation failed: {e}"
         )
 
 @app.get("/api/auth/user-by-email")
