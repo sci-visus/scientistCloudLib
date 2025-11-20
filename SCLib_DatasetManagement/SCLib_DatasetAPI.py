@@ -377,10 +377,18 @@ async def get_user_datasets_organized(
         # Get team datasets
         team_datasets = []
         with mongo_collection_by_type_context('teams') as teams_collection:
-            teams = list(teams_collection.find({'emails': user_email}))
+            # Query teams where user is in emails array OR is the owner
+            teams = list(teams_collection.find({
+                '$or': [
+                    {'emails': user_email},
+                    {'owner': user_email}
+                ]
+            }))
             team_uuids = [team.get('uuid') for team in teams if team.get('uuid')]
             # Also get team names (some datasets use team name in team_uuid field)
             team_names = [team.get('team_name') for team in teams if team.get('team_name')]
+        
+        logger.debug(f"Found {len(teams)} team(s) for user {user_email}: UUIDs={team_uuids}, Names={team_names}")
         
         if team_uuids or team_names:
             team_dataset_uuids = set()
@@ -431,6 +439,9 @@ async def get_user_datasets_organized(
             if team_dataset_uuids:
                 with mongo_collection_by_type_context('visstoredatas') as collection:
                     team_datasets = list(collection.find({'uuid': {'$in': list(team_dataset_uuids)}}))
+                    logger.debug(f"Found {len(team_datasets)} team dataset(s) for user {user_email}")
+            else:
+                logger.debug(f"No team datasets found for user {user_email} (team_uuids={team_uuids}, team_names={team_names})")
         
         # Format datasets
         def format_dataset(doc):

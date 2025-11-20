@@ -1030,13 +1030,14 @@ async def internal_error_handler(request, exc):
         content={"error": "Internal server error", "detail": "An unexpected error occurred"}
     )
 
-# Include Sharing and Team API routes FIRST (before mounting Dataset API)
-# This ensures teams routes are registered before any mount operations
+# Include Sharing and Team API router FIRST (before mounting Dataset API)
+# This ensures teams routes are registered in the main app BEFORE any mounts
+# Router routes are checked before mounted apps in FastAPI
 try:
-    from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
-    # Include the router from the sharing API app (routes already have /api/v1 prefix)
-    app.include_router(sharing_api_app.router)
-    logger.info("✅ Sharing and Team API routes included (routes at /api/v1/*)")
+    from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import router as sharing_router
+    # Include the router (routes already have /api/v1 prefix from router prefix)
+    app.include_router(sharing_router)
+    logger.info("✅ Sharing and Team API router included (routes at /api/v1/*)")
 except ImportError:
     try:
         # Fallback for direct import (when running from /app in Docker)
@@ -1052,18 +1053,40 @@ except ImportError:
                 if sharing_parent not in sys.path:
                     sys.path.insert(0, sharing_parent)
                 try:
-                    from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
-                    app.include_router(sharing_api_app.router)
-                    logger.info(f"✅ Sharing and Team API routes included from {sharing_path}")
+                    from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import router as sharing_router
+                    app.include_router(sharing_router)
+                    logger.info(f"✅ Sharing and Team API router included from {sharing_path}")
                     break
-                except ImportError:
-                    continue
+                except ImportError as import_err:
+                    logger.warning(f"   Router import failed from {sharing_path}: {import_err}")
+                    # Try importing app instead and mount it
+                    try:
+                        from SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
+                        app.mount("/", sharing_api_app)
+                        logger.info(f"✅ Sharing and Team API mounted from {sharing_path} (router import failed)")
+                        break
+                    except ImportError:
+                        continue
     except Exception as e:
-        logger.warning(f"⚠️ Could not include Sharing and Team API routes: {e}")
-        logger.warning("   Sharing and team endpoints will not be available")
+        logger.error(f"❌ Could not include Sharing and Team API router: {e}")
+        logger.error(f"   Exception type: {type(e).__name__}")
+        import traceback
+        logger.error(f"   Traceback: {traceback.format_exc()}")
+        logger.warning("   Trying fallback: mount Sharing API app...")
+        
+        # Last resort: try to mount the app (old method) if router import failed
+        try:
+            from ..SCLib_Sharing_and_Team.SCLib_SharingTeamAPI import app as sharing_api_app
+            app.mount("/", sharing_api_app)
+            logger.warning("⚠️ Fallback: Using app.mount() for Sharing API (router import failed)")
+            logger.info("✅ Sharing and Team API mounted (routes at /api/v1/*)")
+        except Exception as e2:
+            logger.error(f"❌ Fallback mount also failed: {e2}")
+            import traceback
+            logger.error(f"   Traceback: {traceback.format_exc()}")
 
-# Include Dataset Management API router
-# Mount AFTER all upload routes and Sharing API routes are defined to avoid route conflicts
+# Include Dataset Management API router AFTER Sharing API
+# Mount AFTER Sharing API router so Sharing routes (registered first) take precedence
 # Note: Dataset API routes are already prefixed with /api/v1, so mount at root
 try:
     from ..SCLib_DatasetManagement.SCLib_DatasetAPI import app as dataset_api_app

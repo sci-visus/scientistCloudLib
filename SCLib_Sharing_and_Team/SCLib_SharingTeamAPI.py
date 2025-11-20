@@ -4,7 +4,7 @@ SCLib Sharing and Team Management API
 Handles team creation and dataset sharing with users and teams.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, status
+from fastapi import FastAPI, HTTPException, Depends, status, APIRouter
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
@@ -69,7 +69,10 @@ except ImportError:
 # Get logger
 logger = logging.getLogger(__name__)
 
-# Create FastAPI app
+# Create APIRouter for teams and sharing endpoints
+router = APIRouter(prefix="/api/v1")
+
+# Create FastAPI app (for backward compatibility and standalone use)
 app = FastAPI(
     title="SCLib Sharing and Team Management API",
     description="Team creation and dataset sharing with users and teams",
@@ -86,6 +89,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include router in app (for backward compatibility)
+app.include_router(router)
 
 # Pydantic Models
 class TeamCreateRequest(BaseModel):
@@ -182,7 +188,8 @@ async def health_check():
 
 # Team Management Endpoints
 
-@app.post("/api/v1/teams")
+@router.post("/teams")
+@app.post("/api/v1/teams")  # Keep for backward compatibility
 async def create_team(
     request: TeamCreateRequest,
     owner_email: EmailStr
@@ -239,7 +246,8 @@ async def create_team(
         logger.error(f"Failed to create team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/teams/by-user")
+@router.get("/teams/by-user")
+@app.get("/api/v1/teams/by-user")  # Keep for backward compatibility  
 async def list_user_teams(
     user_email: EmailStr
 ):
@@ -308,7 +316,8 @@ async def list_user_teams(
         logger.error(f"Failed to list user teams: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/teams/{team_uuid}")
+@router.get("/teams/{team_uuid}")
+@app.get("/api/v1/teams/{team_uuid}")  # Keep for backward compatibility
 async def get_team(
     team_uuid: str,
     user_email: Optional[EmailStr] = None
@@ -344,7 +353,8 @@ async def get_team(
         logger.error(f"Failed to get team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.put("/api/v1/teams/{team_uuid}")
+@router.put("/teams/{team_uuid}")
+@app.put("/api/v1/teams/{team_uuid}")  # Keep for backward compatibility
 async def update_team(
     team_uuid: str,
     request: TeamUpdateRequest,
@@ -419,7 +429,8 @@ async def update_team(
 
 # Sharing Endpoints
 
-@app.post("/api/v1/share/user")
+@router.post("/share/user")
+@app.post("/api/v1/share/user")  # Keep for backward compatibility
 async def share_dataset_with_user(
     request: ShareDatasetWithUserRequest,
     owner_email: EmailStr
@@ -476,7 +487,8 @@ async def share_dataset_with_user(
         logger.error(f"Failed to share dataset with user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/share/team")
+@router.post("/share/team")
+@app.post("/api/v1/share/team")  # Keep for backward compatibility
 async def share_dataset_with_team(
     request: ShareDatasetWithTeamRequest,
     owner_email: EmailStr
@@ -561,7 +573,8 @@ async def share_dataset_with_team(
         logger.error(f"Failed to share dataset with team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/v1/share/unshare")
+@router.post("/share/unshare")
+@app.post("/api/v1/share/unshare")  # Keep for backward compatibility
 async def unshare_dataset(
     request: UnshareDatasetRequest,
     owner_email: EmailStr
@@ -631,7 +644,8 @@ async def unshare_dataset(
         logger.error(f"Failed to unshare dataset: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/share/user/{user_email}")
+@router.get("/share/user/{user_email}")
+@app.get("/api/v1/share/user/{user_email}")  # Keep for backward compatibility
 async def list_shared_datasets_for_user(
     user_email: EmailStr
 ):
@@ -673,7 +687,8 @@ async def list_shared_datasets_for_user(
         logger.error(f"Failed to list shared datasets for user: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.get("/api/v1/share/team/{team_name}")
+@router.get("/share/team/{team_name}")
+@app.get("/api/v1/share/team/{team_name}")  # Keep for backward compatibility
 async def list_team_datasets(
     team_name: str
 ):
