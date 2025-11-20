@@ -67,9 +67,18 @@ class SCLib_UploadProcessor:
             self.worker_thread.join(timeout=10)
         logger.info("Upload processor stopped")
     
-    def submit_upload_job(self, job_config: UploadJobConfig) -> str:
-        """Submit a new upload job for processing."""
-        job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+    def submit_upload_job(self, job_config: UploadJobConfig, job_id: Optional[str] = None) -> str:
+        """Submit a new upload job for processing.
+        
+        Args:
+            job_config: The upload job configuration
+            job_id: Optional job ID. If not provided, a new one will be generated.
+        
+        Returns:
+            The job ID (either the provided one or the newly generated one)
+        """
+        if job_id is None:
+            job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
         
         # Store job in database
         self._store_job_in_db(job_id, job_config)

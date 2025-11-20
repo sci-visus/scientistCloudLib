@@ -315,8 +315,8 @@ async def initiate_upload(
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported source type: {request.source_type}")
         
-        # Submit job to processor
-        background_tasks.add_task(processor.submit_upload_job, job_config)
+        # Submit job to processor with the pre-generated job_id
+        background_tasks.add_task(processor.submit_upload_job, job_config, job_id)
         
         # Estimate duration based on source type
         estimated_duration = 300  # Default 5 minutes
