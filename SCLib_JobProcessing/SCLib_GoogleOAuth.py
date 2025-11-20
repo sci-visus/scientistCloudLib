@@ -120,15 +120,33 @@ def get_user_google_credentials(user_email: str) -> Credentials:
         if not google_client_id or not google_client_secret:
             raise ValueError("GOOGLE_CLIENT_ID or GOOGLE_CLIENT_SECRET not set in environment")
         
-        return Credentials(
-            token=access_token,
-            refresh_token=refresh_token,
-            token_uri="https://oauth2.googleapis.com/token",
-            client_id=google_client_id,
-            client_secret=google_client_secret,
-            scopes=["https://www.googleapis.com/auth/drive.readonly"],
-            expiry=datetime.utcfromtimestamp(expires_at) if expires_at else None
-        )
+        # Get scopes from database if stored
+        # If not stored, don't specify scopes - let Google use the scopes from the original token grant
+        # This prevents "invalid_scope" errors when refreshing tokens
+        stored_scopes = user_doc.get("google_token_scopes")
+        
+        # Create credentials object
+        # Note: When refreshing, Google validates that scopes match the original grant
+        # If we don't know the original scopes, it's safer to not specify them
+        # The refresh token contains the scope information, so Google will use those
+        creds_kwargs = {
+            "token": access_token,
+            "refresh_token": refresh_token,
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": google_client_id,
+            "client_secret": google_client_secret,
+        }
+        
+        # Only add scopes if we have them stored, otherwise omit to avoid scope mismatch
+        if stored_scopes:
+            scopes = stored_scopes if isinstance(stored_scopes, list) else [stored_scopes]
+            creds_kwargs["scopes"] = scopes
+        # If scopes not stored, don't specify them - the refresh token will provide the correct scopes
+        
+        if expires_at:
+            creds_kwargs["expiry"] = datetime.utcfromtimestamp(expires_at)
+        
+        return Credentials(**creds_kwargs)
 
 def get_google_drive_service(user_email: str):
     """
