@@ -189,7 +189,6 @@ async def health_check():
 # Team Management Endpoints
 
 @router.post("/teams")
-@app.post("/api/v1/teams")  # Keep for backward compatibility
 async def create_team(
     request: TeamCreateRequest,
     owner_email: EmailStr
@@ -247,7 +246,6 @@ async def create_team(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/teams/by-user")
-@app.get("/api/v1/teams/by-user")  # Keep for backward compatibility  
 async def list_user_teams(
     user_email: EmailStr
 ):
@@ -317,7 +315,6 @@ async def list_user_teams(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/teams/{team_uuid}")
-@app.get("/api/v1/teams/{team_uuid}")  # Keep for backward compatibility
 async def get_team(
     team_uuid: str,
     user_email: Optional[EmailStr] = None
