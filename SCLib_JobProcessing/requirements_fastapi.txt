@@ -31,6 +31,7 @@ python-magic>=0.4.27
 python-jose[cryptography]>=3.3.0
 passlib[bcrypt]>=1.7.4
 python-multipart>=0.0.6
+pycryptodome>=3.19.0  # For Google Drive OAuth token encryption (Crypto module)
 
 # Monitoring and logging
 structlog>=23.2.0
