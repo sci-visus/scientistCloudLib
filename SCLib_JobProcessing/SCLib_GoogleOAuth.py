@@ -177,10 +177,12 @@ def validate_google_token(user_email: str) -> bool:
         logger.info(f"Token validated for {user_email} (Google account: {about.get('user', {}).get('emailAddress')})")
         return True
     except google.auth.exceptions.RefreshError as e:
-        if 'invalid_grant' in str(e):
-            logger.error(f"Google refresh token expired for {user_email}: {e}")
+        error_str = str(e)
+        if 'invalid_grant' in error_str or 'invalid_scope' in error_str:
+            error_msg = f"Google OAuth token error: {error_str}"
+            logger.error(f"Google refresh token error for {user_email}: {e}")
             # Mark token as invalid in database
-            _mark_token_invalid(user_email, f"Google OAuth refresh token expired: {str(e)}")
+            _mark_token_invalid(user_email, error_msg)
         return False
     except Exception as e:
         logger.error(f"Error validating token for {user_email}: {e}")

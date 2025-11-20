@@ -815,6 +815,20 @@ class SCLib_UploadProcessor:
             else:
                 raise RuntimeError("Google Drive download failed")
                 
+        except google.auth.exceptions.RefreshError as e:
+            error_str = str(e)
+            if 'invalid_scope' in error_str or 'invalid_grant' in error_str:
+                # Import here to avoid circular dependency
+                try:
+                    from .SCLib_GoogleOAuth import _mark_token_invalid
+                except ImportError:
+                    from SCLib_GoogleOAuth import _mark_token_invalid
+                
+                error_msg = f"Google OAuth token scope mismatch. User must re-authenticate with correct scopes: {error_str}"
+                logger.error(f"Google OAuth scope error for {user_email}: {e}")
+                _mark_token_invalid(user_email, error_msg)
+                raise ValueError(f"Google OAuth token has invalid scopes. Please re-authenticate: {error_str}")
+            raise
         except Exception as e:
             logger.error(f"Error in Google Drive OAuth download: {e}")
             raise
