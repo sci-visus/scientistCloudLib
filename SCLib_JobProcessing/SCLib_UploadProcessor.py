@@ -967,6 +967,26 @@ scope = drive
                 dataset_slug = self._generate_dataset_slug(job_config.dataset_name, job_config.user_email)
                 dataset_id = self._generate_dataset_id()
                 
+                # Extract google_drive_link for Google Drive uploads
+                google_drive_link = None
+                if job_config.source_type == UploadSourceType.GOOGLE_DRIVE:
+                    # Check if folder_link is in source_config (preferred)
+                    if job_config.source_config and job_config.source_config.get('folder_link'):
+                        google_drive_link = job_config.source_config['folder_link']
+                    else:
+                        # Construct link from file_id
+                        # Try source_config first, then fall back to source_path
+                        file_id = None
+                        if job_config.source_config and job_config.source_config.get('file_id'):
+                            file_id = job_config.source_config['file_id']
+                        elif job_config.source_path:
+                            file_id = job_config.source_path
+                        
+                        if file_id:
+                            # Assume it's a folder (most common case), but could be a file
+                            # Use folder link format - if it's actually a file, user can still access it
+                            google_drive_link = f"https://drive.google.com/drive/folders/{file_id}"
+                
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
                     "name": job_config.dataset_name,
@@ -989,26 +1009,36 @@ scope = drive
                     "updated_at": datetime.utcnow()
                 }
                 
+                # Add google_drive_link if available
+                if google_drive_link:
+                    dataset_doc["google_drive_link"] = google_drive_link
+                
                 if existing_dataset:
                     # Update existing dataset - add new file information
-                    update_result = collection.update_one(
-                        {"uuid": job_config.dataset_uuid},
-                        {
-                            "$set": {
-                                "status": "uploading",
-                                "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
-                                "updated_at": datetime.utcnow()
-                            },
-                            "$push": {
-                                "files": {
-                                    "source_path": job_config.source_path,
-                                    "destination_path": job_config.destination_path,
-                                    "source_type": job_config.source_type.value,
-                                    "total_size_bytes": job_config.total_size_bytes,
-                                    "created_at": job_config.created_at
-                                }
+                    update_data = {
+                        "$set": {
+                            "status": "uploading",
+                            "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
+                            "updated_at": datetime.utcnow()
+                        },
+                        "$push": {
+                            "files": {
+                                "source_path": job_config.source_path,
+                                "destination_path": job_config.destination_path,
+                                "source_type": job_config.source_type.value,
+                                "total_size_bytes": job_config.total_size_bytes,
+                                "created_at": job_config.created_at
                             }
                         }
+                    }
+                    
+                    # Add google_drive_link if available and not already set
+                    if google_drive_link and not existing_dataset.get('google_drive_link'):
+                        update_data["$set"]["google_drive_link"] = google_drive_link
+                    
+                    update_result = collection.update_one(
+                        {"uuid": job_config.dataset_uuid},
+                        update_data
                     )
                     if update_result.modified_count > 0:
                         logger.info(f"✅ Updated existing dataset: {job_config.dataset_uuid} (user: {job_config.user_email})")
