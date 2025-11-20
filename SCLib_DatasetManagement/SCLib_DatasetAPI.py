@@ -1576,7 +1576,8 @@ async def update_specific_setting(
         # Allowed settings
         allowed_settings = {
             'name', 'description', 'tags', 'folder_uuid', 'team_uuid',
-            'sensor', 'dimensions', 'preferred_dashboard', 'is_public', 'data_conversion_needed'
+            'sensor', 'dimensions', 'preferred_dashboard', 'is_public', 'data_conversion_needed',
+            'status'  # Allow status updates for retry operations
         }
         
         if setting_name not in allowed_settings:
