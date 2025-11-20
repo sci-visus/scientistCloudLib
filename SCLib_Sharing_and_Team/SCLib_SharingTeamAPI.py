@@ -424,6 +424,43 @@ async def update_team(
         logger.error(f"Failed to update team: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.delete("/teams/{team_uuid}")
+@app.delete("/api/v1/teams/{team_uuid}")  # Keep for backward compatibility
+async def delete_team(
+    team_uuid: str,
+    user_email: EmailStr
+):
+    """Delete a team (only owner can delete)."""
+    try:
+        team = _get_team_by_uuid(team_uuid)
+        
+        if not team:
+            raise HTTPException(status_code=404, detail=f"Team not found: {team_uuid}")
+        
+        # Check ownership
+        if not _check_team_ownership(team, user_email):
+            raise HTTPException(status_code=403, detail="Only team owner can delete team")
+        
+        # Delete from database
+        with mongo_collection_by_type_context('teams') as collection:
+            result = collection.delete_one({"uuid": team_uuid})
+            
+            if result.deleted_count == 0:
+                raise HTTPException(status_code=500, detail="Failed to delete team")
+        
+        logger.info(f"Deleted team: {team_uuid} by {user_email}")
+        
+        return {
+            "success": True,
+            "message": "Team deleted successfully"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete team: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # Sharing Endpoints
 
 @router.post("/share/user")
