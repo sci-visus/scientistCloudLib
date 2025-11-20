@@ -12,7 +12,7 @@ import logging
 import threading
 import uuid
 from typing import Dict, Any, Optional, List, Callable
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import shutil
@@ -1010,7 +1010,7 @@ scope = drive
         This replaces the old _cleanup_old_jobs method - now we clean up datasets directly.
         """
         try:
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
             
             # Clean up datasets with status 'uploading' older than 1 hour
             cutoff_time = datetime.utcnow() - timedelta(hours=1)
