@@ -286,20 +286,55 @@ class SCLib_UploadProcessor:
                 # For Google Drive, use OAuth if we have user_email
                 source_config = {
                     'use_oauth': True,
-                    'user_email': dataset.get('user') or dataset.get('user_id'),
-                    'file_id': dataset.get('source_path', '')
+                    'user_email': dataset.get('user') or dataset.get('user_id')
                 }
-                # Add folder_link if we have google_drive_link
+                
+                # Always prefer extracting from google_drive_link if available (more reliable)
+                file_id = None
                 if dataset.get('google_drive_link'):
                     source_config['folder_link'] = dataset['google_drive_link']
-                    # Extract file_id from folder_link if source_path is empty
-                    if not source_config['file_id']:
-                        import urllib.parse
-                        folder_link = dataset['google_drive_link']
-                        u = urllib.parse.urlparse(folder_link)
-                        file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0] or u.path.strip('/').split('/')[-1]
-                        if file_id and file_id not in ['folders', 'file', 'drive']:
-                            source_config['file_id'] = file_id
+                    # Extract file_id from folder_link using improved logic
+                    import urllib.parse
+                    import re
+                    folder_link = dataset['google_drive_link']
+                    u = urllib.parse.urlparse(folder_link)
+                    
+                    # Try to get id from query string first (for URLs like ?id=FILE_ID)
+                    file_id = urllib.parse.parse_qs(u.query).get('id', [None])[0]
+                    
+                    # If not in query, try to extract from path
+                    # Google Drive URLs can be:
+                    # - /file/d/FILE_ID/view (for files)
+                    # - /drive/folders/FOLDER_ID (for folders)
+                    # - /open?id=FILE_ID (legacy format)
+                    if not file_id:
+                        path = u.path.strip('/')
+                        # Try to match /file/d/FILE_ID pattern
+                        match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', path)
+                        if match:
+                            file_id = match.group(1)
+                        else:
+                            # Try to match /drive/folders/FOLDER_ID pattern
+                            match = re.search(r'/drive/folders/([a-zA-Z0-9_-]+)', path)
+                            if match:
+                                file_id = match.group(1)
+                            else:
+                                # Fallback: get last non-empty segment (but not 'view' or 'edit')
+                                segments = [s for s in path.split('/') if s and s not in ['view', 'edit', 'open']]
+                                if segments:
+                                    file_id = segments[-1]
+                
+                # Fallback to source_path only if we couldn't extract from google_drive_link
+                # But validate it's not a bad value like "view"
+                if not file_id:
+                    source_path = dataset.get('source_path', '')
+                    if source_path and source_path not in ['view', 'edit', 'open', 'folders', 'file', 'drive']:
+                        file_id = source_path
+                
+                if not file_id:
+                    raise ValueError("Could not extract valid file_id from dataset (google_drive_link or source_path)")
+                
+                source_config['file_id'] = file_id
             
             # Reconstruct job config
             # Import SensorType and job creation functions
