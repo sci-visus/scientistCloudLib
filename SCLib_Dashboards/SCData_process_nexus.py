@@ -1,0 +1,563 @@
+"""
+Nexus/HDF5 Data Processor
+
+This module provides a specialized data processor for Nexus/HDF5 files,
+extending the base processor with HDF5-specific functionality.
+"""
+
+import os
+import numpy as np
+import h5py
+import threading
+from typing import Optional, Dict, List, Tuple, Any
+from .SCData_base_processor import BaseDataProcessor
+
+
+class ProcessNexus(BaseDataProcessor):
+    """
+    Specialized data processor for Nexus/HDF5 files.
+    
+    This class handles HDF5-specific operations including dataset discovery,
+    lazy loading, and memmap cache creation.
+    """
+    
+    def __init__(
+        self,
+        nexus_filename: str,
+        mmap_filename: Optional[str] = None,
+        cached_cast_float: bool = True,
+        status_callback: Optional[Any] = None,
+        track_changes: bool = True,
+    ):
+        """
+        Initialize a ProcessNexus instance.
+        
+        Args:
+            nexus_filename: Path to the Nexus/HDF5 file
+            mmap_filename: Optional path to memmap cache file
+            cached_cast_float: Whether to cast to float32 in cache
+            status_callback: Optional callback for status messages
+            track_changes: Whether to track state changes
+        """
+        super().__init__(
+            filename=nexus_filename,
+            mmap_filename=mmap_filename,
+            cached_cast_float=cached_cast_float,
+            status_callback=status_callback,
+            track_changes=track_changes,
+        )
+        
+        self.nexus_filename = nexus_filename  # Alias for compatibility
+        self.h5_file = None
+        
+        # Store initial state after initialization
+        if self.track_changes:
+            self._initial_state = self._capture_state(include_data=False)
+    
+    def get_choices(self) -> bool:
+        """
+        Discover and categorize all datasets in the HDF5 file.
+        
+        Returns:
+            True if successful, False otherwise
+        """
+        DEBUG_PREV = self.DEBUG
+        self.DEBUG = False
+        self.debug_print("=== get_choices() started ===")
+        
+        if not self.nexus_filename or not os.path.exists(self.nexus_filename):
+            self.debug_print(f"ERROR: Nexus file not found: {self.nexus_filename}")
+            return False
+    
+        self.debug_print(f"Opening HDF5 file: {self.nexus_filename}")
+    
+        try:
+            with h5py.File(self.nexus_filename, 'r') as f:
+                # Recursively find all datasets in the HDF5 file
+                def find_all_datasets(group, prefix=""):
+                    """Recursively find all datasets in an HDF5 group"""
+                    datasets = []
+                    for key in group.keys():
+                        full_path = f"{prefix}/{key}" if prefix else key
+                        item = group[key]
+                        if isinstance(item, h5py.Dataset):
+                            datasets.append(full_path)
+                        elif isinstance(item, h5py.Group):
+                            datasets.extend(find_all_datasets(item, full_path))
+                    return datasets
+                
+                all_datasets = find_all_datasets(f)
+                self.debug_print(f"Found {len(all_datasets)} datasets (recursively)")
+                
+                # Categorize datasets by name/keywords
+                names_categories = {
+                    'volume_data': [],
+                    'coordinate_data': [],
+                    'intensity_data': [],
+                    'other_data': []
+                }
+                
+                for dataset_path in all_datasets:
+                    path_lower = dataset_path.lower()
+                    
+                    if any(keyword in path_lower for keyword in ['pil', 'volume', 'data/i', 'intensity', 'waxs', 'detector']):
+                        names_categories['volume_data'].append(dataset_path)
+                    elif any(keyword in path_lower for keyword in ['samx', 'samz', 'xrfx', 'xrfz', 'x', 'z', 'coord']):
+                        names_categories['coordinate_data'].append(dataset_path)
+                    elif any(keyword in path_lower for keyword in ['presample', 'postsample', 'intensity']):
+                        names_categories['intensity_data'].append(dataset_path)
+                    else:
+                        names_categories['other_data'].append(dataset_path)
+                
+                self.names_categories = names_categories
+                
+                # Categorize datasets by actual dimensions
+                dimensions_categories = {
+                    '4d': [],
+                    '3d': [],
+                    '2d': [],
+                    '1d': [],
+                    'scalar': [],
+                    'unknown': []
+                }
+                
+                for dataset_path in all_datasets:
+                    try:
+                        dataset = f[dataset_path]
+                        if hasattr(dataset, 'shape'):
+                            shape = dataset.shape
+                            ndim = len(shape)
+                            
+                            dim_info = {
+                                'path': dataset_path,
+                                'shape': shape,
+                                'dtype': str(dataset.dtype)
+                            }
+                            
+                            if ndim == 4:
+                                dimensions_categories['4d'].append(dim_info)
+                            elif ndim == 3:
+                                dimensions_categories['3d'].append(dim_info)
+                            elif ndim == 2:
+                                dimensions_categories['2d'].append(dim_info)
+                            elif ndim == 1:
+                                dimensions_categories['1d'].append(dim_info)
+                            elif ndim == 0:
+                                dimensions_categories['scalar'].append(dim_info)
+                            else:
+                                dimensions_categories['unknown'].append(dim_info)
+                        else:
+                            dimensions_categories['unknown'].append({
+                                'path': dataset_path,
+                                'shape': 'group',
+                                'dtype': 'group'
+                            })
+                    except Exception as e:
+                        dimensions_categories['unknown'].append({
+                            'path': dataset_path,
+                            'shape': 'error',
+                            'dtype': 'error',
+                            'error': str(e)
+                        })
+                
+                self.dimensions_categories = dimensions_categories
+                self.choices_done = True
+                
+                self.debug_print("=== get_choices() completed successfully ===")
+            
+            self.DEBUG = DEBUG_PREV
+            
+            if self.track_changes:
+                self._record_change("get_choices", {
+                    "num_datasets": len(all_datasets),
+                    "num_4d": len(dimensions_categories['4d']),
+                    "num_3d": len(dimensions_categories['3d']),
+                    "num_2d": len(dimensions_categories['2d']),
+                    "num_1d": len(dimensions_categories['1d']),
+                })
+            
+            return True
+        except Exception as e:
+            self.debug_print(f'ERROR in get_choices(): {e}')
+            return False
+    
+    def load_dataset_by_path(self, dataset_path: str, use_memmap: bool = True) -> Optional[Any]:
+        """
+        Load a specific dataset from the HDF5 file by path.
+        Uses memmap if available, otherwise returns HDF5 dataset reference for efficient slicing.
+        Only loads into memory if use_memmap=False and no memmap exists.
+        
+        Args:
+            dataset_path: Path to the dataset within the HDF5 file
+            use_memmap: If True, use memmap if available, otherwise return HDF5 dataset reference
+            
+        Returns:
+            numpy.ndarray (if loaded into memory), np.memmap (if memmap exists), 
+            h5py.Dataset (if use_memmap=True and no memmap), or None if error
+        """
+        try:
+            # First, check if memmap exists for this dataset
+            if use_memmap:
+                target_mmap = self.get_memmap_filename_for(dataset_path)
+                if os.path.exists(target_mmap):
+                    try:
+                        # Get dataset shape and dtype from HDF5 file
+                        if hasattr(self, 'h5_file') and self.h5_file is not None:
+                            f = self.h5_file
+                        else:
+                            f = h5py.File(self.nexus_filename, 'r')
+                            should_close = True
+                        
+                        dataset = f[dataset_path]
+                        shape = dataset.shape
+                        dtype = np.dtype('float32' if self.cached_cast_float else dataset.dtype)
+                        
+                        if 'should_close' in locals() and should_close:
+                            f.close()
+                        
+                        # Load memmap
+                        volume_memmap = np.memmap(target_mmap, dtype=dtype, shape=shape, mode="r")
+                        self.debug_print(f"Using memmap for {dataset_path}")
+                        return volume_memmap
+                    except Exception as e:
+                        self.debug_print(f"Error loading memmap for {dataset_path}: {e}, falling back to HDF5")
+            
+            # No memmap available - return HDF5 dataset reference for efficient slicing
+            # This allows slicing without loading entire dataset into memory
+            if hasattr(self, 'h5_file') and self.h5_file is not None:
+                f = self.h5_file
+                dataset = f[dataset_path]
+                if use_memmap:
+                    # Return HDF5 dataset reference (lazy loading)
+                    self.debug_print(f"Using HDF5 dataset reference for {dataset_path} (no memmap)")
+                    return dataset
+                else:
+                    # Load into memory only if explicitly requested
+                    data = np.array(dataset)
+                    return data
+            else:
+                # Fallback: open file temporarily
+                # For persistent access, we need to keep the file open or load into memory
+                # Since we can't keep file open without storing reference, load into memory
+                # The caller should cache this result to avoid repeated loads
+                with h5py.File(self.nexus_filename, 'r') as f:
+                    dataset = f[dataset_path]
+                    if use_memmap:
+                        # Load into memory since we can't keep file handle open
+                        # Caller should cache this to avoid repeated loads
+                        self.debug_print(f"Loading {dataset_path} into memory (no persistent file handle)")
+                        data = np.array(dataset)
+                        return data
+                    else:
+                        data = np.array(dataset)
+                        return data
+        except Exception as e:
+            self.debug_print(f"Error loading dataset {dataset_path}: {e}")
+            return None
+    
+    def load_probe_coordinates(self, use_b: bool = False) -> Optional[np.ndarray]:
+        """
+        Load probe coordinates from the nexus file using the already open file handle.
+        
+        Args:
+            use_b: If True, use probe_x_coords_picked_b instead of probe_x_coords_picked
+            
+        Returns:
+            numpy.ndarray: Probe coordinates or None if error
+        """
+        coord_path = getattr(self, 'probe_x_coords_picked_b', None) if use_b else self.probe_x_coords_picked
+        if not coord_path:
+            return None
+        
+        if self.h5_file is None:
+            self.debug_print("Error: HDF5 file handle is not open.")
+            return None
+            
+        try:
+            probe_coords = np.array(self.h5_file.get(coord_path))
+            return probe_coords
+        except Exception as e:
+            self.debug_print(f"❌ Failed to load probe coordinates from {coord_path}: {e}")
+            return None
+    
+    def load_data(self) -> Tuple[Any, Optional[np.ndarray], Optional[np.ndarray], np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Load the main data (volume, presample, postsample, coordinates, preview).
+        
+        Returns:
+            Tuple of (volume, presample, postsample, x_coords, y_coords, preview)
+        """
+        # Set default dataset paths if not already set
+        if self.volume_picked is None:
+            self.volume_picked = "map_mi_sic_0p33mm_002/data/PIL11"
+        if self.x_coords_picked is None:
+            self.x_coords_picked = "map_mi_sic_0p33mm_002/data/samx"
+        if self.y_coords_picked is None:
+            self.y_coords_picked = "map_mi_sic_0p33mm_002/data/samz"
+        
+        if getattr(self, 'plot1_single_dataset_picked', None) is None:
+            if self.presample_picked is None:
+                self.presample_picked = "map_mi_sic_0p33mm_002/scalar_data/presample_intensity"
+            if self.postsample_picked is None:
+                self.postsample_picked = "map_mi_sic_0p33mm_002/scalar_data/postsample_intensity"
+
+        self.debug_print(f"----> LOAD_DATA: nexus_filename: {self.nexus_filename}")
+        self.debug_print(f"\t volume_picked: {self.volume_picked}")
+        self.debug_print(f"\t x_coords_picked: {self.x_coords_picked}")
+        self.debug_print(f"\t y_coords_picked: {self.y_coords_picked}")
+        
+        # Open HDF5 file and keep it open
+        if not hasattr(self, 'h5_file') or self.h5_file is None:
+            self.h5_file = h5py.File(self.nexus_filename, "r")
+            self.file_handle = self.h5_file
+        
+        f = self.h5_file
+        self.volume_dataset = f[self.volume_picked]
+        
+        # If a secondary probe dataset (Plot2B) is selected, keep an HDF5 dataset ref too
+        if getattr(self, 'volume_picked_b', None):
+            try:
+                self.volume_dataset_b = f[self.volume_picked_b]
+            except Exception as _e:
+                self.debug_print(f"WARNING: unable to open volume_picked_b '{self.volume_picked_b}': {_e}")
+        
+        # Load coordinate datasets
+        x_coords_raw = np.array(f.get(self.x_coords_picked))
+        y_coords_raw = np.array(f.get(self.y_coords_picked))
+        
+        # Ensure arrays are at least 1D
+        if x_coords_raw.ndim == 0:
+            self.x_coords_dataset = np.array([x_coords_raw])
+        else:
+            self.x_coords_dataset = np.atleast_1d(x_coords_raw)
+            
+        if y_coords_raw.ndim == 0:
+            self.y_coords_dataset = np.array([y_coords_raw])
+        else:
+            self.y_coords_dataset = np.atleast_1d(y_coords_raw)
+        
+        # Check if we're in single dataset mode for Plot1
+        if getattr(self, 'plot1_single_dataset_picked', None):
+            self.debug_print(f"Using single dataset for preview: {self.plot1_single_dataset_picked}")
+            try:
+                self.single_dataset = np.array(f.get(self.plot1_single_dataset_picked))
+            except Exception as e:
+                self.debug_print(f"ERROR loading single dataset '{self.plot1_single_dataset_picked}': {e}")
+                raise
+            self.presample_dataset = None
+            self.postsample_dataset = None
+        else:
+            self.single_dataset = None
+            self.presample_dataset = np.array(f.get(self.presample_picked))
+            self.postsample_dataset = np.array(f.get(self.postsample_picked))
+
+        shape = self.volume_dataset.shape
+        dtype = np.dtype("float32" if self.cached_cast_float else self.volume_dataset.dtype)
+        self.shape = shape
+        self.dtype = dtype
+
+        # Use memmap if it exists, otherwise use direct HDF5 access
+        volume_memmap = None  # Initialize to ensure it's always assigned
+        if self.mmap_filename and os.path.exists(self.mmap_filename):
+            self.debug_print(f"Using existing memmap cache file: {self.mmap_filename}")
+            try:
+                volume_memmap = np.memmap(self.mmap_filename, dtype=self.dtype, shape=self.shape, mode="r")
+                self.debug_print(f"Successfully loaded memmap file")
+            except Exception as e:
+                self.debug_print(f"ERROR loading memmap file: {e}")
+                self.mmap_filename = None
+                volume_memmap = None
+        
+        # If memmap wasn't loaded (file doesn't exist or error occurred), use direct HDF5 access
+        if volume_memmap is None:
+            self.debug_print("Using direct HDF5 dataset reference (lazy loading)")
+            volume_memmap = self.volume_dataset
+        
+        # Verify coordinate dimensions match volume dimensions
+        if not hasattr(self.x_coords_dataset, '__len__') or len(self.x_coords_dataset) != self.volume_dataset.shape[0]:
+            raise ValueError(
+                f"X coordinates dimension mismatch: volume has {self.volume_dataset.shape[0]} elements, "
+                f"but x_coords has {len(self.x_coords_dataset) if hasattr(self.x_coords_dataset, '__len__') else 'scalar'} elements"
+            )
+        if not hasattr(self.y_coords_dataset, '__len__') or len(self.y_coords_dataset) != self.volume_dataset.shape[1]:
+            raise ValueError(
+                f"Y coordinates dimension mismatch: volume has {self.volume_dataset.shape[1]} elements, "
+                f"but y_coords has {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'scalar'} elements"
+            )
+
+        self.target_x = self.x_coords_dataset.shape[0]
+        self.target_y = self.y_coords_dataset.shape[0]
+        self.target_size = self.target_x * self.target_y
+
+        # Create preview based on mode
+        if getattr(self, 'plot1_single_dataset_picked', None):
+            # Single dataset mode
+            if self.single_dataset.ndim > 1:
+                single_dataset_flat = self.single_dataset.flatten()
+            else:
+                single_dataset_flat = self.single_dataset
+            
+            if single_dataset_flat.size != self.target_x * self.target_y:
+                raise ValueError(
+                    f"Single dataset size mismatch: dataset has {single_dataset_flat.size} elements, "
+                    f"but expected {self.target_x * self.target_y}"
+                )
+            preview_rect = np.reshape(single_dataset_flat, (self.target_x, self.target_y))
+            self.preview = np.nan_to_num(preview_rect, nan=0.0, posinf=0.0, neginf=0.0)
+            
+            if np.max(self.preview) > np.min(self.preview):
+                self.preview = (self.preview - np.min(self.preview)) / (np.max(self.preview) - np.min(self.preview))
+            
+            self.preview = self.preview.astype(np.float32)
+        else:
+            # Ratio mode
+            assert self.presample_dataset.size == self.target_x * self.target_y
+            assert self.postsample_dataset.size == self.target_x * self.target_y
+            presample_rect = np.reshape(self.presample_dataset, (self.target_x, self.target_y))
+            postsample_rect = np.reshape(self.postsample_dataset, (self.target_x, self.target_y))
+
+            self.presample_zeros = np.sum(presample_rect == 0)
+            self.postsample_zeros = np.sum(postsample_rect == 0)
+
+            epsilon = 1e-10
+            self.presample_conditioned = np.where(presample_rect == 0, epsilon, presample_rect)
+            self.postsample_conditioned = np.where(postsample_rect == 0, epsilon, postsample_rect)
+
+            self.preview = self.presample_conditioned / self.postsample_conditioned
+            self.preview = np.nan_to_num(self.preview, nan=0.0, posinf=1.0, neginf=0.0)
+
+            if np.max(self.preview) > np.min(self.preview):
+                self.preview = (self.preview - np.min(self.preview)) / (np.max(self.preview) - np.min(self.preview))
+
+            self.preview = self.preview.astype(np.float32)
+        
+        if self.track_changes:
+            self._record_change("load_data", {
+                "volume_shape": list(volume_memmap.shape) if hasattr(volume_memmap, 'shape') else None,
+                "preview_shape": list(self.preview.shape) if self.preview is not None else None
+            })
+        
+        return volume_memmap, self.presample_dataset, self.postsample_dataset, self.x_coords_dataset, self.y_coords_dataset, self.preview
+    
+    def create_memmap_cache_background(self) -> None:
+        """Create memmap cache file in a background thread."""
+        def _create_memmap():
+            try:
+                if not self.mmap_filename:
+                    self.debug_print("Skipping memmap cache creation (no mmap filename provided)")
+                    return
+                if self.mmap_filename and os.path.exists(self.mmap_filename):
+                    self.debug_print("Memmap cache already exists, skipping creation")
+                    return
+                
+                mmap_dir = os.path.dirname(self.mmap_filename)
+                if not os.access(mmap_dir, os.W_OK):
+                    self.debug_print(f"PERMISSION ERROR: No write permission to directory: {mmap_dir}")
+                    return
+                
+                if not hasattr(self, 'volume_dataset') or self.volume_dataset is None:
+                    self.debug_print("ERROR: volume_dataset not loaded, cannot create memmap cache")
+                    return
+                
+                self.debug_print(f"🔄 Background: Starting memmap cache creation: {self.mmap_filename}")
+                
+                self.debug_print("🔄 Background: Loading HDF5 dataset into memory for caching...")
+                try:
+                    volume_data = self.volume_dataset[:]
+                    self.debug_print(f"✅ Background: Successfully loaded HDF5 data into memory (shape: {volume_data.shape})")
+                except Exception as h5_error:
+                    self.debug_print(f"❌ Background: ERROR loading HDF5 dataset: {h5_error}")
+                    return
+                
+                self.debug_print("🔄 Background: Creating memmap file from loaded data...")
+                write = np.memmap(self.mmap_filename, dtype=self.dtype, shape=self.shape, mode="w+")
+                
+                for u in range(self.shape[0]):
+                    if u % 50 == 0 or u == self.shape[0] - 1:
+                        self.debug_print(f"🔄 Background: Caching slice {u+1}/{self.shape[0]}")
+                    try:
+                        piece = volume_data[u, :, :, :]
+                        piece = piece.astype(np.float32) if self.cached_cast_float else piece
+                        write[u, :, :, :] = piece
+                    except Exception as e:
+                        self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
+                        if os.path.exists(self.mmap_filename):
+                            os.remove(self.mmap_filename)
+                        return
+                
+                write.flush()
+                del write
+                del volume_data
+                self.debug_print(f"✅ Background: Memmap cache file created successfully: {self.mmap_filename}")
+                
+            except Exception as e:
+                self.debug_print(f"❌ Background: ERROR creating memmap cache: {e}")
+        
+        thread = threading.Thread(target=_create_memmap, daemon=True)
+        thread.start()
+        self.debug_print("🚀 Started background thread for memmap cache creation")
+    
+    def create_memmap_cache_background_for(self, dataset_path: str) -> None:
+        """Create a memmap cache for an arbitrary dataset path in background."""
+        def _create(dataset_path):
+            try:
+                if dataset_path is None:
+                    return
+                target_mmap = self.get_memmap_filename_for(dataset_path)
+                if os.path.exists(target_mmap):
+                    self.debug_print(f"Memmap cache already exists for {dataset_path}, skipping: {target_mmap}")
+                    return
+                mmap_dir = os.path.dirname(target_mmap)
+                if not os.access(mmap_dir, os.W_OK):
+                    self.debug_print(f"PERMISSION ERROR: No write permission to directory: {mmap_dir}")
+                    return
+                with h5py.File(self.nexus_filename, 'r') as f:
+                    dset = f[dataset_path]
+                    shape = dset.shape
+                    dtype = 'float32' if self.cached_cast_float else str(dset.dtype)
+                    self.debug_print(f"🔄 Background: Creating memmap for {dataset_path} -> {target_mmap} shape={shape} dtype={dtype}")
+                    write = np.memmap(target_mmap, dtype=np.float32 if self.cached_cast_float else dset.dtype, shape=shape, mode='w+')
+                    if len(shape) == 4:
+                        for u in range(shape[0]):
+                            if u % 50 == 0 or u == shape[0]-1:
+                                self.debug_print(f"🔄 Background: Caching 4D slice {u+1}/{shape[0]}")
+                            piece = dset[u, :, :, :]
+                            piece = piece.astype(np.float32) if self.cached_cast_float else piece
+                            write[u, :, :, :] = piece
+                    elif len(shape) == 3:
+                        for u in range(shape[0]):
+                            if u % 50 == 0 or u == shape[0]-1:
+                                self.debug_print(f"🔄 Background: Caching 3D slice {u+1}/{shape[0]}")
+                            piece = dset[u, :, :]
+                            piece = piece.astype(np.float32) if self.cached_cast_float else piece
+                            write[u, :, :] = piece
+                    else:
+                        data = dset[:]
+                        data = data.astype(np.float32) if self.cached_cast_float else data
+                        write[...] = data
+                    write.flush()
+                    del write
+                    self.debug_print(f"✅ Background: Memmap created for {dataset_path}")
+            except Exception as e:
+                self.debug_print(f"❌ Background: ERROR creating memmap for {dataset_path}: {e}")
+        threading.Thread(target=_create, args=(dataset_path,), daemon=True).start()
+    
+    def close(self) -> None:
+        """Close HDF5 file handle."""
+        if self.h5_file is not None:
+            try:
+                self.h5_file.close()
+            except Exception:
+                pass
+            self.h5_file = None
+            self.file_handle = None
+    
+    # Alias for compatibility with existing code
+    def load_nexus_data(self):
+        """Alias for load_data() for backward compatibility."""
+        return self.load_data()
+
+
+# Alias for backward compatibility
+Process4dNexus = ProcessNexus
+
