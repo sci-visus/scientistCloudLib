@@ -461,7 +461,6 @@ class Process4dNexus:
         try:
             with h5py.File(self.nexus_filename, "r") as f:
                 probe_coords = np.array(f.get(coord_path))
-                print(f"✅ Loaded probe coordinates: {probe_coords.shape}, range: {probe_coords.min():.3f} to {probe_coords.max():.3f}")
                 return probe_coords
         except Exception as e:
             print(f"❌ Failed to load probe coordinates from {coord_path}: {e}")
