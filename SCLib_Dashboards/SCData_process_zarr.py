@@ -9,6 +9,8 @@ import os
 import numpy as np
 import threading
 from typing import Optional, Dict, List, Tuple, Any
+
+# Import zarr for runtime use
 try:
     import zarr
     ZARR_AVAILABLE = True
@@ -210,7 +212,7 @@ class ProcessZarr(BaseDataProcessor):
             self.debug_print(f'ERROR in get_choices(): {e}')
             return False
     
-    def _get_array_by_path(self, dataset_path: str) -> Optional[zarr.Array]:
+    def _get_array_by_path(self, dataset_path: str) -> Optional["zarr.Array"]:
         """Get a Zarr array by path."""
         try:
             zarr_group = self._open_zarr()
