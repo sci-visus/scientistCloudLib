@@ -48,7 +48,10 @@ logger = logging.getLogger(__name__)
 LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100MB - use chunked upload for files larger than this
 CHUNK_SIZE = 100 * 1024 * 1024  # 100MB chunks
 MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024 * 1024  # 10TB max
-TEMP_DIR = "/tmp/scientistcloud_uploads"
+# Use shared volume for chunked uploads so background service can access files
+# Fallback to /tmp if shared volume not available
+SHARED_TEMP_DIR = os.getenv('SHARED_TEMP_DIR', '/mnt/visus_datasets/tmp')
+TEMP_DIR = os.getenv('TEMP_DIR', SHARED_TEMP_DIR)  # Prefer shared volume, fallback to /tmp
 RESUMABLE_UPLOAD_TIMEOUT = 7 * 24 * 3600  # 7 days
 
 # Ensure temp directory exists
@@ -500,7 +503,14 @@ async def upload_file_by_path(
         job_config.destination_path = destination_path
         
         # Submit job to processor and get the actual job ID
-        actual_job_id = processor.submit_upload_job(job_config)
+        # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
+        try:
+            logger.info(f"Submitting upload job for {filename} (UUID: {upload_uuid})")
+            actual_job_id = processor.submit_upload_job(job_config)
+            logger.info(f"✅ Upload job submitted successfully: {actual_job_id} for dataset {upload_uuid}")
+        except Exception as e:
+            logger.error(f"❌ Failed to submit upload job: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to create upload job: {str(e)}")
         
         # Estimate duration based on file size
         file_size_mb = file_size / (1024 * 1024)
@@ -589,7 +599,14 @@ async def _handle_standard_upload(
     job_config.destination_path = destination_path
     
     # Submit job to processor and get the actual job ID
-    actual_job_id = processor.submit_upload_job(job_config)
+    # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
+    try:
+        logger.info(f"Submitting upload job for {filename} (UUID: {upload_uuid})")
+        actual_job_id = processor.submit_upload_job(job_config)
+        logger.info(f"✅ Upload job submitted successfully: {actual_job_id} for dataset {upload_uuid}")
+    except Exception as e:
+        logger.error(f"❌ Failed to submit upload job: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create upload job: {str(e)}")
     
     # Estimate duration based on file size
     file_size_mb = len(content) / (1024 * 1024)
@@ -719,7 +736,27 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         job_config.destination_path = destination_path
         
         # Submit job to processor
-        background_tasks.add_task(processor.submit_upload_job, job_config)
+        # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
+        # This ensures the dataset entry exists and the file path is valid before returning
+        # Also verify the file exists before submitting (shared volume check)
+        if not os.path.exists(final_file_path):
+            error_msg = f"Chunked upload file not found at {final_file_path}. This may indicate a shared volume issue."
+            logger.error(f"❌ {error_msg}")
+            raise RuntimeError(error_msg)
+        
+        try:
+            logger.info(f"Submitting chunked upload job for {filename} (UUID: {upload_uuid}, path: {final_file_path})")
+            actual_job_id = processor.submit_upload_job(job_config)
+            logger.info(f"✅ Chunked upload job submitted successfully: {actual_job_id} for dataset {upload_uuid}")
+        except Exception as e:
+            logger.error(f"❌ Failed to submit chunked upload job: {e}", exc_info=True)
+            # Clean up temp file on error
+            if os.path.exists(final_file_path):
+                try:
+                    os.remove(final_file_path)
+                except:
+                    pass
+            raise
         
         # Mark as complete
         session['uploaded_chunks'] = set(range(session['total_chunks']))
