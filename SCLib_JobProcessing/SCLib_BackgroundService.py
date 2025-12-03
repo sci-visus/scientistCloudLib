@@ -42,6 +42,15 @@ class SCLib_BackgroundService:
         self.worker_id = f"sc_worker_{os.getpid()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.running = False
         
+        # Initialize upload processor for handling upload jobs
+        try:
+            from SCLib_UploadProcessor import get_upload_processor
+            self.upload_processor = get_upload_processor()
+            print("✅ Upload processor initialized")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not initialize upload processor: {e}")
+            self.upload_processor = None
+        
         # Job type handlers
         self.job_handlers = {
             'google_sync': self._handle_google_sync,
@@ -71,6 +80,14 @@ class SCLib_BackgroundService:
         self.running = True
         print(f"Starting SC_BackgroundService worker {self.worker_id}")
         
+        # Start upload processor if available
+        if self.upload_processor:
+            try:
+                self.upload_processor.start()
+                print("✅ Upload processor started")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not start upload processor: {e}")
+        
         try:
             while self.running:
                 self._process_jobs()
@@ -87,6 +104,15 @@ class SCLib_BackgroundService:
     def stop(self):
         """Stop the background service."""
         self.running = False
+        
+        # Stop upload processor if available
+        if self.upload_processor:
+            try:
+                self.upload_processor.stop()
+                print("✅ Upload processor stopped")
+            except Exception as e:
+                print(f"⚠️ Warning: Error stopping upload processor: {e}")
+        
         print("SC_BackgroundService stopped")
     
     def _process_jobs(self):
