@@ -210,8 +210,15 @@ async def initiate_upload(
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported source type: {request.source_type}")
         
-        # Submit job to processor
-        background_tasks.add_task(processor.submit_upload_job, job_config)
+        # Submit job to processor (pass job_id so it matches what we return)
+        # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
+        # This ensures the dataset entry exists before we return, so it can be tracked
+        try:
+            actual_job_id = processor.submit_upload_job(job_config, job_id)
+            logger.info(f"✅ Upload job submitted synchronously: {actual_job_id} (requested: {job_id})")
+        except Exception as e:
+            logger.error(f"❌ Failed to submit upload job: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to create upload job: {str(e)}")
         
         # Estimate duration based on source type and size
         estimated_duration = 300  # Default 5 minutes
@@ -280,8 +287,15 @@ async def upload_local_file(
             tags=tags
         )
         
-        # Submit job to processor
-        background_tasks.add_task(processor.submit_upload_job, job_config)
+        # Submit job to processor (pass job_id so it matches what we return)
+        # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
+        # This ensures the dataset entry exists before we return, so it can be tracked
+        try:
+            actual_job_id = processor.submit_upload_job(job_config, job_id)
+            logger.info(f"✅ Upload job submitted synchronously: {actual_job_id} (requested: {job_id})")
+        except Exception as e:
+            logger.error(f"❌ Failed to submit upload job: {e}", exc_info=True)
+            raise HTTPException(status_code=500, detail=f"Failed to create upload job: {str(e)}")
         
         # Estimate duration based on file size
         file_size_mb = len(content) / (1024 * 1024)
