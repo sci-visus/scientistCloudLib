@@ -696,13 +696,6 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
     try:
         session = get_upload_session(upload_id)
         
-        # Save complete file
-        upload_dir = os.path.join(TEMP_DIR, upload_id)
-        final_file_path = os.path.join(upload_dir, session['filename'])
-        
-        with open(final_file_path, 'wb') as f:
-            f.write(content)
-        
         # Create upload job
         # Use provided UUID for directory uploads, or generate new one for single files
         upload_uuid = session.get('dataset_uuid') if session.get('dataset_uuid') else str(uuid.uuid4())
@@ -712,15 +705,28 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         relative_path = session.get('relative_path')
         filename = session['filename']
         base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
+        
+        # Create the destination directory structure
         if relative_path:
             # Preserve directory structure: files go into {uuid}/{relative_path}/filename
             destination_path = f"{base_path}/{relative_path}/{filename}"
+            destination_dir = os.path.dirname(destination_path)
         else:
             # No directory structure to preserve: files go directly into {uuid}/filename
             destination_path = f"{base_path}/{filename}"
+            destination_dir = base_path
+        
+        # Create destination directory if it doesn't exist
+        os.makedirs(destination_dir, exist_ok=True)
+        
+        # Save file directly to final destination (not temp directory)
+        with open(destination_path, 'wb') as f:
+            f.write(content)
+        
+        logger.info(f"✅ Saved chunked upload file directly to destination: {destination_path}")
         
         job_config = create_local_upload_job(
-            file_path=final_file_path,
+            file_path=destination_path,  # File is already in final destination
             dataset_uuid=upload_uuid,
             user_email=session['user_email'],
             dataset_name=session['dataset_name'],
@@ -732,28 +738,34 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
             team_uuid=session['team_uuid'],
             tags=session.get('tags')
         )
-        # Override destination_path to preserve directory structure
+        # Override destination_path to preserve directory structure (though file is already there)
         job_config.destination_path = destination_path
         
         # Submit job to processor
         # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
         # This ensures the dataset entry exists and the file path is valid before returning
-        # Also verify the file exists before submitting (shared volume check)
-        if not os.path.exists(final_file_path):
-            error_msg = f"Chunked upload file not found at {final_file_path}. This may indicate a shared volume issue."
+        # Verify the file exists before submitting
+        if not os.path.exists(destination_path):
+            error_msg = f"Chunked upload file not found at {destination_path}. File save may have failed."
             logger.error(f"❌ {error_msg}")
             raise RuntimeError(error_msg)
         
         try:
-            logger.info(f"Submitting chunked upload job for {filename} (UUID: {upload_uuid}, path: {final_file_path})")
+            logger.info(f"Submitting chunked upload job for {filename} (UUID: {upload_uuid}, path: {destination_path})")
             actual_job_id = processor.submit_upload_job(job_config)
             logger.info(f"✅ Chunked upload job submitted successfully: {actual_job_id} for dataset {upload_uuid}")
         except Exception as e:
             logger.error(f"❌ Failed to submit chunked upload job: {e}", exc_info=True)
-            # Clean up temp file on error
-            if os.path.exists(final_file_path):
+            # Clean up destination file on error
+            if os.path.exists(destination_path):
                 try:
-                    os.remove(final_file_path)
+                    os.remove(destination_path)
+                    # Also remove directory if empty
+                    try:
+                        if not os.listdir(destination_dir):
+                            os.rmdir(destination_dir)
+                    except:
+                        pass
                 except:
                     pass
             raise
