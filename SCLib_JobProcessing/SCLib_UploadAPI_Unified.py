@@ -813,15 +813,15 @@ async def _process_chunks(upload_id: str, content: bytes, processor: Any):
                 if os.path.exists(destination_path):
                     try:
                         os.remove(destination_path)
-                    # Also remove directory if empty
-                    try:
-                        if not os.listdir(destination_dir):
-                            os.rmdir(destination_dir)
+                        # Also remove directory if empty
+                        try:
+                            if not os.listdir(destination_dir):
+                                os.rmdir(destination_dir)
+                        except:
+                            pass
                     except:
                         pass
-                except:
-                    pass
-            raise
+                raise
         
         # Mark as complete
         session['uploaded_chunks'] = set(range(session['total_chunks']))
