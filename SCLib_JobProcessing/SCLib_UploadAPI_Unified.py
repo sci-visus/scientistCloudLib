@@ -674,24 +674,72 @@ async def _handle_chunked_upload(
     
     create_upload_session(upload_id, session_data)
     
+    # CRITICAL: Create MongoDB entry IMMEDIATELY before processing chunks
+    # This ensures the dataset appears in the UI right away, even for large files
+    # Calculate destination path (same logic as in _process_chunks)
+    base_path = f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{upload_uuid}"
+    if relative_path:
+        destination_path = f"{base_path}/{relative_path}/{filename}"
+    else:
+        destination_path = f"{base_path}/{filename}"
+    
+    # Generate job_id for MongoDB entry
+    job_id = f"upload_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+    
+    # Create job config with destination path (file will be saved there by _process_chunks)
+    job_config = create_local_upload_job(
+        file_path=destination_path,  # File will be saved here by _process_chunks
+        dataset_uuid=upload_uuid,
+        user_email=user_email,
+        dataset_name=dataset_name,
+        sensor=sensor,
+        original_source_path=None,
+        convert=convert,
+        is_public=is_public,
+        folder=folder,  # Metadata only - for UI organization
+        team_uuid=team_uuid,
+        tags=tags
+    )
+    job_config.destination_path = destination_path
+    
+    # Submit job IMMEDIATELY to create MongoDB entry (before file transfer)
+    # This ensures the dataset appears in the UI right away
+    try:
+        logger.info(f"Creating MongoDB entry immediately for chunked upload: {filename} (UUID: {upload_uuid}, job_id: {job_id})")
+        actual_job_id = processor.submit_upload_job(job_config, job_id)
+        logger.info(f"✅ MongoDB entry created immediately: {actual_job_id} for dataset {upload_uuid}")
+        # Store the actual job_id in session for _process_chunks to use
+        session_data['job_id'] = actual_job_id
+    except Exception as e:
+        logger.error(f"❌ Failed to create MongoDB entry immediately: {e}", exc_info=True)
+        # Continue anyway - _process_chunks will try again
+    
+    # Update session with job_id
+    create_upload_session(upload_id, session_data)
+    
     # Create upload directory
     upload_dir = os.path.join(TEMP_DIR, upload_id)
     os.makedirs(upload_dir, exist_ok=True)
     
-    # Process chunks immediately (for this unified API, we'll process all chunks at once)
-    await _process_chunks(upload_id, content, background_tasks, processor)
+    # Process chunks in background so we can return response immediately
+    # This allows the MongoDB entry to be visible in the UI right away
+    background_tasks.add_task(_process_chunks, upload_id, content, processor)
     
     logger.info(f"Initiated chunked upload: {upload_id}, {total_chunks} chunks, {file_size} bytes")
     
+    # Return the actual job_id from MongoDB, not the upload_id
+    # This ensures the frontend can track it immediately
+    return_job_id = session_data.get('job_id', upload_id)
+    
     return UploadResponse(
-        job_id=upload_id,
+        job_id=return_job_id,  # Use MongoDB job_id so frontend can track it
         status="queued",
         message=f"Chunked upload initiated: {filename}",
         estimated_duration=max(300, int(file_size / (1024 * 1024) * 2)),  # 2 seconds per MB
         upload_type="chunked"
     )
 
-async def _process_chunks(upload_id: str, content: bytes, background_tasks: BackgroundTasks, processor: Any):
+async def _process_chunks(upload_id: str, content: bytes, processor: Any):
     """Process all chunks for a chunked upload."""
     try:
         session = get_upload_session(upload_id)
@@ -741,25 +789,30 @@ async def _process_chunks(upload_id: str, content: bytes, background_tasks: Back
         # Override destination_path to preserve directory structure (though file is already there)
         job_config.destination_path = destination_path
         
-        # Submit job to processor
-        # CRITICAL: Call synchronously to ensure MongoDB entry is created immediately
-        # This ensures the dataset entry exists and the file path is valid before returning
-        # Verify the file exists before submitting
+        # Verify the file exists before updating job
         if not os.path.exists(destination_path):
             error_msg = f"Chunked upload file not found at {destination_path}. File save may have failed."
             logger.error(f"❌ {error_msg}")
             raise RuntimeError(error_msg)
         
-        try:
-            logger.info(f"Submitting chunked upload job for {filename} (UUID: {upload_uuid}, path: {destination_path})")
-            actual_job_id = processor.submit_upload_job(job_config)
-            logger.info(f"✅ Chunked upload job submitted successfully: {actual_job_id} for dataset {upload_uuid}")
-        except Exception as e:
-            logger.error(f"❌ Failed to submit chunked upload job: {e}", exc_info=True)
-            # Clean up destination file on error
-            if os.path.exists(destination_path):
-                try:
-                    os.remove(destination_path)
+        # Check if job was already created in _handle_chunked_upload
+        existing_job_id = session.get('job_id')
+        if existing_job_id:
+            # Job already exists in MongoDB - just update the file path if needed
+            logger.info(f"Job already exists in MongoDB: {existing_job_id}. File saved successfully: {destination_path}")
+            # The job_config already has the correct destination_path, so we're done
+        else:
+            # Job wasn't created earlier (shouldn't happen, but handle gracefully)
+            try:
+                logger.info(f"Submitting chunked upload job for {filename} (UUID: {upload_uuid}, path: {destination_path})")
+                actual_job_id = processor.submit_upload_job(job_config)
+                logger.info(f"✅ Chunked upload job submitted successfully: {actual_job_id} for dataset {upload_uuid}")
+            except Exception as e:
+                logger.error(f"❌ Failed to submit chunked upload job: {e}", exc_info=True)
+                # Clean up destination file on error
+                if os.path.exists(destination_path):
+                    try:
+                        os.remove(destination_path)
                     # Also remove directory if empty
                     try:
                         if not os.listdir(destination_dir):
