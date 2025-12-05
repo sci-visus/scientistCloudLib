@@ -440,7 +440,10 @@ class ProcessNexus(BaseDataProcessor):
         return volume_memmap, self.presample_dataset, self.postsample_dataset, self.x_coords_dataset, self.y_coords_dataset, self.preview
     
     def create_memmap_cache_background(self) -> None:
-        """Create memmap cache file in a background thread."""
+        """Create memmap cache file in a background thread.
+        
+        Uses its own HDF5 file handle to avoid blocking the main dataset access.
+        """
         def _create_memmap():
             try:
                 if not self.mmap_filename:
@@ -455,40 +458,67 @@ class ProcessNexus(BaseDataProcessor):
                     self.debug_print(f"PERMISSION ERROR: No write permission to directory: {mmap_dir}")
                     return
                 
-                if not hasattr(self, 'volume_dataset') or self.volume_dataset is None:
-                    self.debug_print("ERROR: volume_dataset not loaded, cannot create memmap cache")
+                if not hasattr(self, 'volume_picked') or not self.volume_picked:
+                    self.debug_print("ERROR: volume_picked not set, cannot create memmap cache")
                     return
                 
                 self.debug_print(f"🔄 Background: Starting memmap cache creation: {self.mmap_filename}")
                 
-                self.debug_print("🔄 Background: Loading HDF5 dataset into memory for caching...")
-                try:
-                    volume_data = self.volume_dataset[:]
-                    self.debug_print(f"✅ Background: Successfully loaded HDF5 data into memory (shape: {volume_data.shape})")
-                except Exception as h5_error:
-                    self.debug_print(f"❌ Background: ERROR loading HDF5 dataset: {h5_error}")
-                    return
-                
-                self.debug_print("🔄 Background: Creating memmap file from loaded data...")
-                write = np.memmap(self.mmap_filename, dtype=self.dtype, shape=self.shape, mode="w+")
-                
-                for u in range(self.shape[0]):
-                    if u % 50 == 0 or u == self.shape[0] - 1:
-                        self.debug_print(f"🔄 Background: Caching slice {u+1}/{self.shape[0]}")
-                    try:
-                        piece = volume_data[u, :, :, :]
-                        piece = piece.astype(np.float32) if self.cached_cast_float else piece
-                        write[u, :, :, :] = piece
-                    except Exception as e:
-                        self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
-                        if os.path.exists(self.mmap_filename):
-                            os.remove(self.mmap_filename)
-                        return
-                
-                write.flush()
-                del write
-                del volume_data
-                self.debug_print(f"✅ Background: Memmap cache file created successfully: {self.mmap_filename}")
+                # Open our own HDF5 file handle to avoid blocking the main dataset access
+                # This allows slicing to continue while memmap is being created
+                with h5py.File(self.nexus_filename, 'r') as f:
+                    dset = f[self.volume_picked]
+                    shape = dset.shape
+                    dtype = np.dtype('float32' if self.cached_cast_float else dset.dtype)
+                    
+                    self.debug_print(f"🔄 Background: Creating memmap file (shape={shape}, dtype={dtype})...")
+                    write = np.memmap(self.mmap_filename, dtype=dtype, shape=shape, mode="w+")
+                    
+                    # Process in chunks to avoid loading entire dataset into memory
+                    if len(shape) == 4:
+                        for u in range(shape[0]):
+                            if u % 10 == 0 or u == shape[0] - 1:
+                                self.debug_print(f"🔄 Background: Caching 4D slice {u+1}/{shape[0]}")
+                            try:
+                                # Read slice directly from HDF5 (efficient, doesn't load entire dataset)
+                                piece = dset[u, :, :, :]
+                                piece = piece.astype(np.float32) if self.cached_cast_float else piece
+                                write[u, :, :, :] = piece
+                            except Exception as e:
+                                self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
+                                import traceback
+                                self.debug_print(traceback.format_exc())
+                                if os.path.exists(self.mmap_filename):
+                                    os.remove(self.mmap_filename)
+                                return
+                    elif len(shape) == 3:
+                        for u in range(shape[0]):
+                            if u % 10 == 0 or u == shape[0] - 1:
+                                self.debug_print(f"🔄 Background: Caching 3D slice {u+1}/{shape[0]}")
+                            try:
+                                piece = dset[u, :, :]
+                                piece = piece.astype(np.float32) if self.cached_cast_float else piece
+                                write[u, :, :] = piece
+                            except Exception as e:
+                                self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
+                                import traceback
+                                self.debug_print(traceback.format_exc())
+                                if os.path.exists(self.mmap_filename):
+                                    os.remove(self.mmap_filename)
+                                return
+                    else:
+                        # For 1D/2D datasets, load all at once (smaller datasets)
+                        data = dset[:]
+                        data = data.astype(np.float32) if self.cached_cast_float else data
+                        write[...] = data
+                    
+                    write.flush()
+                    del write
+                    self.debug_print(f"✅ Background: Memmap cache file created successfully: {self.mmap_filename}")
+                    
+                    write.flush()
+                    del write
+                    self.debug_print(f"✅ Background: Memmap cache file created successfully: {self.mmap_filename}")
                 
             except Exception as e:
                 self.debug_print(f"❌ Background: ERROR creating memmap cache: {e}")
@@ -519,11 +549,19 @@ class ProcessNexus(BaseDataProcessor):
                     write = np.memmap(target_mmap, dtype=np.float32 if self.cached_cast_float else dset.dtype, shape=shape, mode='w+')
                     if len(shape) == 4:
                         for u in range(shape[0]):
-                            if u % 50 == 0 or u == shape[0]-1:
+                            if u % 10 == 0 or u == shape[0]-1:
                                 self.debug_print(f"🔄 Background: Caching 4D slice {u+1}/{shape[0]}")
-                            piece = dset[u, :, :, :]
-                            piece = piece.astype(np.float32) if self.cached_cast_float else piece
-                            write[u, :, :, :] = piece
+                            try:
+                                piece = dset[u, :, :, :]
+                                piece = piece.astype(np.float32) if self.cached_cast_float else piece
+                                write[u, :, :, :] = piece
+                            except Exception as e:
+                                self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
+                                import traceback
+                                self.debug_print(traceback.format_exc())
+                                if os.path.exists(target_mmap):
+                                    os.remove(target_mmap)
+                                return
                     elif len(shape) == 3:
                         for u in range(shape[0]):
                             if u % 50 == 0 or u == shape[0]-1:
