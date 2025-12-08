@@ -1614,6 +1614,8 @@ try:
             # Plot1's dynamic range is computed once at initialization or when mode changes
             # Update Plot2B if it exists
             show_slice_b()  # This already handles Plot2B Dynamic/User Specified range mode
+            # Save state for undo/redo (debounced to avoid excessive saves during dragging)
+            debounced_save_state("X slider changed", update_undo_redo=True)
         except Exception as e:
             print(f"⚠️ ERROR in on_x_slider_change(): {e}")
             import traceback
@@ -1627,6 +1629,8 @@ try:
             # Plot1's dynamic range is computed once at initialization or when mode changes
             # Update Plot2B if it exists
             show_slice_b()  # This already handles Plot2B Dynamic/User Specified range mode
+            # Save state for undo/redo (debounced to avoid excessive saves during dragging)
+            debounced_save_state("Y slider changed", update_undo_redo=True)
         except Exception as e:
             print(f"⚠️ ERROR in on_y_slider_change(): {e}")
             import traceback
@@ -1664,6 +1668,7 @@ try:
                 y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
             # Note: Setting slider.value will trigger on_x_slider_change/on_y_slider_change
             # which will call draw_cross1() and show_slice()
+            # State is saved by the slider change handlers, so we don't need to save here
 
     # Draw initial crosshairs (skip if loading session - will be drawn by auto_load_session)
     if not _session_loading_state["is_loading"]:
@@ -2338,6 +2343,15 @@ try:
 
         def do_save():
             if _state_save_state["pending"]:
+                # Save slider positions to session metadata before saving state
+                try:
+                    if 'x_slider' in locals() and x_slider is not None:
+                        session.metadata['x_slider_value'] = x_slider.value
+                    if 'y_slider' in locals() and y_slider is not None:
+                        session.metadata['y_slider_value'] = y_slider.value
+                except:
+                    pass
+                
                 plot1_history.save_state(description)
                 session_history.save_state(description)
                 if update_undo_redo:
@@ -2371,6 +2385,17 @@ try:
             color_mapper1.high = map_plot.range_max
         if map_plot.palette != color_mapper1.palette:
             color_mapper1.palette = map_plot.palette
+        
+        # Restore slider positions from session metadata
+        try:
+            if 'x_slider' in locals() and x_slider is not None:
+                if 'x_slider_value' in session.metadata:
+                    x_slider.value = session.metadata['x_slider_value']
+            if 'y_slider' in locals() and y_slider is not None:
+                if 'y_slider_value' in session.metadata:
+                    y_slider.value = session.metadata['y_slider_value']
+        except Exception as e:
+            print(f"⚠️ Warning: Could not restore slider positions: {e}")
 
     # Create custom undo/redo callbacks that also update UI
     def on_undo():
@@ -3640,33 +3665,44 @@ try:
             except:
                 pass
             
-            # Recreate mapper for Plot3
-            print(f"🔍 DEBUG: Creating {new_cls.__name__} for Plot3: low={low3}, high={high3}")
-            new_color_mapper3 = new_cls(palette=current_color_mapper3.palette, low=low3, high=high3)
-            if current_image_renderer3 is not None:
-                # Remove the specific image renderer
-                if current_image_renderer3 in current_plot3.renderers:
-                    current_plot3.renderers.remove(current_image_renderer3)
-                # Re-add the renderer with the new color mapper
-                new_image_renderer3 = current_plot3.image(
-                    "image", source=current_source3, x="x", y="y", dw="dw", dh="dh", color_mapper=new_color_mapper3,
-                )
-                # Update outer scope variables
-                import sys
-                frame = sys._getframe(1)
-                frame.f_locals['color_mapper3'] = new_color_mapper3
-                frame.f_locals['image_renderer3'] = new_image_renderer3
-                print(f"✅ DEBUG: Plot3 image renderer recreated with {new_cls.__name__}")
-                # Force source change event to update the plot
+            # Use map_plot.update_color_scale() method (same as Plot1) to preserve palette
+            if map_plot is not None:
+                print(f"🔍 DEBUG: Using map_plot.update_color_scale() for Plot3: use_log={new == 1}")
+                # Plot3 doesn't have crosshairs, so we don't need preserve/restore functions
+                def preserve_crosshairs_3():
+                    return []  # Plot3 doesn't have crosshairs
+                
+                def restore_crosshairs_3(renderers):
+                    pass  # Plot3 doesn't have crosshairs
+                
                 try:
-                    current_source3.change.emit()
-                except:
-                    pass
-            # Update colorbar if it exists
-            if colorbar3_obj is not None:
-                colorbar3_obj.color_mapper = new_color_mapper3
-                print(f"✅ DEBUG: Plot3 colorbar updated")
-            print(f"✅ DEBUG: Plot3 color scale updated successfully")
+                    new_color_mapper3, new_image_renderer3 = map_plot.update_color_scale(
+                        current_plot3,
+                        current_image_renderer3,
+                        current_color_mapper3,
+                        current_source3,
+                        use_log=(new == 1),
+                        colorbar=colorbar3_obj,
+                        preserve_crosshairs=preserve_crosshairs_3,
+                        restore_crosshairs=restore_crosshairs_3,
+                    )
+                    # Update outer scope variables
+                    import sys
+                    frame = sys._getframe(1)
+                    frame.f_locals['color_mapper3'] = new_color_mapper3
+                    frame.f_locals['image_renderer3'] = new_image_renderer3
+                    # Trigger source change to refresh the plot
+                    try:
+                        current_source3.change.emit()
+                    except:
+                        pass
+                    print(f"✅ DEBUG: Plot3 color scale updated successfully using map_plot.update_color_scale()")
+                except Exception as e:
+                    print(f"❌ ERROR: Failed to update Plot3 color scale: {e}")
+                    import traceback
+                    traceback.print_exc()
+            else:
+                print(f"⚠️ WARNING: map_plot is None, cannot use update_color_scale() for Plot3")
         except Exception as e:
             print(f"❌ ERROR: Error in on_plot3_color_scale_change: {e}")
             import traceback

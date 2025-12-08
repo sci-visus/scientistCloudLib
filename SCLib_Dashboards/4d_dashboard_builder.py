@@ -652,14 +652,15 @@ class DashboardBuilder:
                 else:
                     raise FileNotFoundError(f"Dashboard file not found: {dashboard_file}")
             except Exception as e:
-                print(f"⚠️ WARNING: Could not import create_tmp_dashboard: {e}")
+                error_message = str(e)  # Capture error message as string to avoid scoping issues
+                print(f"⚠️ WARNING: Could not import create_tmp_dashboard: {error_message}")
                 import traceback
                 traceback.print_exc()
                 # Create a dummy function that shows an error
                 def create_tmp_dashboard(process_4dnexus):
                     from bokeh.layouts import column
                     from SCLib_Dashboards import create_div
-                    return column(create_div(text=f"<h3 style='color: red;'>Error: Could not load dataset selection dashboard</h3><p>{str(e)}</p>"))
+                    return column(create_div(text=f"<h3 style='color: red;'>Error: Could not load dataset selection dashboard</h3><p>{error_message}</p>"))
                 namespace['create_tmp_dashboard'] = create_tmp_dashboard
             
             # Execute the implementation code
