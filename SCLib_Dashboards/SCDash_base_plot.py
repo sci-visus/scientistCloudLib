@@ -813,8 +813,9 @@ class BasePlot:
             low = color_mapper.low
             high = color_mapper.high
         
-        # Create new color mapper
-        new_color_mapper = new_cls(palette=color_mapper.palette, low=low, high=high)
+        # Create new color mapper - use self.palette (source of truth) instead of color_mapper.palette
+        # This ensures the palette is preserved when switching between linear/log
+        new_color_mapper = new_cls(palette=self.palette, low=low, high=high)
         
         # Preserve crosshair renderers if function provided
         crosshair_renderers = []
