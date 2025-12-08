@@ -1615,7 +1615,9 @@ try:
             # Update Plot2B if it exists
             show_slice_b()  # This already handles Plot2B Dynamic/User Specified range mode
             # Save state for undo/redo (debounced to avoid excessive saves during dragging)
-            debounced_save_state("X slider changed", update_undo_redo=True)
+            # Skip if we're restoring state (undo/redo)
+            if not _skip_slider_state_save["value"]:
+                debounced_save_state("X slider changed", update_undo_redo=True)
         except Exception as e:
             print(f"⚠️ ERROR in on_x_slider_change(): {e}")
             import traceback
@@ -1630,7 +1632,9 @@ try:
             # Update Plot2B if it exists
             show_slice_b()  # This already handles Plot2B Dynamic/User Specified range mode
             # Save state for undo/redo (debounced to avoid excessive saves during dragging)
-            debounced_save_state("Y slider changed", update_undo_redo=True)
+            # Skip if we're restoring state (undo/redo)
+            if not _skip_slider_state_save["value"]:
+                debounced_save_state("Y slider changed", update_undo_redo=True)
         except Exception as e:
             print(f"⚠️ ERROR in on_y_slider_change(): {e}")
             import traceback
@@ -1658,17 +1662,25 @@ try:
 
             # Convert back to original coordinate space for sliders
             # Sliders use original x_coords and y_coords (not flipped)
-            if map_plot.needs_flip:
-                # When flipped: plot1_x_coords is actually y_coords, plot1_y_coords is actually x_coords
-                x_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
-                y_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
-            else:
-                # Not flipped: plot1_x_coords is x_coords, plot1_y_coords is y_coords
-                x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
-                y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
-            # Note: Setting slider.value will trigger on_x_slider_change/on_y_slider_change
-            # which will call draw_cross1() and show_slice()
-            # State is saved by the slider change handlers, so we don't need to save here
+            # Temporarily disable state saves to prevent multiple saves
+            _skip_slider_state_save["value"] = True
+            
+            try:
+                # Update both sliders (handlers will update plots but won't save state)
+                if map_plot.needs_flip:
+                    # When flipped: plot1_x_coords is actually y_coords, plot1_y_coords is actually x_coords
+                    x_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
+                    y_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                else:
+                    # Not flipped: plot1_x_coords is x_coords, plot1_y_coords is y_coords
+                    x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                    y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
+                
+                # Slider change handlers will automatically call draw_cross1() and show_slice()
+                # Save state once for both slider changes (after both are updated)
+                debounced_save_state("Plot clicked (both sliders changed)", update_undo_redo=True)
+            finally:
+                _skip_slider_state_save["value"] = False
 
     # Draw initial crosshairs (skip if loading session - will be drawn by auto_load_session)
     if not _session_loading_state["is_loading"]:
@@ -2269,17 +2281,18 @@ try:
                 draw_rect2b()
 
     # Reset buttons for Plot2 and Plot2b
+    # Create buttons for both 3D and 4D volumes (reset reloads from data source)
     reset_plot2_button = None
     reset_plot2b_button = None
     
-    if plot2 is not None and not is_3d_volume:
+    if plot2 is not None:
         reset_plot2_button = create_button(
             label="Reset Plot2",
             button_type="warning",
             width=100
         )
     
-    if plot2b is not None and not is_3d_volume:
+    if plot2b is not None:
         reset_plot2b_button = create_button(
             label="Reset Plot2b",
             button_type="warning",
@@ -2329,6 +2342,7 @@ try:
     # This prevents excessive state saves during rapid UI interactions
     # Use a mutable container so nested functions can modify the values
     _state_save_state = {"timer": None, "pending": False}
+    _skip_slider_state_save = {"value": False}  # Flag to skip state saves during undo/redo (mutable container)
 
     def debounced_save_state(description: str, update_undo_redo: bool = True, delay: float = 0.5):
         """
@@ -2387,15 +2401,20 @@ try:
             color_mapper1.palette = map_plot.palette
         
         # Restore slider positions from session metadata
+        # Use flag to prevent state saves during restoration
+        _skip_slider_state_save["value"] = True
         try:
-            if 'x_slider' in locals() and x_slider is not None:
+            if 'x_slider' in locals() and x_slider is not None and 'y_slider' in locals() and y_slider is not None:
+                # Restore both slider values (handlers will update plots but won't save state)
                 if 'x_slider_value' in session.metadata:
                     x_slider.value = session.metadata['x_slider_value']
-            if 'y_slider' in locals() and y_slider is not None:
                 if 'y_slider_value' in session.metadata:
                     y_slider.value = session.metadata['y_slider_value']
+                # Slider change handlers will automatically call show_slice() and draw_cross1()
         except Exception as e:
             print(f"⚠️ Warning: Could not restore slider positions: {e}")
+        finally:
+            _skip_slider_state_save["value"] = False
 
     # Create custom undo/redo callbacks that also update UI
     def on_undo():
@@ -5690,38 +5709,64 @@ try:
 
     # Reset functions using SCLib utility
     def reset_plot2():
-        """Reset Plot2 to original volume slice."""
-        if plot2 is None or is_3d_volume:
+        """Reset Plot2 to original volume slice by reloading from memmap/nexus."""
+        if plot2 is None:
             return
-        reset_plot_to_original_data(
-            source=source2,
-            original_data=plot2_original_data,
-            bokeh_figure=plot2,
-            color_mapper=color_mapper2,
-            original_min=plot2_original_min,
-            original_max=plot2_original_max,
-            min_input=range2_min_input if 'range2_min_input' in locals() else None,
-            max_input=range2_max_input if 'range2_max_input' in locals() else None,
-            debug=True
-        )
-        print(f"✅ Reset Plot2 to original slice")
+        try:
+            # Reload data from memmap/nexus by calling show_slice()
+            # This will reload the current slice from the volume data source
+            show_slice()
+            print(f"✅ Reset Plot2 to original slice (reloaded from data source)")
+        except Exception as e:
+            print(f"⚠️ ERROR resetting Plot2: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to stored original data if reload fails
+            try:
+                reset_plot_to_original_data(
+                    source=source2,
+                    original_data=plot2_original_data,
+                    bokeh_figure=plot2,
+                    color_mapper=color_mapper2,
+                    original_min=plot2_original_min,
+                    original_max=plot2_original_max,
+                    min_input=range2_min_input if 'range2_min_input' in locals() else None,
+                    max_input=range2_max_input if 'range2_max_input' in locals() else None,
+                    debug=True
+                )
+                print(f"✅ Reset Plot2 using stored original data (fallback)")
+            except Exception as e2:
+                print(f"❌ ERROR in fallback reset: {e2}")
     
     def reset_plot2b():
-        """Reset Plot2b to original volume slice."""
-        if plot2b is None or is_3d_volume:
+        """Reset Plot2b to original volume slice by reloading from memmap/nexus."""
+        if plot2b is None:
             return
-        reset_plot_to_original_data(
-            source=source2b,
-            original_data=plot2b_original_data,
-            bokeh_figure=plot2b,
-            color_mapper=color_mapper2b,
-            original_min=plot2b_original_min,
-            original_max=plot2b_original_max,
-            min_input=range2b_min_input if 'range2b_min_input' in locals() else None,
-            max_input=range2b_max_input if 'range2b_max_input' in locals() else None,
-            debug=True
-        )
-        print(f"✅ Reset Plot2b to original slice")
+        try:
+            # Reload data from memmap/nexus by calling show_slice_b()
+            # This will reload the current slice from the volume data source
+            show_slice_b()
+            print(f"✅ Reset Plot2b to original slice (reloaded from data source)")
+        except Exception as e:
+            print(f"⚠️ ERROR resetting Plot2b: {e}")
+            import traceback
+            traceback.print_exc()
+            # Fallback to stored original data if reload fails
+            try:
+                reset_plot_to_original_data(
+                    source=source2b,
+                    original_data=plot2b_original_data,
+                    bokeh_figure=plot2b,
+                    color_mapper=color_mapper2b,
+                    original_min=plot2b_original_min,
+                    original_max=plot2b_original_max,
+                    min_input=range2b_min_input if 'range2b_min_input' in locals() else None,
+                    max_input=range2b_max_input if 'range2b_max_input' in locals() else None,
+                    debug=True
+                )
+                print(f"✅ Reset Plot2b using stored original data (fallback)")
+            except Exception as e2:
+                print(f"❌ ERROR in fallback reset: {e2}")
     
     # Connect reset buttons
     if reset_plot2_button is not None:
@@ -5769,20 +5814,21 @@ try:
         plot2_items.append(create_div(text="<p style='color: red;'>⚠️ Error: Plot2 could not be created. Check dataset selection.</p>"))
     # Add Plot3 computation buttons between plot2 and plot2b range
     plot2_items.append(create_label_div("Plot2 -> Plot3:", width=200))
-    # Create a row with Reset button and Show Plot3 button
+    # Create a row with Reset button and Show Plot3 button for Plot2
     if reset_plot2_button is not None:
         plot2_items.append(row( compute_plot3_button, reset_plot2_button))
     else:
         plot2_items.append(compute_plot3_button)
+    # Create a row with Reset button and Show Plot3 button for Plot2B
     if compute_plot3_from_plot2b_button is not None:
-        plot2_items.append(compute_plot3_from_plot2b_button)
+        if reset_plot2b_button is not None:
+            plot2_items.append(row(compute_plot3_from_plot2b_button, reset_plot2b_button))
+        else:
+            plot2_items.append(compute_plot3_from_plot2b_button)
     if plot2b is not None:
         if range2b_section is not None:
             plot2_items.append(range2b_section)
         plot2_items.append(plot2b)
-        # Add reset button for Plot2b
-        if reset_plot2b_button is not None:
-            plot2_items.append(reset_plot2b_button)
     plot2_col = create_plot_column(plot2_items)
 
     # Plot3 column

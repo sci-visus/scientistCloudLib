@@ -637,20 +637,81 @@ class DashboardBuilder:
             try:
                 import importlib.util
                 import os
-                dashboard_dir = os.path.dirname(os.path.abspath(__file__))
-                dashboard_file = os.path.join(dashboard_dir, '4d_dashboardLiteImprove.py')
-                if os.path.exists(dashboard_file):
-                    spec = importlib.util.spec_from_file_location("dashboard_module", dashboard_file)
-                    dashboard_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(dashboard_module)
-                    if hasattr(dashboard_module, 'create_tmp_dashboard'):
-                        namespace['create_tmp_dashboard'] = dashboard_module.create_tmp_dashboard
-                        print("✅ Successfully imported create_tmp_dashboard for back button")
-                    else:
-                        print("⚠️ WARNING: create_tmp_dashboard not found in 4d_dashboardLiteImprove module")
-                        raise AttributeError("create_tmp_dashboard not found")
+                import sys
+                import inspect
+                
+                # Try to find 4d_dashboardLite.py by looking at the call stack
+                # The dashboard builder is called from 4d_dashboardLite.py, so we can find it
+                dashboard_file = None
+                possible_paths = []
+                
+                # Method 1: Look in the call stack for the file that called us
+                try:
+                    frame = inspect.currentframe()
+                    # Go up the stack to find the calling file
+                    while frame:
+                        frame = frame.f_back
+                        if frame is None:
+                            break
+                        filename = frame.f_code.co_filename
+                        if '4d_dashboardLite.py' in filename:
+                            dashboard_file = filename
+                            print(f"✅ Found dashboard file from call stack: {dashboard_file}")
+                            break
+                except:
+                    pass
+                
+                # Method 2: Try relative paths from current file location
+                if dashboard_file is None or not os.path.exists(dashboard_file):
+                    current_file = os.path.abspath(__file__)
+                    current_dir = os.path.dirname(current_file)
+                    
+                    # From SCLib_Dashboards to dashboards: 
+                    # .../scientistCloudLib/SCLib_Dashboards/ -> .../scientistcloud/SC_Dashboards/dashboards/
+                    base_dir = os.path.dirname(os.path.dirname(current_dir))  # Go up to scientistCloudLib
+                    possible_paths = [
+                        os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                        os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                    ]
+                    
+                    # Method 3: Try current working directory
+                    try:
+                        cwd = os.getcwd()
+                        possible_paths.extend([
+                            os.path.join(cwd, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                            os.path.join(cwd, 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                            os.path.join(cwd, 'dashboards', '4d_dashboardLite.py'),
+                            os.path.join(cwd, '4d_dashboardLite.py'),
+                        ])
+                    except:
+                        pass
+                    
+                    # Method 4: Try sys.path
+                    for path_dir in sys.path:
+                        if path_dir and os.path.isdir(path_dir):
+                            test_path = os.path.join(path_dir, '4d_dashboardLite.py')
+                            if test_path not in possible_paths:
+                                possible_paths.append(test_path)
+                    
+                    # Try each path
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            dashboard_file = path
+                            print(f"✅ Found dashboard file at: {dashboard_file}")
+                            break
+                
+                if dashboard_file is None or not os.path.exists(dashboard_file):
+                    raise FileNotFoundError(f"Dashboard file not found. Tried paths: {possible_paths}")
+                
+                spec = importlib.util.spec_from_file_location("dashboard_module", dashboard_file)
+                dashboard_module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(dashboard_module)
+                if hasattr(dashboard_module, 'create_tmp_dashboard'):
+                    namespace['create_tmp_dashboard'] = dashboard_module.create_tmp_dashboard
+                    print("✅ Successfully imported create_tmp_dashboard for back button")
                 else:
-                    raise FileNotFoundError(f"Dashboard file not found: {dashboard_file}")
+                    print("⚠️ WARNING: create_tmp_dashboard not found in 4d_dashboardLite module")
+                    raise AttributeError("create_tmp_dashboard not found")
             except Exception as e:
                 error_message = str(e)  # Capture error message as string to avoid scoping issues
                 print(f"⚠️ WARNING: Could not import create_tmp_dashboard: {error_message}")

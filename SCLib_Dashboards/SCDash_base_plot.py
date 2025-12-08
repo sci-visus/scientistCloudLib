@@ -882,8 +882,12 @@ class BasePlot:
         """
         from bokeh.models import LinearColorMapper, LogColorMapper
         
-        # Determine mapper class (preserve linear/log)
-        mapper_cls = type(color_mapper)
+        # Determine mapper class (preserve linear/log) - use self.color_scale as source of truth
+        # This ensures the color scale is preserved even if color_mapper type doesn't match
+        if self.color_scale == ColorScale.LOG:
+            mapper_cls = LogColorMapper
+        else:
+            mapper_cls = LinearColorMapper
         
         # Create new color mapper with new palette
         new_color_mapper = mapper_cls(
