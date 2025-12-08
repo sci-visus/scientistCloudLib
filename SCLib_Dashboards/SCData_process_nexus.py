@@ -48,6 +48,40 @@ class ProcessNexus(BaseDataProcessor):
         )
         
         self.nexus_filename = nexus_filename  # Alias for compatibility
+        
+        # Clean up any incomplete .tmp memmap files on initialization
+        self._cleanup_incomplete_memmap_files()
+    
+    def _cleanup_incomplete_memmap_files(self):
+        """Clean up any incomplete .tmp memmap files from previous sessions."""
+        try:
+            # Determine the directory where memmap files are stored
+            if self.memmap_cache_dir:
+                cache_dir = self.memmap_cache_dir
+            else:
+                cache_dir = os.path.dirname(self.nexus_filename)
+            
+            if not os.path.exists(cache_dir):
+                return
+            
+            # Find all .tmp files related to this nexus file
+            nexus_basename = os.path.splitext(os.path.basename(self.nexus_filename))[0]
+            tmp_files = []
+            for filename in os.listdir(cache_dir):
+                if filename.startswith(nexus_basename) and filename.endswith('.float32.dat.tmp'):
+                    tmp_files.append(os.path.join(cache_dir, filename))
+            
+            # Silently remove all .tmp files (incomplete writes from previous sessions)
+            # This is just cleanup on initialization - doesn't affect normal operation
+            for tmp_file in tmp_files:
+                try:
+                    os.remove(tmp_file)
+                    # Don't print message - this is expected cleanup on init
+                except Exception as e:
+                    # Only log if there's an actual error (permission issue, etc.)
+                    self.debug_print(f"⚠️ Could not remove incomplete memmap file {os.path.basename(tmp_file)}: {e}")
+        except Exception as e:
+            self.debug_print(f"⚠️ Error cleaning up incomplete memmap files: {e}")
         self.h5_file = None
         
         # Store initial state after initialization
@@ -357,12 +391,161 @@ class ProcessNexus(BaseDataProcessor):
         self.dtype = dtype
 
         # Use memmap if it exists, otherwise use direct HDF5 access
+        # IMPORTANT: Use volume-specific memmap filename based on current volume_picked
+        # Generate memmap filename that includes the volume path to avoid conflicts between different volumes
+        volume_specific_mmap_filename = self.get_memmap_filename_for(self.volume_picked) if self.volume_picked else self.mmap_filename
+        
         volume_memmap = None  # Initialize to ensure it's always assigned
-        if self.mmap_filename and os.path.exists(self.mmap_filename):
-            self.debug_print(f"Using existing memmap cache file: {self.mmap_filename}")
+        if volume_specific_mmap_filename and os.path.exists(volume_specific_mmap_filename):
+            import time
+            validation_start = time.time()
+            self.debug_print(f"Using existing memmap cache file: {volume_specific_mmap_filename}")
             try:
-                volume_memmap = np.memmap(self.mmap_filename, dtype=self.dtype, shape=self.shape, mode="r")
-                self.debug_print(f"Successfully loaded memmap file")
+                volume_memmap = np.memmap(volume_specific_mmap_filename, dtype=self.dtype, shape=self.shape, mode="r")
+                
+                # Validate cache: check if it's all zeros (corrupted cache)
+                # Use fast sequential sampling instead of slow random sampling
+                # Sample from strategic locations: corners, center, and a few slices
+                validation_passed = False
+                try:
+                    # For large arrays, sample strategically to avoid slow random I/O
+                    # IMPORTANT: For 4D data (x, y, z, u), we need to check actual probe slices
+                    # which are at volume[x, y, :, :] - these are the slices that will be displayed
+                    if volume_memmap.size > 1000000:
+                        # Large array: sample from specific slices and corners (fast sequential access)
+                        sample_values = []
+                        
+                        # For 4D data, check actual probe slices that will be used
+                        if len(volume_memmap.shape) == 4:
+                            # Check a few probe slices from different map positions
+                            # These are the slices that will actually be displayed in Plot2
+                            x_dim, y_dim, z_dim, u_dim = volume_memmap.shape
+                            
+                            # Sample probe slices from different map positions
+                            # Check first, middle, and last map positions
+                            map_positions = [
+                                (0, 0),  # First map position
+                                (x_dim // 2, y_dim // 2),  # Middle map position
+                                (x_dim - 1, y_dim - 1),  # Last map position
+                            ]
+                            
+                            for x, y in map_positions:
+                                try:
+                                    # Get the probe slice at this map position
+                                    probe_slice = volume_memmap[x, y, :, :]
+                                    # Sample from this slice (check if it has non-zero values)
+                                    sample_values.append(probe_slice.flatten()[:500])
+                                except:
+                                    pass
+                            
+                            # Also check some edge slices along x and y dimensions
+                            if x_dim > 1:
+                                mid_y = y_dim // 2
+                                sample_values.append(volume_memmap[x_dim // 2, mid_y, :, :].flatten()[:500])
+                            if y_dim > 1:
+                                mid_x = x_dim // 2
+                                sample_values.append(volume_memmap[mid_x, y_dim // 2, :, :].flatten()[:500])
+                        else:
+                            # For 3D or other shapes, use original strategy
+                            # Sample from first and last slices along each dimension
+                            if len(volume_memmap.shape) >= 1:
+                                # First and last elements along first dimension
+                                idx0 = tuple([0] + [slice(None)] * (len(volume_memmap.shape) - 1))
+                                idx1 = tuple([-1] + [slice(None)] * (len(volume_memmap.shape) - 1))
+                                sample_values.append(volume_memmap[idx0].flatten()[:1000])
+                                sample_values.append(volume_memmap[idx1].flatten()[:1000])
+                            
+                            if len(volume_memmap.shape) >= 2:
+                                # Middle slice along first dimension
+                                mid_idx = volume_memmap.shape[0] // 2
+                                idx_mid = tuple([mid_idx] + [slice(None)] * (len(volume_memmap.shape) - 1))
+                                sample_values.append(volume_memmap[idx_mid].flatten()[:1000])
+                            
+                            # Sample corners (first and last elements)
+                            corner_indices = []
+                            for dim_size in volume_memmap.shape:
+                                corner_indices.append([0, min(100, dim_size - 1)])
+                            
+                            # Get a few corner samples
+                            import itertools
+                            for corner in itertools.product(*corner_indices[:min(4, len(corner_indices))]):
+                                if len(corner) == len(volume_memmap.shape):
+                                    try:
+                                        sample_values.append(np.array([volume_memmap[corner]]))
+                                    except:
+                                        pass
+                        
+                        if sample_values:
+                            sample_values = np.concatenate([v.flatten() for v in sample_values if v.size > 0])
+                        else:
+                            # Fallback: sample first 1000 elements sequentially
+                            sample_values = volume_memmap.flat[:1000]
+                    else:
+                        # Small array: can sample more thoroughly
+                        sample_size = min(1000, volume_memmap.size)
+                        # Use sequential sampling instead of random (much faster)
+                        step = max(1, volume_memmap.size // sample_size)
+                        sample_indices = np.arange(0, volume_memmap.size, step)[:sample_size]
+                        sample_values = volume_memmap.flat[sample_indices]
+                    
+                    # Check if all sampled values are zero (or very close to zero)
+                    # For 4D data, we need a higher threshold since we're checking actual probe slices
+                    non_zero_count = np.count_nonzero(sample_values)
+                    total_samples = len(sample_values) if hasattr(sample_values, '__len__') else sample_values.size
+                    
+                    # For 4D data, require at least 1% non-zero values in probe slices
+                    # This catches cases where edges have data but probe slices are all zeros
+                    if len(volume_memmap.shape) == 4:
+                        min_non_zero_ratio = 0.01  # 1% of probe slice should have non-zero values
+                        non_zero_ratio = non_zero_count / total_samples if total_samples > 0 else 0
+                        validation_passed = (non_zero_ratio >= min_non_zero_ratio)
+                        if not validation_passed:
+                            self.debug_print(f"⚠️ Validation failed: only {non_zero_ratio*100:.2f}% non-zero values in probe slices (required {min_non_zero_ratio*100:.1f}%)")
+                    else:
+                        validation_passed = (non_zero_count > 0)
+                    validation_time = time.time() - validation_start
+                    
+                except Exception as validation_error:
+                    # If validation fails, assume file is OK (don't block loading)
+                    validation_time = time.time() - validation_start
+                    self.debug_print(f"Validation check failed (non-critical): {validation_error} (took {validation_time:.3f}s)")
+                    validation_passed = True  # Assume OK to avoid blocking
+                
+                if not validation_passed:
+                    self.debug_print(f"⚠️ WARNING: Memmap cache appears corrupted (all zeros in sample). Regenerating...")
+                    # Close the memmap and delete the corrupted file
+                    # Explicitly close the memmap to ensure file handle is released
+                    try:
+                        if hasattr(volume_memmap, '_mmap'):
+                            volume_memmap._mmap.close()
+                    except:
+                        pass
+                    del volume_memmap
+                    # Force garbage collection to ensure file handle is released
+                    import gc
+                    gc.collect()
+                    
+                    # Now try to remove the file
+                    try:
+                        # On some systems, we may need to wait a moment for the file handle to be released
+                        import time
+                        time.sleep(0.1)
+                        os.remove(volume_specific_mmap_filename)
+                        self.debug_print(f"✅ Deleted corrupted cache file: {volume_specific_mmap_filename}")
+                    except FileNotFoundError:
+                        self.debug_print(f"Cache file already removed: {volume_specific_mmap_filename}")
+                    except PermissionError as e:
+                        self.debug_print(f"⚠️ Could not delete corrupted cache file (permission error): {e}")
+                        self.debug_print(f"   File may be locked. You may need to manually delete: {volume_specific_mmap_filename}")
+                    except Exception as e:
+                        self.debug_print(f"⚠️ Could not delete corrupted cache file: {e}")
+                        self.debug_print(f"   You may need to manually delete: {volume_specific_mmap_filename}")
+                    volume_memmap = None
+                    self.mmap_filename = None
+                else:
+                    self.debug_print(f"✅ Successfully loaded memmap file (validated: {non_zero_count}/{total_samples} non-zero values, took {validation_time:.3f}s)")
+                    # Update self.mmap_filename to the volume-specific one for consistency
+                    self.mmap_filename = volume_specific_mmap_filename
             except Exception as e:
                 self.debug_print(f"ERROR loading memmap file: {e}")
                 self.mmap_filename = None
@@ -446,23 +629,39 @@ class ProcessNexus(BaseDataProcessor):
         """
         def _create_memmap():
             try:
-                if not self.mmap_filename:
-                    self.debug_print("Skipping memmap cache creation (no mmap filename provided)")
-                    return
-                if self.mmap_filename and os.path.exists(self.mmap_filename):
-                    self.debug_print("Memmap cache already exists, skipping creation")
-                    return
-                
-                mmap_dir = os.path.dirname(self.mmap_filename)
-                if not os.access(mmap_dir, os.W_OK):
-                    self.debug_print(f"PERMISSION ERROR: No write permission to directory: {mmap_dir}")
-                    return
-                
+                # Use volume-specific memmap filename based on current volume_picked
                 if not hasattr(self, 'volume_picked') or not self.volume_picked:
                     self.debug_print("ERROR: volume_picked not set, cannot create memmap cache")
                     return
                 
-                self.debug_print(f"🔄 Background: Starting memmap cache creation: {self.mmap_filename}")
+                volume_specific_mmap_filename = self.get_memmap_filename_for(self.volume_picked)
+                
+                if not volume_specific_mmap_filename:
+                    self.debug_print("Skipping memmap cache creation (no mmap filename provided)")
+                    return
+                
+                if os.path.exists(volume_specific_mmap_filename):
+                    self.debug_print(f"Memmap cache already exists, skipping creation: {volume_specific_mmap_filename}")
+                    return
+                
+                # Use .tmp file for atomic write - only rename to final name when complete
+                tmp_filename = volume_specific_mmap_filename + '.tmp'
+                
+                # Silently clean up any existing .tmp file (incomplete write from previous session)
+                # This is just cleanup - doesn't affect the normal load-from-nxs flow
+                if os.path.exists(tmp_filename):
+                    try:
+                        os.remove(tmp_filename)
+                        # Don't print message - this is expected cleanup, not a user action
+                    except:
+                        pass
+                
+                mmap_dir = os.path.dirname(volume_specific_mmap_filename)
+                if not os.access(mmap_dir, os.W_OK):
+                    self.debug_print(f"PERMISSION ERROR: No write permission to directory: {mmap_dir}")
+                    return
+                
+                self.debug_print(f"🔄 Background: Starting memmap cache creation: {volume_specific_mmap_filename}")
                 
                 # Open our own HDF5 file handle to avoid blocking the main dataset access
                 # This allows slicing to continue while memmap is being created
@@ -472,7 +671,16 @@ class ProcessNexus(BaseDataProcessor):
                     dtype = np.dtype('float32' if self.cached_cast_float else dset.dtype)
                     
                     self.debug_print(f"🔄 Background: Creating memmap file (shape={shape}, dtype={dtype})...")
-                    write = np.memmap(self.mmap_filename, dtype=dtype, shape=shape, mode="w+")
+                    # Create the .tmp file first to ensure it exists
+                    # Calculate file size
+                    element_size = np.dtype(dtype).itemsize
+                    file_size = int(np.prod(shape) * element_size)
+                    # Create empty file of correct size
+                    with open(tmp_filename, 'wb') as f:
+                        f.seek(file_size - 1)
+                        f.write(b'\0')
+                    # Now open as memmap for writing
+                    write = np.memmap(tmp_filename, dtype=dtype, shape=shape, mode="r+")
                     
                     # Process in chunks to avoid loading entire dataset into memory
                     if len(shape) == 4:
@@ -488,8 +696,8 @@ class ProcessNexus(BaseDataProcessor):
                                 self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
                                 import traceback
                                 self.debug_print(traceback.format_exc())
-                                if os.path.exists(self.mmap_filename):
-                                    os.remove(self.mmap_filename)
+                                if os.path.exists(volume_specific_mmap_filename):
+                                    os.remove(volume_specific_mmap_filename)
                                 return
                     elif len(shape) == 3:
                         for u in range(shape[0]):
@@ -503,8 +711,12 @@ class ProcessNexus(BaseDataProcessor):
                                 self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
                                 import traceback
                                 self.debug_print(traceback.format_exc())
-                                if os.path.exists(self.mmap_filename):
-                                    os.remove(self.mmap_filename)
+                                # Clean up .tmp file on error
+                                if os.path.exists(tmp_filename):
+                                    try:
+                                        os.remove(tmp_filename)
+                                    except:
+                                        pass
                                 return
                     else:
                         # For 1D/2D datasets, load all at once (smaller datasets)
@@ -512,13 +724,47 @@ class ProcessNexus(BaseDataProcessor):
                         data = data.astype(np.float32) if self.cached_cast_float else data
                         write[...] = data
                     
+                    # Flush and properly close the .tmp file
                     write.flush()
+                    # Explicitly sync the underlying mmap to disk
+                    if hasattr(write, '_mmap'):
+                        write._mmap.flush()
+                    # Close the memmap
+                    if hasattr(write, '_mmap'):
+                        write._mmap.close()
                     del write
-                    self.debug_print(f"✅ Background: Memmap cache file created successfully: {self.mmap_filename}")
                     
-                    write.flush()
-                    del write
-                    self.debug_print(f"✅ Background: Memmap cache file created successfully: {self.mmap_filename}")
+                    # Force file system sync to ensure file is written to disk
+                    try:
+                        import time
+                        time.sleep(0.1)  # Brief pause to ensure file system sync
+                        # Also try to sync the file explicitly if possible
+                        if os.path.exists(tmp_filename):
+                            with open(tmp_filename, 'rb') as f:
+                                f.flush()
+                                os.fsync(f.fileno())
+                    except:
+                        pass  # fsync might not be available on all systems
+                    
+                    # Verify .tmp file exists before renaming
+                    if not os.path.exists(tmp_filename):
+                        self.debug_print(f"❌ Background: ERROR .tmp file does not exist after write: {tmp_filename}")
+                        return
+                    
+                    # Atomically rename .tmp to final filename
+                    try:
+                        os.rename(tmp_filename, volume_specific_mmap_filename)
+                        self.debug_print(f"✅ Background: Memmap cache file created successfully: {volume_specific_mmap_filename}")
+                        # Update self.mmap_filename to the volume-specific one for consistency
+                        self.mmap_filename = volume_specific_mmap_filename
+                    except Exception as e:
+                        self.debug_print(f"❌ Background: ERROR renaming .tmp file to final name: {e}")
+                        # Clean up .tmp file if rename failed
+                        if os.path.exists(tmp_filename):
+                            try:
+                                os.remove(tmp_filename)
+                            except:
+                                pass
                 
             except Exception as e:
                 self.debug_print(f"❌ Background: ERROR creating memmap cache: {e}")
@@ -537,6 +783,19 @@ class ProcessNexus(BaseDataProcessor):
                 if os.path.exists(target_mmap):
                     self.debug_print(f"Memmap cache already exists for {dataset_path}, skipping: {target_mmap}")
                     return
+                
+                # Use .tmp file for atomic write
+                tmp_filename = target_mmap + '.tmp'
+                
+                # Silently clean up any existing .tmp file (incomplete write from previous session)
+                # This is just cleanup - doesn't affect the normal load-from-nxs flow
+                if os.path.exists(tmp_filename):
+                    try:
+                        os.remove(tmp_filename)
+                        # Don't print message - this is expected cleanup, not a user action
+                    except:
+                        pass
+                
                 mmap_dir = os.path.dirname(target_mmap)
                 if not os.access(mmap_dir, os.W_OK):
                     self.debug_print(f"PERMISSION ERROR: No write permission to directory: {mmap_dir}")
@@ -546,7 +805,16 @@ class ProcessNexus(BaseDataProcessor):
                     shape = dset.shape
                     dtype = 'float32' if self.cached_cast_float else str(dset.dtype)
                     self.debug_print(f"🔄 Background: Creating memmap for {dataset_path} -> {target_mmap} shape={shape} dtype={dtype}")
-                    write = np.memmap(target_mmap, dtype=np.float32 if self.cached_cast_float else dset.dtype, shape=shape, mode='w+')
+                    # Create the .tmp file first to ensure it exists
+                    dtype_final = np.float32 if self.cached_cast_float else dset.dtype
+                    element_size = np.dtype(dtype_final).itemsize
+                    file_size = int(np.prod(shape) * element_size)
+                    # Create empty file of correct size
+                    with open(tmp_filename, 'wb') as f:
+                        f.seek(file_size - 1)
+                        f.write(b'\0')
+                    # Now open as memmap for writing
+                    write = np.memmap(tmp_filename, dtype=dtype_final, shape=shape, mode='r+')
                     if len(shape) == 4:
                         for u in range(shape[0]):
                             if u % 10 == 0 or u == shape[0]-1:
@@ -559,8 +827,12 @@ class ProcessNexus(BaseDataProcessor):
                                 self.debug_print(f"❌ Background: ERROR caching slice {u}: {e}")
                                 import traceback
                                 self.debug_print(traceback.format_exc())
-                                if os.path.exists(target_mmap):
-                                    os.remove(target_mmap)
+                                # Clean up .tmp file on error
+                                if os.path.exists(tmp_filename):
+                                    try:
+                                        os.remove(tmp_filename)
+                                    except:
+                                        pass
                                 return
                     elif len(shape) == 3:
                         for u in range(shape[0]):
@@ -573,9 +845,46 @@ class ProcessNexus(BaseDataProcessor):
                         data = dset[:]
                         data = data.astype(np.float32) if self.cached_cast_float else data
                         write[...] = data
+                    
+                    # Flush and properly close the .tmp file
                     write.flush()
+                    # Explicitly sync the underlying mmap to disk
+                    if hasattr(write, '_mmap'):
+                        write._mmap.flush()
+                    # Close the memmap
+                    if hasattr(write, '_mmap'):
+                        write._mmap.close()
                     del write
-                    self.debug_print(f"✅ Background: Memmap created for {dataset_path}")
+                    
+                    # Force file system sync to ensure file is written to disk
+                    try:
+                        import time
+                        time.sleep(0.1)  # Brief pause to ensure file system sync
+                        # Also try to sync the file explicitly if possible
+                        if os.path.exists(tmp_filename):
+                            with open(tmp_filename, 'rb') as f:
+                                f.flush()
+                                os.fsync(f.fileno())
+                    except:
+                        pass  # fsync might not be available on all systems
+                    
+                    # Verify .tmp file exists before renaming
+                    if not os.path.exists(tmp_filename):
+                        self.debug_print(f"❌ Background: ERROR .tmp file does not exist after write: {tmp_filename}")
+                        return
+                    
+                    # Atomically rename .tmp to final filename
+                    try:
+                        os.rename(tmp_filename, target_mmap)
+                        self.debug_print(f"✅ Background: Memmap created for {dataset_path}")
+                    except Exception as e:
+                        self.debug_print(f"❌ Background: ERROR renaming .tmp file to final name: {e}")
+                        # Clean up .tmp file if rename failed
+                        if os.path.exists(tmp_filename):
+                            try:
+                                os.remove(tmp_filename)
+                            except:
+                                pass
             except Exception as e:
                 self.debug_print(f"❌ Background: ERROR creating memmap for {dataset_path}: {e}")
         threading.Thread(target=_create, args=(dataset_path,), daemon=True).start()

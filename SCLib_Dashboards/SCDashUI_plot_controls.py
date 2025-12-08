@@ -108,7 +108,7 @@ def create_range_section(
     )
     
     return column(
-        create_label_div(label, width=200),
+        #create_label_div(label, width=200),
         row(min_input, max_input),
         sizing_mode="stretch_width"
     )
@@ -305,14 +305,14 @@ def create_plot_shape_controls(
     min_size_input = create_text_input(
         title="Min Map Size (px):",
         value=str(min_size),
-        width=150,
+        width=100,
         callback=min_size_callback
     )
     
     max_size_input = create_text_input(
         title="Max Map Size (px):",
         value=str(max_size),
-        width=150,
+        width=100,
         callback=max_size_callback
     )
     
@@ -421,4 +421,73 @@ def create_range_section_with_toggle(
     )
     
     return range_section, toggle
+
+
+def update_range_inputs_safely(
+    min_input: Optional[TextInput],
+    max_input: Optional[TextInput],
+    min_value: float,
+    max_value: float,
+    use_callback: bool = True
+) -> Optional[Callable]:
+    """
+    Safely update range input widgets while preserving their disabled state.
+    
+    This function handles the common pattern of:
+    1. Temporarily enabling disabled inputs
+    2. Updating the values
+    3. Restoring the disabled state
+    
+    Args:
+        min_input: Minimum range input widget (can be None)
+        max_input: Maximum range input widget (can be None)
+        min_value: New minimum value to set
+        max_value: New maximum value to set
+        use_callback: If True, returns a callback function that can be used with
+                     curdoc().add_next_tick_callback(). If False, updates immediately.
+    
+    Returns:
+        If use_callback=True, returns a callable function that performs the update.
+        If use_callback=False, returns None and updates immediately.
+    
+    Example:
+        # Using with callback (recommended for Bokeh):
+        from bokeh.io import curdoc
+        update_func = update_range_inputs_safely(
+            range1_min_input, range1_max_input, new_min, new_max, use_callback=True
+        )
+        curdoc().add_next_tick_callback(update_func)
+        
+        # Immediate update (not recommended for Bokeh):
+        update_range_inputs_safely(
+            range1_min_input, range1_max_input, new_min, new_max, use_callback=False
+        )
+    """
+    def _update():
+        try:
+            if min_input is not None:
+                was_disabled = min_input.disabled
+                if was_disabled:
+                    min_input.disabled = False
+                min_input.value = str(min_value)
+                if was_disabled:
+                    min_input.disabled = True
+            
+            if max_input is not None:
+                was_disabled = max_input.disabled
+                if was_disabled:
+                    max_input.disabled = False
+                max_input.value = str(max_value)
+                if was_disabled:
+                    max_input.disabled = True
+        except Exception as e:
+            print(f"⚠️ WARNING: Failed to update range inputs: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    if use_callback:
+        return _update
+    else:
+        _update()
+        return None
 

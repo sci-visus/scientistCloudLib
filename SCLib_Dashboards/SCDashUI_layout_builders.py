@@ -160,8 +160,9 @@ def create_range_section_layout(
     Returns:
         Column layout
     """
-    items = [create_label_div(label, width=width)]
-    
+    #items = [create_label_div(label, width=width)]
+    items = []
+
     if toggle:
         items.append(toggle)
     

@@ -64,7 +64,7 @@ from SCLib_Dashboards import create_range_section
 # Create a range input section
 range_section = create_range_section(
     label="Map Range:",
-    min_title="Range Min:",
+    min_title="Map Range Min:",
     max_title="Range Max:",
     min_value=0.0,
     max_value=100.0,

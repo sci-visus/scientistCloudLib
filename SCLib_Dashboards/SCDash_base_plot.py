@@ -19,7 +19,7 @@ The class supports:
 
 import numpy as np
 import json
-from typing import Optional, Dict, List, Tuple, Any, Union
+from typing import Optional, Dict, List, Tuple, Any, Union, Callable
 from enum import Enum
 from datetime import datetime
 import copy
@@ -750,4 +750,177 @@ class BasePlot:
         
         # When flipped, Y tick labels become X tick labels
         return self.x_tick_labels
+
+    def update_color_scale(
+        self,
+        bokeh_figure,
+        image_renderer,
+        color_mapper,
+        source,
+        use_log: bool,
+        colorbar: Optional[Any] = None,
+        preserve_crosshairs: Optional[Callable[[], list]] = None,
+        restore_crosshairs: Optional[Callable[[list], None]] = None,
+    ) -> Tuple[Any, Any]:
+        """
+        Update the color scale (linear/log) for an image plot.
+        
+        This method handles switching between LinearColorMapper and LogColorMapper,
+        recreating the image renderer, and preserving crosshairs.
+        
+        Args:
+            bokeh_figure: Bokeh figure object
+            image_renderer: Current image renderer (will be replaced)
+            color_mapper: Current color mapper (will be replaced)
+            source: ColumnDataSource with image data
+            use_log: If True, use LogColorMapper; if False, use LinearColorMapper
+            colorbar: Optional colorbar to update
+            preserve_crosshairs: Optional function that returns list of crosshair renderers to preserve
+            restore_crosshairs: Optional function that takes list of renderers and restores them
+        
+        Returns:
+            Tuple of (new_color_mapper, new_image_renderer)
+        """
+        from bokeh.models import LinearColorMapper, LogColorMapper
+        
+        # Get current data to check for positive values (needed for log scale)
+        current_data = None
+        if 'image' in source.data and len(source.data['image']) > 0:
+            current_data = np.array(source.data["image"][0])
+        
+        # Determine which mapper class to use
+        if use_log:
+            if current_data is not None and current_data.size > 0:
+                positive_data = current_data[current_data > 0]
+                if positive_data.size == 0:
+                    # No positive values, fall back to linear
+                    new_cls = LinearColorMapper
+                    low = color_mapper.low if color_mapper.low > 0 else 0.001
+                    high = color_mapper.high if color_mapper.high > 0 else 1.0
+                else:
+                    new_cls = LogColorMapper
+                    # Use current ranges if positive, otherwise use data-based ranges
+                    low = color_mapper.low if color_mapper.low > 0 else max(np.min(positive_data), 0.001)
+                    high = color_mapper.high if color_mapper.high > 0 else np.max(positive_data)
+            else:
+                # No data available, use linear as fallback
+                new_cls = LinearColorMapper
+                low = color_mapper.low if color_mapper.low > 0 else 0.001
+                high = color_mapper.high if color_mapper.high > 0 else 1.0
+        else:
+            new_cls = LinearColorMapper
+            # Preserve current ranges
+            low = color_mapper.low
+            high = color_mapper.high
+        
+        # Create new color mapper
+        new_color_mapper = new_cls(palette=color_mapper.palette, low=low, high=high)
+        
+        # Preserve crosshair renderers if function provided
+        crosshair_renderers = []
+        if preserve_crosshairs is not None:
+            try:
+                crosshair_renderers = preserve_crosshairs()
+            except:
+                pass
+        
+        # Remove the old image renderer
+        if image_renderer is not None and image_renderer in bokeh_figure.renderers:
+            bokeh_figure.renderers.remove(image_renderer)
+        
+        # Re-add the renderer with the new color mapper
+        new_image_renderer = bokeh_figure.image(
+            "image", source=source, x="x", y="y", dw="dw", dh="dh", color_mapper=new_color_mapper,
+        )
+        
+        # Restore crosshair renderers if function provided
+        if restore_crosshairs is not None and crosshair_renderers:
+            try:
+                restore_crosshairs(crosshair_renderers)
+            except:
+                pass
+        
+        # Update colorbar if provided
+        if colorbar is not None:
+            colorbar.color_mapper = new_color_mapper
+        
+        # Update plot's color_scale state
+        self.color_scale = ColorScale.LOG if use_log else ColorScale.LINEAR
+        
+        return new_color_mapper, new_image_renderer
+
+    def update_palette(
+        self,
+        bokeh_figure,
+        image_renderer,
+        color_mapper,
+        source,
+        new_palette: str,
+        colorbar: Optional[Any] = None,
+        preserve_crosshairs: Optional[Callable[[], list]] = None,
+        restore_crosshairs: Optional[Callable[[list], None]] = None,
+    ) -> Tuple[Any, Any]:
+        """
+        Update the color palette for an image plot.
+        
+        This method recreates the color mapper with a new palette and updates
+        the image renderer, preserving crosshairs.
+        
+        Args:
+            bokeh_figure: Bokeh figure object
+            image_renderer: Current image renderer (will be replaced)
+            color_mapper: Current color mapper (will be replaced)
+            source: ColumnDataSource with image data
+            new_palette: New palette name (e.g., "Viridis256", "Plasma256")
+            colorbar: Optional colorbar to update
+            preserve_crosshairs: Optional function that returns list of crosshair renderers to preserve
+            restore_crosshairs: Optional function that takes list of renderers and restores them
+        
+        Returns:
+            Tuple of (new_color_mapper, new_image_renderer)
+        """
+        from bokeh.models import LinearColorMapper, LogColorMapper
+        
+        # Determine mapper class (preserve linear/log)
+        mapper_cls = type(color_mapper)
+        
+        # Create new color mapper with new palette
+        new_color_mapper = mapper_cls(
+            palette=new_palette,
+            low=color_mapper.low,
+            high=color_mapper.high
+        )
+        
+        # Preserve crosshair renderers if function provided
+        crosshair_renderers = []
+        if preserve_crosshairs is not None:
+            try:
+                crosshair_renderers = preserve_crosshairs()
+            except:
+                pass
+        
+        # Remove the old image renderer
+        if image_renderer is not None and image_renderer in bokeh_figure.renderers:
+            bokeh_figure.renderers.remove(image_renderer)
+        
+        # Re-add the renderer with the new color mapper
+        new_image_renderer = bokeh_figure.image(
+            "image", source=source, x="x", y="y", dw="dw", dh="dh", color_mapper=new_color_mapper,
+        )
+        
+        # Restore crosshair renderers if function provided
+        if restore_crosshairs is not None and crosshair_renderers:
+            try:
+                restore_crosshairs(crosshair_renderers)
+            except:
+                pass
+        
+        # Update colorbar if provided
+        if colorbar is not None:
+            colorbar.color_mapper = new_color_mapper
+        
+        # Update plot's palette state
+        self.palette = new_palette
+        
+        return new_color_mapper, new_image_renderer
 

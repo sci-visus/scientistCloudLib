@@ -56,6 +56,11 @@ from .SCDash_data_session import (
     create_data_plot_session_from_state,
 )
 
+from .SCDash_4d_session import (
+    FourDDashboardSession,
+    create_4d_session_from_process_4dnexus,
+)
+
 from .SCData_base_processor import (
     BaseDataProcessor,
     DatasetCategory,
@@ -102,6 +107,7 @@ from .SCDashUI_plot_controls import (
     create_plot_shape_controls,
     create_range_mode_toggle,
     create_range_section_with_toggle,
+    update_range_inputs_safely,
     DEFAULT_PALETTES,
 )
 
@@ -162,6 +168,8 @@ __all__ = [
     "create_session_from_state",
     "DataPlotSession",
     "create_data_plot_session_from_state",
+    "FourDDashboardSession",
+    "create_4d_session_from_process_4dnexus",
     # Data processors
     "BaseDataProcessor",
     "DatasetCategory",

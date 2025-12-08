@@ -89,6 +89,7 @@ def sync_plot_to_color_scale_selector(
 def sync_color_scale_selector_to_plot(
     plot: BasePlot,
     selector: Any,
+    update_callback: Optional[Callable[[bool], None]] = None,
 ) -> None:
     """
     Update plot color scale from selector widget.
@@ -96,11 +97,22 @@ def sync_color_scale_selector_to_plot(
     Args:
         plot: BasePlot instance
         selector: RadioButtonGroup widget for color scale
+        update_callback: Optional callback function(use_log: bool) to update Bokeh color mapper
     """
+    use_log = selector.active == 1
     if selector.active == 0:
         plot.set_color_scale(ColorScale.LINEAR)
     elif selector.active == 1:
         plot.set_color_scale(ColorScale.LOG)
+    
+    # Call the update callback to actually change the Bokeh color mapper
+    if update_callback is not None:
+        try:
+            update_callback(use_log)
+        except Exception as e:
+            print(f"⚠️ Error updating color scale: {e}")
+            import traceback
+            traceback.print_exc()
 
 
 def sync_plot_to_palette_selector(
@@ -280,6 +292,7 @@ def create_sync_callbacks(
     max_input: Any,
     color_scale_selector: Any,
     palette_selector: Any,
+    color_scale_update_callback: Optional[Callable[[bool], None]] = None,
 ) -> Dict[str, Callable]:
     """
     Create callback functions that sync UI widgets to plot state.
@@ -290,6 +303,7 @@ def create_sync_callbacks(
         max_input: Range maximum input widget
         color_scale_selector: Color scale selector widget
         palette_selector: Palette selector widget
+        color_scale_update_callback: Optional callback function(use_log: bool) to update Bokeh color mapper
         
     Returns:
         Dictionary of callback functions
@@ -298,7 +312,8 @@ def create_sync_callbacks(
         sync_range_inputs_to_plot(plot, min_input, max_input)
     
     def on_color_scale_change(attr, old, new):
-        sync_color_scale_selector_to_plot(plot, color_scale_selector)
+        # Pass the update callback to actually change the Bokeh color mapper
+        sync_color_scale_selector_to_plot(plot, color_scale_selector, update_callback=color_scale_update_callback)
     
     def on_palette_change(attr, old, new):
         sync_palette_selector_to_plot(plot, palette_selector)
