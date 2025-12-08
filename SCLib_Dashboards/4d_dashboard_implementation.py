@@ -26,6 +26,91 @@ try:
             except:
                 return Path(os.getcwd())
     
+    # Helper function to get a writable sessions directory with fallback
+    def get_writable_sessions_dir(preferred_path=None):
+        """Get a writable sessions directory, with fallback options if preferred path is not writable.
+        
+        Args:
+            preferred_path: Preferred directory path (usually dataset directory). If None, uses get_save_dir_path().
+        
+        Returns:
+            Path to a writable sessions directory
+        """
+        import os
+        from pathlib import Path
+        
+        # Try preferred path first (dataset directory)
+        if preferred_path is None:
+            preferred_path = get_save_dir_path()
+        
+        preferred_sessions_dir = Path(preferred_path) / "sessions"
+        
+        # Check if we can write to preferred location
+        try:
+            # Try to create the directory
+            preferred_sessions_dir.mkdir(parents=True, exist_ok=True)
+            # Test write permissions by trying to create a test file
+            test_file = preferred_sessions_dir / ".write_test"
+            try:
+                test_file.write_text("test")
+                test_file.unlink()  # Delete test file
+                # Success! Return preferred location
+                return preferred_sessions_dir
+            except (PermissionError, OSError):
+                # Can't write here, try fallback
+                pass
+        except (PermissionError, OSError):
+            # Can't create directory, try fallback
+            pass
+        
+        # Fallback 1: Try server-wide sessions directory
+        # Use environment variable if set, otherwise use /tmp/scientistcloud_sessions
+        server_sessions_base = os.getenv('SC_SESSIONS_DIR', '/tmp/scientistcloud_sessions')
+        try:
+            server_sessions_dir = Path(server_sessions_base)
+            server_sessions_dir.mkdir(parents=True, exist_ok=True)
+            # Test write
+            test_file = server_sessions_dir / ".write_test"
+            test_file.write_text("test")
+            test_file.unlink()
+            # Create dataset-specific subdirectory
+            dataset_id = preferred_path.name if preferred_path else "default"
+            dataset_sessions_dir = server_sessions_dir / dataset_id
+            dataset_sessions_dir.mkdir(parents=True, exist_ok=True)
+            print(f"⚠️ Using fallback sessions directory: {dataset_sessions_dir}")
+            return dataset_sessions_dir
+        except (PermissionError, OSError) as e:
+            print(f"⚠️ Could not use server sessions directory: {e}")
+        
+        # Fallback 2: Try user's home directory
+        try:
+            home_dir = Path.home()
+            user_sessions_dir = home_dir / ".scientistcloud_sessions"
+            user_sessions_dir.mkdir(parents=True, exist_ok=True)
+            # Test write
+            test_file = user_sessions_dir / ".write_test"
+            test_file.write_text("test")
+            test_file.unlink()
+            # Create dataset-specific subdirectory
+            dataset_id = preferred_path.name if preferred_path else "default"
+            dataset_sessions_dir = user_sessions_dir / dataset_id
+            dataset_sessions_dir.mkdir(parents=True, exist_ok=True)
+            print(f"⚠️ Using user home sessions directory: {dataset_sessions_dir}")
+            return dataset_sessions_dir
+        except (PermissionError, OSError) as e:
+            print(f"⚠️ Could not use user home sessions directory: {e}")
+        
+        # Fallback 3: Use current working directory
+        try:
+            cwd_sessions_dir = Path(os.getcwd()) / "sessions"
+            cwd_sessions_dir.mkdir(parents=True, exist_ok=True)
+            print(f"⚠️ Using current directory for sessions: {cwd_sessions_dir}")
+            return cwd_sessions_dir
+        except (PermissionError, OSError) as e:
+            print(f"⚠️ Could not use current directory: {e}")
+            # Last resort: raise error
+            raise PermissionError(f"Could not find a writable location for sessions. Tried: {preferred_sessions_dir}, {server_sessions_base}, {home_dir}/.scientistcloud_sessions, {os.getcwd()}/sessions")
+    
     DATA_IS_LOCAL = False  # Will be determined dynamically if needed
 
     # Check if we're loading from tmp_dashboard and set flag early to prevent range callbacks from firing
@@ -2483,7 +2568,27 @@ try:
             # Determine sessions directory (use nexus file directory)
             save_dir_path = get_save_dir_path()
 
-            sessions_dir = save_dir_path / "sessions"
+            # Get writable sessions directory (with fallback if needed)
+            # For loading, we need to check both preferred and fallback locations
+            sessions_dir = None
+            preferred_sessions_dir = save_dir_path / "sessions"
+            
+            # Try preferred location first
+            if preferred_sessions_dir.exists() and preferred_sessions_dir.is_dir():
+                try:
+                    # Test if readable
+                    list(preferred_sessions_dir.iterdir())
+                    sessions_dir = preferred_sessions_dir
+                except (PermissionError, OSError):
+                    pass
+            
+            # If preferred doesn't work, try fallback
+            if sessions_dir is None:
+                try:
+                    sessions_dir = get_writable_sessions_dir(save_dir_path)
+                except PermissionError:
+                    load_session_select.options = ["No sessions directory found"]
+                    return []
 
             if not sessions_dir.exists():
                 load_session_select.options = ["No sessions directory found"]
@@ -4397,9 +4502,8 @@ try:
                 # Use default sessions directory (nexus file directory)
                 save_dir_path = get_save_dir_path()
 
-            # Create sessions subdirectory
-            sessions_dir = save_dir_path / "sessions"
-            sessions_dir.mkdir(parents=True, exist_ok=True)
+            # Get writable sessions directory (with fallback if needed)
+            sessions_dir = get_writable_sessions_dir(save_dir_path)
             filepath = sessions_dir / filename
 
             # Save session - include_data=False means NO data arrays, only UI settings
@@ -4622,9 +4726,8 @@ try:
             # Determine save directory (use nexus file directory)
             save_dir_path = get_save_dir_path()
 
-            # Create sessions subdirectory
-            sessions_dir = save_dir_path / "sessions"
-            sessions_dir.mkdir(parents=True, exist_ok=True)
+            # Get writable sessions directory (with fallback if needed)
+            sessions_dir = get_writable_sessions_dir(save_dir_path)
 
             # Generate filename
             filename = f"changelog_{session.session_id}.json"
