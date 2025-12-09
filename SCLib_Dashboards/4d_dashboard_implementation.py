@@ -49,18 +49,28 @@ try:
         try:
             # Try to create the directory
             preferred_sessions_dir.mkdir(parents=True, exist_ok=True)
+            # Try to set permissions if we can (may not work if we're not owner)
+            try:
+                os.chmod(preferred_sessions_dir, 0o755)
+            except (PermissionError, OSError):
+                pass  # Can't change permissions, but might still be able to write
+            
             # Test write permissions by trying to create a test file
             test_file = preferred_sessions_dir / ".write_test"
             try:
                 test_file.write_text("test")
                 test_file.unlink()  # Delete test file
                 # Success! Return preferred location
+                print(f"✅ Using preferred sessions directory: {preferred_sessions_dir}")
                 return preferred_sessions_dir
-            except (PermissionError, OSError):
+            except (PermissionError, OSError) as e:
                 # Can't write here, try fallback
+                print(f"⚠️ Cannot write to preferred sessions directory {preferred_sessions_dir}: {e}")
+                print(f"   Directory exists: {preferred_sessions_dir.exists()}, is_dir: {preferred_sessions_dir.is_dir()}")
                 pass
-        except (PermissionError, OSError):
+        except (PermissionError, OSError) as e:
             # Can't create directory, try fallback
+            print(f"⚠️ Cannot create preferred sessions directory {preferred_sessions_dir}: {e}")
             pass
         
         # Fallback 1: Try server-wide sessions directory
@@ -2559,7 +2569,7 @@ try:
 
     # Function to refresh session list for loading
     def refresh_session_list():
-        """Refresh the list of available sessions."""
+        """Refresh the list of available sessions from both preferred and fallback locations."""
         try:
             from pathlib import Path
             import os
@@ -2568,54 +2578,62 @@ try:
             # Determine sessions directory (use nexus file directory)
             save_dir_path = get_save_dir_path()
 
-            # Get writable sessions directory (with fallback if needed)
-            # For loading, we need to check both preferred and fallback locations
-            sessions_dir = None
+            # Check BOTH preferred and fallback locations to find all sessions
             preferred_sessions_dir = save_dir_path / "sessions"
+            all_session_files = []
             
-            # Try preferred location first
+            # Check preferred location first
             if preferred_sessions_dir.exists() and preferred_sessions_dir.is_dir():
                 try:
                     # Test if readable
                     list(preferred_sessions_dir.iterdir())
-                    sessions_dir = preferred_sessions_dir
-                except (PermissionError, OSError):
-                    pass
+                    # Find session files in preferred location
+                    preferred_files = list(preferred_sessions_dir.glob("session_*.json"))
+                    all_session_files.extend(preferred_files)
+                    print(f"✅ Found {len(preferred_files)} session(s) in preferred location: {preferred_sessions_dir}")
+                except (PermissionError, OSError) as e:
+                    print(f"⚠️ Cannot read preferred sessions directory: {e}")
             
-            # If preferred doesn't work, try fallback
-            if sessions_dir is None:
-                try:
-                    sessions_dir = get_writable_sessions_dir(save_dir_path)
-                except PermissionError:
-                    load_session_select.options = ["No sessions directory found"]
-                    return []
+            # Also check fallback location (where sessions might actually be saved)
+            try:
+                fallback_sessions_dir = get_writable_sessions_dir(save_dir_path)
+                if fallback_sessions_dir.exists() and fallback_sessions_dir.is_dir():
+                    # Find session files in fallback location
+                    fallback_files = list(fallback_sessions_dir.glob("session_*.json"))
+                    # Only add files that aren't already in the list (avoid duplicates)
+                    for f in fallback_files:
+                        if f not in all_session_files:
+                            all_session_files.append(f)
+                    if fallback_files:
+                        print(f"✅ Found {len(fallback_files)} session(s) in fallback location: {fallback_sessions_dir}")
+            except (PermissionError, OSError) as e:
+                print(f"⚠️ Cannot access fallback sessions directory: {e}")
 
-            if not sessions_dir.exists():
-                load_session_select.options = ["No sessions directory found"]
-                return []
-
-            # Find all session files
-            session_files = sorted(sessions_dir.glob("session_*.json"), key=os.path.getmtime, reverse=True)
-
-            if not session_files:
+            # If no session files found in either location
+            if not all_session_files:
                 load_session_select.options = ["No session files found"]
                 return []
+
+            # Sort all session files by modification time (newest first)
+            all_session_files = sorted(all_session_files, key=os.path.getmtime, reverse=True)
 
             # Create display names with timestamps
             session_choices = []
             session_files_list = []
-            for filepath in session_files:
+            for filepath in all_session_files:
                 try:
                     mtime = os.path.getmtime(filepath)
                     timestamp_str = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
                     display_name = f"{filepath.name} ({timestamp_str})"
                     session_choices.append(display_name)
                     session_files_list.append(filepath)
-                except:
+                except Exception as e:
+                    print(f"⚠️ Error processing session file {filepath}: {e}")
                     session_choices.append(filepath.name)
                     session_files_list.append(filepath)
 
             load_session_select.options = session_choices
+            print(f"✅ Total sessions found: {len(session_files_list)}")
             return session_files_list
         except Exception as e:
             print(f"Error refreshing session list: {e}")
