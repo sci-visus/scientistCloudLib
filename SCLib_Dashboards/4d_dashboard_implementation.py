@@ -4791,16 +4791,54 @@ try:
                 status_div.text = f"<span style='color: red;'>{error_msg}</span>"
                 return
             
+            # Store the function and other needed variables that will be captured by the closure
+            # Use a list to ensure the variable is mutable and captured correctly
+            dashboard_creator_ref = [create_dashboard_func]
+            process_instance = self.process_4dnexus
+            session_file_name = filepath.name
+            
             loading = column(create_div(text="<h3>Loading dashboard with session...</h3>"))
             _curdoc().clear()
             _curdoc().add_root(loading)
 
             def _build_and_swap():
+                """Rebuild the dashboard with the loaded session data."""
                 try:
-                    full_dashboard = create_dashboard_func(self.process_4dnexus)
+                    # Use the captured variable from outer scope
+                    dashboard_creator = dashboard_creator_ref[0]
+                    if dashboard_creator is None:
+                        # Fallback: try to import it again
+                        try:
+                            import importlib.util
+                            import os
+                            # Try Docker path first
+                            dashboard_file = '/app/4d_dashboardLite.py'
+                            if not os.path.exists(dashboard_file):
+                                # Try other paths
+                                current_file = os.path.abspath(__file__)
+                                current_dir = os.path.dirname(current_file)
+                                base_dir = os.path.dirname(os.path.dirname(current_dir))
+                                dashboard_file = os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py')
+                            
+                            if os.path.exists(dashboard_file):
+                                spec = importlib.util.spec_from_file_location("dashboard_lite", dashboard_file)
+                                dashboard_module = importlib.util.module_from_spec(spec)
+                                spec.loader.exec_module(dashboard_module)
+                                dashboard_creator = getattr(dashboard_module, 'create_dashboard', None)
+                                if dashboard_creator:
+                                    dashboard_creator_ref[0] = dashboard_creator  # Update the reference
+                                else:
+                                    raise NameError("create_dashboard function not found in module")
+                            else:
+                                raise FileNotFoundError(f"Dashboard file not found: {dashboard_file}")
+                        except Exception as import_error:
+                            raise NameError(f"create_dashboard function not available: {import_error}")
+                    
+                    # Call the dashboard creator function
+                    full_dashboard = dashboard_creator(process_instance)
                     _curdoc().clear()
                     _curdoc().add_root(full_dashboard)
-                    print(f"✅ Dashboard recreated with session data from {filepath.name}")
+                    print(f"✅ Dashboard recreated with session data from {session_file_name}")
                 except Exception as e:
                     import traceback
                     error_msg = f"Error recreating dashboard: {str(e)}"
