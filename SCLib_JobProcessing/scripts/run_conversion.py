@@ -114,9 +114,16 @@ class DatasetConverter:
             elif self.sensor_type in ("4D_NEXUS", "NEXUS"):
                 # 4D Nexus conversion is disabled - using memmap instead of IDX conversion
                 # Do nothing - files stay in upload directory, no conversion needed
+                # The dashboard will read .nxs files directly from the upload directory (base_dir)
+                logger.info("=" * 80)
                 logger.info("4D NEXUS conversion is disabled - using memmap, no conversion needed")
+                logger.info("Files remain in upload directory - dashboard reads directly from there")
+                logger.info(f"Input directory (upload): {self.input_dir}")
+                logger.info(f"Output directory (converted): {self.output_dir} (will remain empty)")
+                logger.info("Dashboard will find .nxs files in base_dir (upload directory)")
+                logger.info("4D NEXUS conversion completed successfully (no-op)")
+                logger.info("=" * 80)
                 # No-op: files remain in input directory, no copying or conversion
-                pass
             elif self.sensor_type == "HDF5":
                 self._convert_hdf5()
             elif self.sensor_type == "NETCDF":
@@ -126,8 +133,15 @@ class DatasetConverter:
             
             # Fix permissions
             self._fix_permissions(self.input_dir)
-            self._fix_permissions(self.output_dir)
-            safe_chmod(self.output_dir, 0o777)
+            # For 4D_NEXUS, output_dir may be empty (no conversion), but still ensure it exists
+            if self.sensor_type not in ("4D_NEXUS", "NEXUS"):
+                # Only fix permissions on output_dir if we actually converted files there
+                self._fix_permissions(self.output_dir)
+                safe_chmod(self.output_dir, 0o777)
+            else:
+                # For 4D_NEXUS, just ensure output_dir exists (may be checked by other processes)
+                self.output_dir.mkdir(parents=True, exist_ok=True)
+                safe_chmod(self.output_dir, 0o777)
             
             # Upload to AWS if requested
             if self.upload_to_aws:
