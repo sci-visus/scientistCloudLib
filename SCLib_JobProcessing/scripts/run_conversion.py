@@ -112,10 +112,11 @@ class DatasetConverter:
             elif self.sensor_type == "TIFF_RGB":
                 self._convert_tiff_rgb()
             elif self.sensor_type in ("4D_NEXUS", "NEXUS"):
-                # 4D Nexus conversion is currently disabled
-                # Just copy files to output directory without conversion
-                logger.info("4D NEXUS conversion is disabled - copying files only")
-                self._copy_files_only()
+                # 4D Nexus conversion is disabled - using memmap instead of IDX conversion
+                # Do nothing - files stay in upload directory, no conversion needed
+                logger.info("4D NEXUS conversion is disabled - using memmap, no conversion needed")
+                # No-op: files remain in input directory, no copying or conversion
+                pass
             elif self.sensor_type == "HDF5":
                 self._convert_hdf5()
             elif self.sensor_type == "NETCDF":

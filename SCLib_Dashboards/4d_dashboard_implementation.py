@@ -2540,6 +2540,80 @@ try:
         if map_plot.palette != color_mapper1.palette:
             color_mapper1.palette = map_plot.palette
         
+        # Sync Plot1 range mode toggle label and active state
+        try:
+            if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
+                if map_plot.range_mode == RangeMode.USER_SPECIFIED:
+                    range1_mode_toggle.label = "User Select Enabled"
+                    range1_mode_toggle.active = True
+                else:
+                    range1_mode_toggle.label = "Dynamic Enabled"
+                    range1_mode_toggle.active = False
+        except:
+            pass
+        
+        # Sync Plot1B range mode toggle if it exists
+        try:
+            if 'range1b_mode_toggle' in locals() and range1b_mode_toggle is not None and map_plot_b is not None:
+                if map_plot_b.range_mode == RangeMode.USER_SPECIFIED:
+                    range1b_mode_toggle.label = "User Select Enabled"
+                    range1b_mode_toggle.active = True
+                else:
+                    range1b_mode_toggle.label = "Dynamic Enabled"
+                    range1b_mode_toggle.active = False
+        except:
+            pass
+        
+        # Sync Plot2 range mode toggle if it exists
+        try:
+            if 'range2_mode_toggle' in locals() and range2_mode_toggle is not None:
+                # For Plot2, check probe_2d_plot or probe_1d_plot range_mode
+                plot2_range_mode = None
+                if probe_2d_plot is not None and hasattr(probe_2d_plot, 'range_mode'):
+                    plot2_range_mode = probe_2d_plot.range_mode
+                elif probe_1d_plot is not None and hasattr(probe_1d_plot, 'range_mode'):
+                    plot2_range_mode = probe_1d_plot.range_mode
+                
+                if plot2_range_mode == RangeMode.USER_SPECIFIED:
+                    range2_mode_toggle.label = "User Select Enabled"
+                    range2_mode_toggle.active = True
+                else:
+                    range2_mode_toggle.label = "Dynamic Enabled"
+                    range2_mode_toggle.active = False
+        except:
+            pass
+        
+        # Sync Plot2B range mode toggle if it exists
+        try:
+            if 'range2b_mode_toggle' in locals() and range2b_mode_toggle is not None:
+                # For Plot2B, check probe_2d_plot_b or probe_1d_plot_b range_mode
+                plot2b_range_mode = None
+                if probe_2d_plot_b is not None and hasattr(probe_2d_plot_b, 'range_mode'):
+                    plot2b_range_mode = probe_2d_plot_b.range_mode
+                elif probe_1d_plot_b is not None and hasattr(probe_1d_plot_b, 'range_mode'):
+                    plot2b_range_mode = probe_1d_plot_b.range_mode
+                
+                if plot2b_range_mode == RangeMode.USER_SPECIFIED:
+                    range2b_mode_toggle.label = "User Select Enabled"
+                    range2b_mode_toggle.active = True
+                else:
+                    range2b_mode_toggle.label = "Dynamic Enabled"
+                    range2b_mode_toggle.active = False
+        except:
+            pass
+        
+        # Sync Plot3 range mode toggle if it exists (Plot3 uses map_plot for state)
+        try:
+            if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
+                if map_plot.range_mode == RangeMode.USER_SPECIFIED:
+                    range3_mode_toggle.label = "User Select Enabled"
+                    range3_mode_toggle.active = True
+                else:
+                    range3_mode_toggle.label = "Dynamic Enabled"
+                    range3_mode_toggle.active = False
+        except:
+            pass
+        
         # Restore slider positions from session metadata
         # Use flag to prevent state saves during restoration
         _skip_slider_state_save["value"] = True
@@ -2872,7 +2946,7 @@ try:
             range1_max_input.disabled = False
             # Update toggle label to "User Specified"
             if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
-                range1_mode_toggle.label = "User Specified Enabled"
+                range1_mode_toggle.label = "User Select Enabled"
         else:  # Toggle is inactive = Dynamic mode
             map_plot.range_mode = RangeMode.DYNAMIC
             range1_min_input.disabled = True
@@ -2891,7 +2965,7 @@ try:
         curdoc().add_next_tick_callback(save_state_async)
 
     # Set initial label based on range mode
-    plot1_initial_label = "User Specified Enabled" if map_plot.range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+    plot1_initial_label = "User Select Enabled" if map_plot.range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
     range1_section, range1_mode_toggle = create_range_section_with_toggle(
         label="Plot1 Range:",
         min_title="Plot 1 Range Min:",
@@ -4122,7 +4196,7 @@ try:
                 range1b_max_input.disabled = False
                 # Update toggle label to "User Specified"
                 if 'range1b_mode_toggle' in locals() and range1b_mode_toggle is not None:
-                    range1b_mode_toggle.label = "User Specified Enabled"
+                    range1b_mode_toggle.label = "User Select Enabled"
             else:  # Toggle is inactive = Dynamic mode
                 map_plot_b.range_mode = RangeMode.DYNAMIC
                 range1b_min_input.disabled = True
@@ -4132,7 +4206,7 @@ try:
                     range1b_mode_toggle.label = "Dynamic Enabled"
 
         # Set initial label based on range mode
-        plot1b_initial_label = "User Specified Enabled" if map_plot_b.range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+        plot1b_initial_label = "User Select Enabled" if map_plot_b.range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
         range1b_section, range1b_mode_toggle = create_range_section_with_toggle(
             label="Plot1B Range:",
             min_title="Plot 1B Range Min:",
@@ -4228,7 +4302,7 @@ try:
             range2_max_input.disabled = False
             # Update toggle label to "User Specified"
             if 'range2_mode_toggle' in locals() and range2_mode_toggle is not None:
-                range2_mode_toggle.label = "User Specified Enabled"
+                range2_mode_toggle.label = "User Select Enabled"
         else:  # Toggle is inactive = Dynamic mode
             range2_min_input.disabled = True
             range2_max_input.disabled = True
@@ -4238,6 +4312,14 @@ try:
             # Recompute range from current data
             update_plot2_range_dynamic()
 
+    # Determine Plot2 initial range mode and label
+    plot2_initial_range_mode = RangeMode.DYNAMIC  # Default
+    if probe_2d_plot is not None and hasattr(probe_2d_plot, 'range_mode'):
+        plot2_initial_range_mode = probe_2d_plot.range_mode
+    elif probe_1d_plot is not None and hasattr(probe_1d_plot, 'range_mode'):
+        plot2_initial_range_mode = probe_1d_plot.range_mode
+    plot2_initial_label = "User Select Enabled" if plot2_initial_range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+    
     range2_section, range2_mode_toggle = create_range_section_with_toggle(
         label="Plot2 Range:",
         min_title="Plot2 Range Min:",
@@ -4245,8 +4327,8 @@ try:
         min_value=probe_min_val,
         max_value=probe_max_val,
         width=120,
-        toggle_label="Dynamic Enabled",  # Default to Dynamic mode
-        toggle_active=False,  # Default to Dynamic (False = Dynamic, True = User Specified)
+        toggle_label=plot2_initial_label,
+        toggle_active=(plot2_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
         toggle_callback=on_plot2_range_mode_change,
         min_callback=on_range2_change,
         max_callback=on_range2_change,
@@ -4323,7 +4405,7 @@ try:
                 range2b_max_input.disabled = False
                 # Update toggle label to "User Specified"
                 if 'range2b_mode_toggle' in locals() and range2b_mode_toggle is not None:
-                    range2b_mode_toggle.label = "User Specified Enabled"
+                    range2b_mode_toggle.label = "User Select Enabled"
             else:  # Toggle is inactive = Dynamic mode
                 range2b_min_input.disabled = True
                 range2b_max_input.disabled = True
@@ -4414,6 +4496,14 @@ try:
                         except:
                             pass
 
+        # Determine Plot2B initial range mode and label
+        plot2b_initial_range_mode = RangeMode.DYNAMIC  # Default
+        if probe_2d_plot_b is not None and hasattr(probe_2d_plot_b, 'range_mode'):
+            plot2b_initial_range_mode = probe_2d_plot_b.range_mode
+        elif probe_1d_plot_b is not None and hasattr(probe_1d_plot_b, 'range_mode'):
+            plot2b_initial_range_mode = probe_1d_plot_b.range_mode
+        plot2b_initial_label = "User Select Enabled" if plot2b_initial_range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+        
         range2b_section, range2b_mode_toggle = create_range_section_with_toggle(
             label="Plot2B Range:",
             min_title="Plot2B Range Min:",
@@ -4421,8 +4511,8 @@ try:
             min_value=plot2b_min_val,
             max_value=plot2b_max_val,
             width=120,
-            toggle_label="Dynamic Enabled",  # Default to Dynamic mode
-            toggle_active=False,  # Default to Dynamic (False = Dynamic, True = User Specified)
+            toggle_label=plot2b_initial_label,
+            toggle_active=(plot2b_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
             toggle_callback=on_plot2b_range_mode_change,
             min_callback=on_range2b_change,
             max_callback=on_range2b_change,
@@ -4494,14 +4584,18 @@ try:
             range3_max_input.disabled = False
             # Update toggle label to "User Specified"
             if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
-                range3_mode_toggle.label = "User Specified Enabled"
+                range3_mode_toggle.label = "User Select Enabled"
         else:  # Toggle is inactive = Dynamic mode
             range3_min_input.disabled = True
             range3_max_input.disabled = True
             # Update toggle label to "Dynamic"
             if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
-                range3_mode_toggle.label = "Dynamic Enabled "
+                range3_mode_toggle.label = "Dynamic Enabled"
 
+    # Determine Plot3 initial range mode and label (Plot3 uses map_plot for state)
+    plot3_initial_range_mode = map_plot.range_mode if map_plot is not None else RangeMode.DYNAMIC
+    plot3_initial_label = "User Select Enabled" if plot3_initial_range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+    
     range3_section, range3_mode_toggle = create_range_section_with_toggle(
         label="Plot3 Range:",
         min_title="Plot3 Range Min:",
@@ -4509,8 +4603,8 @@ try:
         min_value=plot3_min_val,
         max_value=plot3_max_val,
         width=120,
-        toggle_label="Dynamic Enabled",  # Default to Dynamic mode
-        toggle_active=False,  # Default to Dynamic (False = Dynamic, True = User Specified)
+        toggle_label=plot3_initial_label,
+        toggle_active=(plot3_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
         toggle_callback=on_plot3_range_mode_change,
         min_callback=on_range3_change,
         max_callback=on_range3_change,
