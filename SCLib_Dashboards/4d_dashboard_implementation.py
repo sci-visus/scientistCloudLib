@@ -4710,13 +4710,94 @@ try:
 
             # Recreate the dashboard with restored dataset paths (same approach as tmp_dashboard)
             from bokeh.io import curdoc as _curdoc
+            import importlib.util
+            import os
+            import sys
+            import inspect
+            
+            # Import create_dashboard from the main dashboard file
+            # Similar to how create_tmp_dashboard is imported in 4d_dashboard_builder.py
+            create_dashboard_func = None
+            try:
+                # Try to find 4d_dashboardLite.py by looking at the call stack or file paths
+                dashboard_file = None
+                possible_paths = []
+                
+                # Method 1: Look in the call stack for the file that called us
+                try:
+                    frame = inspect.currentframe()
+                    # Go up the stack to find the calling file
+                    while frame:
+                        frame = frame.f_back
+                        if frame is None:
+                            break
+                        filename = frame.f_code.co_filename
+                        if '4d_dashboardLite.py' in filename:
+                            dashboard_file = filename
+                            print(f"✅ Found dashboard file from call stack: {dashboard_file}")
+                            break
+                except:
+                    pass
+                
+                # Method 2: Try relative paths from current file location
+                if dashboard_file is None or not os.path.exists(dashboard_file):
+                    current_file = os.path.abspath(__file__)
+                    current_dir = os.path.dirname(current_file)
+                    
+                    # From SCLib_Dashboards to dashboards
+                    base_dir = os.path.dirname(os.path.dirname(current_dir))  # Go up to scientistCloudLib
+                    possible_paths = [
+                        os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                        os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                        os.path.join('/app', '4d_dashboardLite.py'),  # Docker path
+                    ]
+                    
+                    for path in possible_paths:
+                        if os.path.exists(path):
+                            dashboard_file = path
+                            print(f"✅ Found dashboard file at: {dashboard_file}")
+                            break
+                
+                # Method 3: Try current working directory
+                if dashboard_file is None or not os.path.exists(dashboard_file):
+                    try:
+                        cwd = os.getcwd()
+                        cwd_path = os.path.join(cwd, '4d_dashboardLite.py')
+                        if os.path.exists(cwd_path):
+                            dashboard_file = cwd_path
+                            print(f"✅ Found dashboard file in CWD: {dashboard_file}")
+                    except:
+                        pass
+                
+                if dashboard_file and os.path.exists(dashboard_file):
+                    spec = importlib.util.spec_from_file_location("dashboard_lite", dashboard_file)
+                    dashboard_module = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(dashboard_module)
+                    create_dashboard_func = getattr(dashboard_module, 'create_dashboard', None)
+                    if create_dashboard_func:
+                        print(f"✅ Successfully imported create_dashboard from {dashboard_file}")
+                    else:
+                        print(f"⚠️ create_dashboard function not found in {dashboard_file}")
+                else:
+                    print(f"⚠️ Could not find 4d_dashboardLite.py. Tried: {possible_paths}")
+            except Exception as e:
+                import traceback
+                print(f"⚠️ Error importing create_dashboard: {e}")
+                traceback.print_exc()
+            
+            if create_dashboard_func is None:
+                error_msg = "Could not import create_dashboard function. Cannot recreate dashboard."
+                print(f"❌ {error_msg}")
+                status_div.text = f"<span style='color: red;'>{error_msg}</span>"
+                return
+            
             loading = column(create_div(text="<h3>Loading dashboard with session...</h3>"))
             _curdoc().clear()
             _curdoc().add_root(loading)
 
             def _build_and_swap():
                 try:
-                    full_dashboard = create_dashboard(self.process_4dnexus)
+                    full_dashboard = create_dashboard_func(self.process_4dnexus)
                     _curdoc().clear()
                     _curdoc().add_root(full_dashboard)
                     print(f"✅ Dashboard recreated with session data from {filepath.name}")
