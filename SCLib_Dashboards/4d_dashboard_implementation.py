@@ -1863,6 +1863,11 @@ try:
             # Load Plot1B dataset
             single_dataset_b = self.process_4dnexus.load_dataset_by_path(self.process_4dnexus.plot1b_single_dataset_picked)
             if single_dataset_b is not None:
+                # Convert h5py.Dataset to numpy array if needed (h5py.Dataset doesn't have .flatten())
+                import h5py
+                if isinstance(single_dataset_b, h5py.Dataset):
+                    single_dataset_b = np.array(single_dataset_b)
+                
                 # Flatten if needed and reshape
                 if single_dataset_b.ndim > 1:
                     single_dataset_b_flat = single_dataset_b.flatten()
