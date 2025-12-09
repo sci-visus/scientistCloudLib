@@ -464,3 +464,4 @@ def reset_plot_to_original_data(
             print(f"  ⚠️ Error resetting plot: {e}")
             import traceback
             traceback.print_exc()
+

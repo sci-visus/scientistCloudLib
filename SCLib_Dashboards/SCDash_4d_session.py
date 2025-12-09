@@ -242,3 +242,4 @@ def create_4d_session_from_process_4dnexus(process_4dnexus, user_email: Optional
         probe_y_coords_picked_b=getattr(process_4dnexus, 'probe_y_coords_picked_b', None),
         user_email=user_email,
     )
+
