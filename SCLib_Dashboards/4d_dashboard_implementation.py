@@ -5,14 +5,37 @@ try:
     
     # Helper function to get save directory path
     def get_save_dir_path():
-        """Get the save directory path based on nexus file location."""
+        """Get the save directory path based on nexus file location or UUID from URL parameters."""
         import os
+        import re
         from pathlib import Path
         try:
             # Use the nexus file directory as the base directory
             nexus_filename = self.process_4dnexus.nexus_filename
-            return Path(os.path.dirname(nexus_filename))
-        except:
+            nexus_dir = Path(os.path.dirname(nexus_filename))
+            
+            # Check if this is a dataset directory (contains UUID pattern in path)
+            # Pattern: /mnt/visus_datasets/upload/{uuid} or /mnt/visus_datasets/converted/{uuid}
+            path_str = str(nexus_dir)
+            if '/mnt/visus_datasets/upload/' in path_str:
+                # Extract UUID from path: /mnt/visus_datasets/upload/{uuid}/...
+                match = re.search(r'/mnt/visus_datasets/upload/([a-f0-9-]{36})', path_str)
+                if match:
+                    uuid = match.group(1)
+                    # Return the upload directory for this UUID (where sessions should be saved)
+                    return Path(f'/mnt/visus_datasets/upload/{uuid}')
+            elif '/mnt/visus_datasets/converted/' in path_str:
+                # Extract UUID from path: /mnt/visus_datasets/converted/{uuid}/...
+                match = re.search(r'/mnt/visus_datasets/converted/([a-f0-9-]{36})', path_str)
+                if match:
+                    uuid = match.group(1)
+                    # Return the upload directory for this UUID (where sessions should be saved)
+                    return Path(f'/mnt/visus_datasets/upload/{uuid}')
+            
+            # If no UUID pattern found, return the nexus file directory
+            return nexus_dir
+        except Exception as e:
+            print(f"⚠️ Error getting save dir from nexus_filename: {e}")
             # Fallback: try environment variable or default
             try:
                 DOMAIN_NAME = os.getenv('DOMAIN_NAME', '')
@@ -21,8 +44,25 @@ try:
                     local_base_dir = "/Users/amygooch/GIT/SCI/DATA/waxs/pil11/"
                     return Path(local_base_dir)
                 else:
-                    nexus_filename = self.process_4dnexus.nexus_filename
-                    return Path(os.path.dirname(nexus_filename))
+                    # Try to get from nexus_filename again
+                    try:
+                        nexus_filename = self.process_4dnexus.nexus_filename
+                        nexus_dir = Path(os.path.dirname(nexus_filename))
+                        # Check for UUID pattern
+                        path_str = str(nexus_dir)
+                        if '/mnt/visus_datasets/upload/' in path_str:
+                            match = re.search(r'/mnt/visus_datasets/upload/([a-f0-9-]{36})', path_str)
+                            if match:
+                                uuid = match.group(1)
+                                return Path(f'/mnt/visus_datasets/upload/{uuid}')
+                        elif '/mnt/visus_datasets/converted/' in path_str:
+                            match = re.search(r'/mnt/visus_datasets/converted/([a-f0-9-]{36})', path_str)
+                            if match:
+                                uuid = match.group(1)
+                                return Path(f'/mnt/visus_datasets/upload/{uuid}')
+                        return nexus_dir
+                    except:
+                        return Path(os.getcwd())
             except:
                 return Path(os.getcwd())
     
@@ -2577,9 +2617,11 @@ try:
 
             # Determine sessions directory (use nexus file directory)
             save_dir_path = get_save_dir_path()
+            print(f"🔍 DEBUG refresh_session_list: save_dir_path = {save_dir_path}")
 
             # Check BOTH preferred and fallback locations to find all sessions
             preferred_sessions_dir = save_dir_path / "sessions"
+            print(f"🔍 DEBUG refresh_session_list: preferred_sessions_dir = {preferred_sessions_dir}")
             all_session_files = []
             
             # Check preferred location first
