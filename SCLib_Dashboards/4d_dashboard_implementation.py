@@ -4739,18 +4739,26 @@ try:
                 except:
                     pass
                 
-                # Method 2: Try relative paths from current file location
+                # Method 2: Try relative paths - don't use __file__ since code is executed via exec()
                 if dashboard_file is None or not os.path.exists(dashboard_file):
-                    current_file = os.path.abspath(__file__)
-                    current_dir = os.path.dirname(current_file)
-                    
-                    # From SCLib_Dashboards to dashboards
-                    base_dir = os.path.dirname(os.path.dirname(current_dir))  # Go up to scientistCloudLib
+                    # Try Docker path first (most common in production)
                     possible_paths = [
-                        os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
-                        os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
                         os.path.join('/app', '4d_dashboardLite.py'),  # Docker path
                     ]
+                    
+                    # Try to get current file location if __file__ is available
+                    try:
+                        current_file = os.path.abspath(__file__)
+                        current_dir = os.path.dirname(current_file)
+                        # From SCLib_Dashboards to dashboards
+                        base_dir = os.path.dirname(os.path.dirname(current_dir))  # Go up to scientistCloudLib
+                        possible_paths.extend([
+                            os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                            os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                        ])
+                    except NameError:
+                        # __file__ not available (code executed via exec), skip these paths
+                        pass
                     
                     for path in possible_paths:
                         if os.path.exists(path):
@@ -4811,14 +4819,30 @@ try:
                         try:
                             import importlib.util
                             import os
-                            # Try Docker path first
+                            # Try Docker path first (most common in production)
                             dashboard_file = '/app/4d_dashboardLite.py'
                             if not os.path.exists(dashboard_file):
-                                # Try other paths
-                                current_file = os.path.abspath(__file__)
-                                current_dir = os.path.dirname(current_file)
-                                base_dir = os.path.dirname(os.path.dirname(current_dir))
-                                dashboard_file = os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py')
+                                # Try to get current file location if __file__ is available
+                                try:
+                                    current_file = os.path.abspath(__file__)
+                                    current_dir = os.path.dirname(current_file)
+                                    base_dir = os.path.dirname(os.path.dirname(current_dir))
+                                    dashboard_file = os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py')
+                                except NameError:
+                                    # __file__ not available, try sys.path
+                                    import sys
+                                    for path_dir in sys.path:
+                                        if path_dir and os.path.isdir(path_dir):
+                                            test_path = os.path.join(path_dir, '4d_dashboardLite.py')
+                                            if os.path.exists(test_path):
+                                                dashboard_file = test_path
+                                                break
+                                    # If still not found, try current working directory
+                                    if not os.path.exists(dashboard_file):
+                                        cwd = os.getcwd()
+                                        cwd_path = os.path.join(cwd, '4d_dashboardLite.py')
+                                        if os.path.exists(cwd_path):
+                                            dashboard_file = cwd_path
                             
                             if os.path.exists(dashboard_file):
                                 spec = importlib.util.spec_from_file_location("dashboard_lite", dashboard_file)
