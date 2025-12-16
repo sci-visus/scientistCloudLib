@@ -254,6 +254,9 @@ class SessionStateHistory(StateHistory):
     
     def _restore_session_state(self, state: Dict[str, Any]) -> None:
         """Restore session state."""
+        print(f"🔍 DEBUG: _restore_session_state() called")
+        print(f"🔍 DEBUG: state keys: {list(state.keys())}")
+        
         # Note: This is a simplified restore - in practice, you'd need to
         # reconstruct plots from their state based on plot type
         # For now, we'll update existing plots if they match
@@ -263,8 +266,34 @@ class SessionStateHistory(StateHistory):
             self.session.session_id = session_id
         
         metadata = state.get("metadata", {})
+        print(f"🔍 DEBUG: metadata keys in state: {list(metadata.keys()) if metadata else 'None'}")
+        if 'x_slider_value' in metadata:
+            print(f"🔍 DEBUG: metadata['x_slider_value'] = {metadata['x_slider_value']}")
+        if 'y_slider_value' in metadata:
+            print(f"🔍 DEBUG: metadata['y_slider_value'] = {metadata['y_slider_value']}")
+        
         if metadata:
+            print(f"🔍 DEBUG: Before update, session.metadata keys: {list(self.session.metadata.keys())}")
+            # Check if slider values are in the state's metadata before updating
+            has_x_slider = 'x_slider_value' in metadata
+            has_y_slider = 'y_slider_value' in metadata
+            
             self.session.metadata.update(metadata)
+            
+            # If the state doesn't have slider values, remove them from session.metadata
+            # This handles the case where we're restoring to an initial state that predates slider changes
+            if not has_x_slider and 'x_slider_value' in self.session.metadata:
+                del self.session.metadata['x_slider_value']
+                print(f"🔍 DEBUG: Removed x_slider_value from session.metadata (not in restored state)")
+            if not has_y_slider and 'y_slider_value' in self.session.metadata:
+                del self.session.metadata['y_slider_value']
+                print(f"🔍 DEBUG: Removed y_slider_value from session.metadata (not in restored state)")
+            
+            print(f"🔍 DEBUG: After update, session.metadata keys: {list(self.session.metadata.keys())}")
+            if 'x_slider_value' in self.session.metadata:
+                print(f"🔍 DEBUG: session.metadata['x_slider_value'] = {self.session.metadata['x_slider_value']}")
+            if 'y_slider_value' in self.session.metadata:
+                print(f"🔍 DEBUG: session.metadata['y_slider_value'] = {self.session.metadata['y_slider_value']}")
         
         plots_state = state.get("plots", {})
         for plot_id, plot_state in plots_state.items():

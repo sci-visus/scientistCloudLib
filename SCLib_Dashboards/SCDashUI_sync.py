@@ -259,9 +259,9 @@ def sync_plot_to_crosshair_display(
     """
     if plot.crosshairs_enabled:
         if x_display:
-            x_display.text = f"X: {plot.crosshair_x:.3f}" if plot.crosshair_x is not None else "X: --"
+            x_display.text = f"    X: {plot.crosshair_x:.3f}" if plot.crosshair_x is not None else "    X: --"
         if y_display:
-            y_display.text = f"Y: {plot.crosshair_y:.3f}" if plot.crosshair_y is not None else "Y: --"
+            y_display.text = f"    Y: {plot.crosshair_y:.3f}" if plot.crosshair_y is not None else "    Y: --"
 
 
 def sync_plot_to_selection_display(

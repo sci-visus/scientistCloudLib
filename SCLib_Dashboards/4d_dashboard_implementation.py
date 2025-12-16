@@ -291,6 +291,10 @@ try:
 
     # rect3: For Plot3 selection (X, Y dimensions)
     rect3 = Rectangle(0, 0, volume.shape[0] - 1, volume.shape[1] - 1)
+    # rect3_crosshair: For Plot3 crosshairs (synchronized with Plot1)
+    rect3_crosshair = Rectangle(0, 0, volume.shape[0] - 1, volume.shape[1] - 1)
+    rect3_crosshair.h1line = None  # Initialize crosshair line attributes
+    rect3_crosshair.v1line = None
 
     # Set initial probe positions to middle of the data range
     x_index = volume.shape[0] // 2
@@ -338,7 +342,7 @@ try:
     original_map_y_label = get_last_path_component(map_y_path) or 'Y Position'
     
     # Get Plot1 title from dataset source (use x_coords_picked or y_coords_picked, or preview if available)
-    plot1_title = "Plot1 - Map View"
+    plot1_title = "Projection -- file"
     if map_x_path:
         plot1_title = map_x_path
     elif map_y_path:
@@ -462,18 +466,28 @@ try:
     # Create color mapper (store in variable for later updates)
     color_mapper1 = LinearColorMapper(palette=map_plot.palette, low=map_min_val, high=map_max_val)
 
-    # Calculate initial plot dimensions from map_plot
+    # Calculate initial plot dimensions from map_plot (respects user settings: Square, Custom, Aspect ratio)
     initial_width, initial_height = map_plot.calculate_plot_dimensions()
+    
+    # Add extra width to account for vertical colorbar on the right (typically ~60 pixels)
+    colorbar_width = 60
+    plot_width_with_colorbar = initial_width + colorbar_width
+    plot_height = initial_height
+    
+    # For Plot1, we use match_aspect=True to maintain 1:1 aspect ratio based on coordinate ranges
+    # The map_plot.calculate_plot_dimensions() already respects user settings, so we just add colorbar width
+    print(f"🔍 DEBUG: Plot1 dimensions from map_plot: {initial_width}x{initial_height}, with colorbar={plot_width_with_colorbar}x{plot_height}")
 
     # Create Bokeh figure for Plot1 (use calculated dimensions)
+    # Use match_aspect=True to maintain 1:1 aspect ratio based on coordinate ranges
     plot1 = figure(
         title=plot1_title,
         x_range=(float(np.min(plot1_x_coords)), float(np.max(plot1_x_coords))),
         y_range=(float(np.min(plot1_y_coords)), float(np.max(plot1_y_coords))),
         tools="pan,wheel_zoom,box_zoom,reset,tap",
-        match_aspect=True,
-        width=initial_width,
-        height=initial_height,
+        match_aspect=True,  # Maintain 1:1 aspect ratio based on coordinate ranges
+        width=plot_width_with_colorbar,
+        height=plot_height,
     )
 
     # Set axis labels (already swapped in map_plot if needed)
@@ -537,8 +551,8 @@ try:
 
     # Create colorbar
     try:
-        colorbar1 = ColorBar(color_mapper=color_mapper1, title="Plot1 Intensity", location=(0, 0))
-        plot1.add_layout(colorbar1, "below")
+        colorbar1 = ColorBar(color_mapper=color_mapper1, title="", location=(1, 0))
+        plot1.add_layout(colorbar1, "right")
         print("✅ Plot1 colorbar added successfully")
     except Exception as e:
         print(f"⚠️ ERROR adding Plot1 colorbar: {e}")
@@ -559,6 +573,40 @@ try:
     def draw_cross1():
         """Draw crosshairs on Plot1 based on current slider values."""
         try:
+            # First, clear any old crosshair renderers from Plot1 using stored references
+            if hasattr(rect1, 'h1line') and rect1.h1line is not None:
+                try:
+                    if rect1.h1line in plot1.renderers:
+                        plot1.renderers.remove(rect1.h1line)
+                except (ValueError, AttributeError):
+                    pass
+                rect1.h1line = None
+            
+            if hasattr(rect1, 'v1line') and rect1.v1line is not None:
+                try:
+                    if rect1.v1line in plot1.renderers:
+                        plot1.renderers.remove(rect1.v1line)
+                except (ValueError, AttributeError):
+                    pass
+                rect1.v1line = None
+            
+            # Also clear map_plot's stored renderers if they're on Plot1
+            if hasattr(map_plot, '_crosshair_h_line') and map_plot._crosshair_h_line is not None:
+                try:
+                    if map_plot._crosshair_h_line in plot1.renderers:
+                        plot1.renderers.remove(map_plot._crosshair_h_line)
+                except (ValueError, AttributeError):
+                    pass
+                map_plot._crosshair_h_line = None
+            
+            if hasattr(map_plot, '_crosshair_v_line') and map_plot._crosshair_v_line is not None:
+                try:
+                    if map_plot._crosshair_v_line in plot1.renderers:
+                        plot1.renderers.remove(map_plot._crosshair_v_line)
+                except (ValueError, AttributeError):
+                    pass
+                map_plot._crosshair_v_line = None
+            
             x_index = get_x_index()
             y_index = get_y_index()
 
@@ -590,6 +638,86 @@ try:
                 draw_cross1b()
         except (NameError, AttributeError):
             pass  # Plot1B not created yet
+        
+        # Also update Plot3 crosshairs (synchronized with Plot1)
+        try:
+            draw_cross3()
+        except (NameError, AttributeError):
+            pass  # Plot3 not created yet
+
+    # Function to draw crosshairs on Plot3 (synchronized with Plot1)
+    def draw_cross3():
+        """Draw crosshairs on Plot3 using the same coordinates as Plot1."""
+        try:
+            # Check if plot3 exists (it's defined in the outer scope)
+            try:
+                if plot3 is None:
+                    return
+            except NameError:
+                return  # Plot3 not created yet
+
+            # First, clear any existing crosshair renderers from Plot3 using stored references
+            if hasattr(rect3_crosshair, 'h1line') and rect3_crosshair.h1line is not None:
+                try:
+                    if rect3_crosshair.h1line in plot3.renderers:
+                        plot3.renderers.remove(rect3_crosshair.h1line)
+                except (ValueError, AttributeError):
+                    pass
+                rect3_crosshair.h1line = None
+            
+            if hasattr(rect3_crosshair, 'v1line') and rect3_crosshair.v1line is not None:
+                try:
+                    if rect3_crosshair.v1line in plot3.renderers:
+                        plot3.renderers.remove(rect3_crosshair.v1line)
+                except (ValueError, AttributeError):
+                    pass
+                rect3_crosshair.v1line = None
+
+            x_index = get_x_index()
+            y_index = get_y_index()
+
+            # Get coordinates using flipped coordinate arrays (same as Plot1)
+            if plot3_x_coords is None or plot3_y_coords is None:
+                print("⚠️ WARNING: plot3_x_coords or plot3_y_coords is None in draw_cross3()")
+                return
+
+            # Temporarily store Plot1's crosshair renderers so we don't overwrite them
+            # Save current Plot1 crosshair renderers
+            plot1_h_line_backup = None
+            plot1_v_line_backup = None
+            if hasattr(map_plot, '_crosshair_h_line'):
+                plot1_h_line_backup = map_plot._crosshair_h_line
+            if hasattr(map_plot, '_crosshair_v_line'):
+                plot1_v_line_backup = map_plot._crosshair_v_line
+            
+            # Clear map_plot's crosshair renderer references so it creates new ones for Plot3
+            map_plot._crosshair_h_line = None
+            map_plot._crosshair_v_line = None
+
+            # Use the utility function from the plot library
+            # Plot3 uses the same coordinate system as Plot1, so we can use map_plot
+            draw_crosshairs_from_indices(
+                map_plot=map_plot,
+                bokeh_figure=plot3,
+                x_index=x_index,
+                y_index=y_index,
+                x_coords=plot3_x_coords,
+                y_coords=plot3_y_coords,
+                rect_storage=rect3_crosshair,
+            )
+            
+            # Restore Plot1's crosshair renderer references
+            map_plot._crosshair_h_line = plot1_h_line_backup
+            map_plot._crosshair_v_line = plot1_v_line_backup
+            
+        except NameError:
+            # Plot3 not created yet, silently return
+            return
+        except Exception as e:
+            print(f"⚠️ ERROR in draw_cross3(): {e}")
+            import traceback
+            traceback.print_exc()
+            return
 
     # Function to draw crosshairs on Plot1B (synchronized with Plot1)
     def draw_cross1b():
@@ -686,9 +814,13 @@ try:
             tools="pan,wheel_zoom,box_zoom,reset,tap",
             x_range=(float(np.min(plot2_x_coords_1d)), float(np.max(plot2_x_coords_1d))),
             y_range=(float(np.min(initial_slice_1d)), float(np.max(initial_slice_1d))),
-            width=initial_width,
+            width=plot_width_with_colorbar,
             height=initial_height,
         )
+        # Store base dimensions for Probe Scale control (1D plot)
+        plot2_base_area_width = plot_width_with_colorbar - colorbar_width
+        plot2_base_area_height = initial_height
+        plot2_data_aspect_ratio = None
         plot2.add_tools(box_select_1d)
 
         # Set axis labels and ticks for Plot2 1D (use last component of path)
@@ -854,14 +986,45 @@ try:
         # Get Plot2 title from dataset source (volume_picked)
         plot2_title = getattr(self.process_4dnexus, 'volume_picked', None) or "Plot2 - 2D Probe View"
 
+        # Calculate aspect ratio from Plot2 data shape for 1:1 display
+        # Data shape is (height, width) in numpy: shape[0]=rows (y-axis/height), shape[1]=cols (x-axis/width)
+        if plot2_data is not None and len(plot2_data.shape) == 2:
+            plot2_data_width = plot2_data.shape[1]  # Number of columns (x dimension) - e.g., 487
+            plot2_data_height = plot2_data.shape[0]  # Number of rows (y dimension) - e.g., 407
+            plot2_data_aspect_ratio = plot2_data_width / plot2_data_height  # e.g., 487/407 ≈ 1.197
+            print(f"🔍 DEBUG: Plot2 data aspect ratio from shape: {plot2_data_aspect_ratio:.3f} (width={plot2_data_width}, height={plot2_data_height})")
+            
+            # Calculate plot dimensions to maintain 1:1 aspect ratio based on data shape
+            # Use height as base, then calculate width to maintain aspect ratio
+            base_height = initial_height
+            plot2_area_height = base_height
+            plot2_area_width = int(base_height * plot2_data_aspect_ratio)  # Make width proportional to aspect ratio
+            
+            # Add extra width to account for vertical colorbar on the right
+            plot2_width_with_colorbar = plot2_area_width + colorbar_width
+            plot2_height = plot2_area_height
+            
+            print(f"🔍 DEBUG: Plot2 dimensions: plot_area={plot2_area_width}x{plot2_area_height}, with colorbar={plot2_width_with_colorbar}x{plot2_height}")
+            # Store base dimensions for Probe Scale control
+            plot2_base_area_width = plot2_area_width
+            plot2_base_area_height = plot2_area_height
+        else:
+            # Fallback to original calculation if data shape not available
+            plot2_width_with_colorbar = plot_width_with_colorbar
+            plot2_height = initial_height
+            plot2_data_aspect_ratio = None
+            # Store base dimensions for Probe Scale control (1D plot)
+            plot2_base_area_width = plot_width_with_colorbar - colorbar_width
+            plot2_base_area_height = initial_height
+        
         plot2 = figure(
             title=plot2_title,
             tools="pan,wheel_zoom,box_zoom,reset,tap",
             x_range=(float(np.min(plot2_x_coords)), float(np.max(plot2_x_coords))),
             y_range=(float(np.min(plot2_y_coords)), float(np.max(plot2_y_coords))),
-            match_aspect=True,
-            width=initial_width,
-            height=initial_height,
+            match_aspect=False,  # We maintain aspect ratio manually via dimensions
+            width=plot2_width_with_colorbar,
+            height=plot2_height,
         )
         plot2.add_tools(box_select_2d)
 
@@ -936,8 +1099,8 @@ try:
         image_renderer2 = plot2.image(
             "image", source=source2, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper2
         )
-        colorbar2 = ColorBar(color_mapper=color_mapper2, title="Plot2 Intensity", location=(0, 0))
-        plot2.add_layout(colorbar2, "below")
+        colorbar2 = ColorBar(color_mapper=color_mapper2, title="", location=(1, 0))
+        plot2.add_layout(colorbar2, "right")
         print(f"✅ Plot2 image renderer and colorbar created successfully")
         
         # Store original Plot2 slice data for reset functionality
@@ -1153,14 +1316,42 @@ try:
                     # Create Bokeh figure (smaller size: 300x300)
                     # Add BoxSelectTool for rectangle region selection with persistent=True to keep box visible
                     box_select_2db = BoxSelectTool(dimensions="both", persistent=True)  # Select both x and y ranges, keep box visible
+                    # Calculate aspect ratio from Plot2B data shape for 1:1 display
+                    if plot2b_data is not None and len(plot2b_data.shape) == 2:
+                        plot2b_data_width = plot2b_data.shape[1]  # Number of columns (x dimension)
+                        plot2b_data_height = plot2b_data.shape[0]  # Number of rows (y dimension)
+                        plot2b_data_aspect_ratio = plot2b_data_width / plot2b_data_height
+                        print(f"🔍 DEBUG: Plot2B data aspect ratio from shape: {plot2b_data_aspect_ratio:.3f} (width={plot2b_data_width}, height={plot2b_data_height})")
+                        
+                        # Calculate plot dimensions to maintain 1:1 aspect ratio based on data shape
+                        base_height = initial_height
+                        plot2b_area_height = base_height
+                        plot2b_area_width = int(base_height * plot2b_data_aspect_ratio)
+                        
+                        # Add extra width to account for vertical colorbar on the right
+                        plot2b_width_with_colorbar = plot2b_area_width + colorbar_width
+                        plot2b_height = plot2b_area_height
+                        
+                        print(f"🔍 DEBUG: Plot2B dimensions: plot_area={plot2b_area_width}x{plot2b_area_height}, with colorbar={plot2b_width_with_colorbar}x{plot2b_height}")
+                        # Store base dimensions for Probe Scale control
+                        plot2b_base_area_width = plot2b_area_width
+                        plot2b_base_area_height = plot2b_area_height
+                    else:
+                        # Fallback to original calculation if data shape not available
+                        plot2b_width_with_colorbar = plot_width_with_colorbar
+                        plot2b_height = initial_height
+                        # Store base dimensions for Probe Scale control (1D plot)
+                        plot2b_base_area_width = plot_width_with_colorbar - colorbar_width
+                        plot2b_base_area_height = initial_height
+                    
                     plot2b = figure(
                         title=plot2b_title_2d,
                         tools="pan,wheel_zoom,box_zoom,reset,tap",
                         x_range=(float(np.min(plot2b_x_coords)), float(np.max(plot2b_x_coords))),
                         y_range=(float(np.min(plot2b_y_coords)), float(np.max(plot2b_y_coords))),
-                        match_aspect=True,
-                        width=initial_width,
-                        height=initial_height,
+                        match_aspect=False,  # We maintain aspect ratio manually via dimensions
+                        width=plot2b_width_with_colorbar,
+                        height=plot2b_height,
                     )
                     plot2b.add_tools(box_select_2db)
 
@@ -1239,8 +1430,8 @@ try:
                     image_renderer2b = plot2b.image(
                         "image", source=source2b, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper2b
                     )
-                    colorbar2b = ColorBar(color_mapper=color_mapper2b, title="Plot2B Intensity", location=(0, 0))
-                    plot2b.add_layout(colorbar2b, "below")
+                    colorbar2b = ColorBar(color_mapper=color_mapper2b, title="", location=(1, 0))
+                    plot2b.add_layout(colorbar2b, "right")
                     
                     # Store original Plot2B slice data for reset functionality
                     plot2b_original_data = {
@@ -1281,9 +1472,13 @@ try:
                         tools="pan,wheel_zoom,box_zoom,reset,tap",
                         x_range=(0, len(initial_slice_1d_b)),
                         y_range=(float(np.min(initial_slice_1d_b)), float(np.max(initial_slice_1d_b))),
-                        width=initial_width,
+                        width=plot_width_with_colorbar,
                         height=initial_height,
                     )
+                    # Store base dimensions for Probe Scale control (1D plot)
+                    plot2b_base_area_width = plot_width_with_colorbar - colorbar_width
+                    plot2b_base_area_height = initial_height
+                    plot2b_data_aspect_ratio = None
                     plot2b.add_tools(box_select_1db)
 
                     # Set axis labels and ticks for 1D Plot2B
@@ -1330,15 +1525,18 @@ try:
     # Add BoxSelectTool for rectangle region selection on Plot3 with persistent=True to keep box visible
     box_select_3 = BoxSelectTool(dimensions="both", persistent=True)  # Select both x and y ranges, keep box visible
     # Get Plot3 title from dataset source (volume_picked)
-    plot3_title = getattr(self.process_4dnexus, 'volume_picked', None) or "Plot3 - Additional View"
+    plot3_title = getattr(self.process_4dnexus, 'volume_picked', None) or "Projection -- generated"
     
+    # Plot3 should use the exact same dimensions as Plot1 since they show the same type of data
+    # Use the same dimensions calculated for Plot1 (respects user settings and includes colorbar width)
     plot3 = figure(
         title=plot3_title,
         tools="pan,wheel_zoom,box_zoom,reset,tap",
         x_range=(float(np.min(plot3_x_coords)), float(np.max(plot3_x_coords))),
         y_range=(float(np.min(plot3_y_coords)), float(np.max(plot3_y_coords))),
-        width=initial_width,
-        height=initial_height,
+        match_aspect=True,  # Maintain 1:1 aspect ratio based on coordinate ranges (same as Plot1)
+        width=plot_width_with_colorbar,  # Same width as Plot1 (includes colorbar)
+        height=plot_height,  # Same height as Plot1
     )
     plot3.add_tools(box_select_3)
 
@@ -1369,8 +1567,8 @@ try:
     image_renderer3 = plot3.image(
         "image", source=source3, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper3
     )
-    colorbar3 = ColorBar(color_mapper=color_mapper3, title="Plot3 Intensity", location=(0, 0))
-    plot3.add_layout(colorbar3, "below")
+    colorbar3 = ColorBar(color_mapper=color_mapper3, title="", location=(1, 0))
+    plot3.add_layout(colorbar3, "right")
 
     # Create sliders using SCLib UI (compact with inline labels)
     x_slider = create_slider(
@@ -1391,10 +1589,13 @@ try:
         width=200
     )
     
-    # Create compact slider layout with inline labels (2 rows)
-    slider_x_row = row(create_label_div("X:", width=30), x_slider)
-    slider_y_row = row(create_label_div("Y:", width=30), y_slider)
-    sliders_column = column(slider_x_row, slider_y_row)
+    # Create compact slider layout with inline labels (all on one line)
+    sliders_row = row(
+        create_label_div("X:", width=30), x_slider,
+        create_label_div("Y:", width=30), y_slider,
+        sizing_mode="stretch_width"
+    )
+    sliders_column = column(sliders_row, sizing_mode="stretch_width")
 
     # Function to update Plot2 based on crosshair position
     def show_slice():
@@ -1743,6 +1944,12 @@ try:
     # Slider callbacks to update crosshairs and Plot2
     def on_x_slider_change(attr, old, new):
         try:
+            # Immediately save slider value to session metadata (for undo/redo)
+            try:
+                session.metadata['x_slider_value'] = new
+            except (NameError, AttributeError):
+                pass  # session not available in this scope
+            
             draw_cross1()
             show_slice()  # This already handles Plot2 Dynamic/User Specified range mode
             # Note: Plot1's range should NOT update when slider moves - it uses static map data
@@ -1760,6 +1967,12 @@ try:
 
     def on_y_slider_change(attr, old, new):
         try:
+            # Immediately save slider value to session metadata (for undo/redo)
+            try:
+                session.metadata['y_slider_value'] = new
+            except (NameError, AttributeError):
+                pass  # session not available in this scope
+            
             draw_cross1()
             show_slice()  # This already handles Plot2 Dynamic/User Specified range mode
             # Note: Plot1's range should NOT update when slider moves - it uses static map data
@@ -1811,17 +2024,18 @@ try:
                     x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
                     y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
                 
-                # Slider change handlers will automatically call draw_cross1() and show_slice()
+                # Slider change handlers will automatically call draw_cross1() (which also calls draw_cross3()) and show_slice()
                 # Save state once for both slider changes (after both are updated)
-                debounced_save_state("Plot clicked (both sliders changed)", update_undo_redo=True)
+                debounced_save_state("Plot1 clicked (both sliders changed)", update_undo_redo=True)
             finally:
                 _skip_slider_state_save["value"] = False
 
     # Draw initial crosshairs (skip if loading session - will be drawn by auto_load_session)
+    # Note: draw_cross1() will also call draw_cross3() to synchronize Plot3 crosshairs
     if not _session_loading_state["is_loading"]:
         try:
-            draw_cross1()
-            print("✅ Initial crosshairs drawn successfully")
+            draw_cross1()  # This will also draw crosshairs on Plot3
+            print("✅ Initial crosshairs drawn successfully (Plot1 and Plot3)")
         except Exception as e:
             print(f"⚠️ ERROR drawing initial crosshairs: {e}")
             import traceback
@@ -1914,6 +2128,9 @@ try:
 
                     # Calculate initial plot dimensions from map_plot_b
                     initial_width_b, initial_height_b = map_plot_b.calculate_plot_dimensions()
+                    
+                    # Add extra width to account for vertical colorbar on the right (typically ~60 pixels)
+                    plot_width_b_with_colorbar = initial_width_b + colorbar_width
 
                     # Create Bokeh figure for Plot1B (use calculated dimensions)
                     plot1b = figure(
@@ -1922,7 +2139,7 @@ try:
                         y_range=(float(np.min(plot1b_y_coords)), float(np.max(plot1b_y_coords))),
                         tools="pan,wheel_zoom,box_zoom,reset,tap",
                         match_aspect=True,
-                        width=initial_width_b,
+                        width=plot_width_b_with_colorbar,
                         height=initial_height_b,
                     )
 
@@ -1946,8 +2163,8 @@ try:
                     image_renderer1b = plot1b.image(
                         "image", source=source1b, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper1b
                     )
-                    colorbar1b = ColorBar(color_mapper=color_mapper1b, title="Plot1B Intensity", location=(0, 0))
-                    plot1b.add_layout(colorbar1b, "below")
+                    colorbar1b = ColorBar(color_mapper=color_mapper1b, title="", location=(1, 0))
+                    plot1b.add_layout(colorbar1b, "right")
 
                     # Initialize rect1b for Plot1B crosshairs
                     rect1b = Rectangle(0, 0, volume.shape[0] - 1, volume.shape[1] - 1)
@@ -2049,6 +2266,9 @@ try:
 
                 # Calculate initial plot dimensions from map_plot_b
                 initial_width_b, initial_height_b = map_plot_b.calculate_plot_dimensions()
+                
+                # Add extra width to account for vertical colorbar on the right (typically ~60 pixels)
+                plot_width_b_with_colorbar = initial_width_b + colorbar_width
 
                 # Create Bokeh figure for Plot1B (use calculated dimensions)
                 plot1b = figure(
@@ -2057,7 +2277,7 @@ try:
                     y_range=(float(np.min(plot1b_y_coords)), float(np.max(plot1b_y_coords))),
                     tools="pan,wheel_zoom,box_zoom,reset,tap",
                     match_aspect=True,
-                    width=initial_width_b,
+                    width=plot_width_b_with_colorbar,
                     height=initial_height_b,
                 )
 
@@ -2080,8 +2300,8 @@ try:
                 image_renderer1b = plot1b.image(
                     "image", source=source1b, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper1b
                 )
-                colorbar1b = ColorBar(color_mapper=color_mapper1b, title="Plot1B Intensity", location=(0, 0))
-                plot1b.add_layout(colorbar1b, "below")
+                colorbar1b = ColorBar(color_mapper=color_mapper1b, title="", location=(1, 0))
+                plot1b.add_layout(colorbar1b, "right")
 
                 # Initialize rect1b for Plot1B crosshairs
                 rect1b = Rectangle(0, 0, volume.shape[0] - 1, volume.shape[1] - 1)
@@ -2441,17 +2661,17 @@ try:
     
     # Create buttons to compute Plot3 from Plot2 selections
     compute_plot3_button = create_button(
-        label="Show Plot3 from Plot2a ->",
+        label="Generate Projection", #Show Plot3 from Plot2a ->",
         button_type="success",
-        width=200
+        width=100  # Changed from 200 to 100 to match other widgets (as small as possible)
     )
 
     compute_plot3_from_plot2b_button = None
     if plot2b is not None:
         compute_plot3_from_plot2b_button = create_button(
-            label="Show Plot3 from Plot2b ->",
+            label="Generate Projection", #"Show Plot3 from Plot2b ->",
             button_type="success",
-            width=200
+            width=100  # Changed from 200 to 100 to match other widgets (as small as possible)
         )
 
     # Create undo/redo buttons first (needed for callbacks)
@@ -2498,16 +2718,25 @@ try:
         def do_save():
             if _state_save_state["pending"]:
                 # Save slider positions to session metadata before saving state
+                # Access x_slider and y_slider from closure scope (not locals())
                 try:
-                    if 'x_slider' in locals() and x_slider is not None:
+                    # Try to access sliders from closure - they should be available
+                    if x_slider is not None:
                         session.metadata['x_slider_value'] = x_slider.value
-                    if 'y_slider' in locals() and y_slider is not None:
+                        print(f"🔍 DEBUG: do_save() - Saved x_slider.value = {x_slider.value} to session.metadata")
+                    if y_slider is not None:
                         session.metadata['y_slider_value'] = y_slider.value
-                except:
-                    pass
+                        print(f"🔍 DEBUG: do_save() - Saved y_slider.value = {y_slider.value} to session.metadata")
+                except (NameError, AttributeError) as e:
+                    print(f"⚠️ DEBUG: Error saving slider values to metadata: {e}")
+                    import traceback
+                    traceback.print_exc()
                 
+                print(f"🔍 DEBUG: do_save() - Saving state with description: {description}")
+                print(f"🔍 DEBUG: do_save() - session.metadata keys before save: {list(session.metadata.keys())}")
                 plot1_history.save_state(description)
                 session_history.save_state(description)
+                print(f"✅ DEBUG: do_save() - State saved. History length: {len(session_history.history)}, current_index: {session_history.current_index}")
                 if update_undo_redo:
                     undo_redo_callbacks["update"]()
                 _state_save_state["pending"] = False
@@ -2526,12 +2755,46 @@ try:
     def update_ui_after_state_change():
         """Update UI widgets after state change (undo/redo/load)."""
         sync_plot_to_range_inputs(map_plot, range1_min_input, range1_max_input)
-        # Sync color scale selector (inline with range toggle)
+        # Sync color scale selectors for all plots
         try:
             from SCLib_Dashboards.SCDashUI_sync import sync_plot_to_color_scale_selector
+            # Sync Plot1 color scale selector
             sync_plot_to_color_scale_selector(map_plot, plot1_color_scale_selector)
-        except:
-            pass
+            
+            # Sync Plot2 color scale selector if it exists
+            try:
+                if 'plot2_color_scale_selector' in locals() and plot2_color_scale_selector is not None:
+                    if probe_2d_plot is not None:
+                        sync_plot_to_color_scale_selector(probe_2d_plot, plot2_color_scale_selector)
+                    elif probe_1d_plot is not None:
+                        # For 1D plots, check if y_scale is LogScale
+                        from bokeh.models import LogScale
+                        is_log = isinstance(plot2.y_scale, LogScale) if 'plot2' in locals() and plot2 is not None else False
+                        plot2_color_scale_selector.active = 1 if is_log else 0
+            except Exception as e:
+                print(f"⚠️ DEBUG: Could not sync Plot2 color scale selector: {e}")
+            
+            # Sync Plot2B color scale selector if it exists
+            try:
+                if 'plot2b_color_scale_selector' in locals() and plot2b_color_scale_selector is not None:
+                    if probe_2d_plot_b is not None:
+                        sync_plot_to_color_scale_selector(probe_2d_plot_b, plot2b_color_scale_selector)
+                    elif probe_1d_plot_b is not None:
+                        # For 1D plots, check if y_scale is LogScale
+                        from bokeh.models import LogScale
+                        is_log = isinstance(plot2b.y_scale, LogScale) if 'plot2b' in locals() and plot2b is not None else False
+                        plot2b_color_scale_selector.active = 1 if is_log else 0
+            except Exception as e:
+                print(f"⚠️ DEBUG: Could not sync Plot2B color scale selector: {e}")
+            
+            # Sync Plot3 color scale selector (Plot3 uses map_plot for state)
+            try:
+                if 'plot3_color_scale_selector' in locals() and plot3_color_scale_selector is not None:
+                    sync_plot_to_color_scale_selector(map_plot, plot3_color_scale_selector)
+            except Exception as e:
+                print(f"⚠️ DEBUG: Could not sync Plot3 color scale selector: {e}")
+        except Exception as e:
+            print(f"⚠️ DEBUG: Error syncing color scale selectors: {e}")
         sync_plot_to_palette_selector(map_plot, palette_selector)
         # Update Bokeh color mapper if needed
         if hasattr(map_plot, 'range_min') and hasattr(map_plot, 'range_max'):
@@ -2544,10 +2807,10 @@ try:
         try:
             if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
                 if map_plot.range_mode == RangeMode.USER_SPECIFIED:
-                    range1_mode_toggle.label = "User Select Enabled"
+                    range1_mode_toggle.label = "Auto=Off"
                     range1_mode_toggle.active = True
                 else:
-                    range1_mode_toggle.label = "Dynamic Enabled"
+                    range1_mode_toggle.label = "Auto=On"
                     range1_mode_toggle.active = False
         except:
             pass
@@ -2556,10 +2819,10 @@ try:
         try:
             if 'range1b_mode_toggle' in locals() and range1b_mode_toggle is not None and map_plot_b is not None:
                 if map_plot_b.range_mode == RangeMode.USER_SPECIFIED:
-                    range1b_mode_toggle.label = "User Select Enabled"
+                    range1b_mode_toggle.label = "Auto=Off"
                     range1b_mode_toggle.active = True
                 else:
-                    range1b_mode_toggle.label = "Dynamic Enabled"
+                    range1b_mode_toggle.label = "Auto=On"
                     range1b_mode_toggle.active = False
         except:
             pass
@@ -2575,10 +2838,10 @@ try:
                     plot2_range_mode = probe_1d_plot.range_mode
                 
                 if plot2_range_mode == RangeMode.USER_SPECIFIED:
-                    range2_mode_toggle.label = "User Select Enabled"
+                    range2_mode_toggle.label = "Auto=Off"
                     range2_mode_toggle.active = True
                 else:
-                    range2_mode_toggle.label = "Dynamic Enabled"
+                    range2_mode_toggle.label = "Auto=On"
                     range2_mode_toggle.active = False
         except:
             pass
@@ -2594,10 +2857,10 @@ try:
                     plot2b_range_mode = probe_1d_plot_b.range_mode
                 
                 if plot2b_range_mode == RangeMode.USER_SPECIFIED:
-                    range2b_mode_toggle.label = "User Select Enabled"
+                    range2b_mode_toggle.label = "Auto=Off"
                     range2b_mode_toggle.active = True
                 else:
-                    range2b_mode_toggle.label = "Dynamic Enabled"
+                    range2b_mode_toggle.label = "Auto=On"
                     range2b_mode_toggle.active = False
         except:
             pass
@@ -2606,39 +2869,121 @@ try:
         try:
             if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
                 if map_plot.range_mode == RangeMode.USER_SPECIFIED:
-                    range3_mode_toggle.label = "User Select Enabled"
+                    range3_mode_toggle.label = "Auto=Off"
                     range3_mode_toggle.active = True
                 else:
-                    range3_mode_toggle.label = "Dynamic Enabled"
+                    range3_mode_toggle.label = "Auto=On"
                     range3_mode_toggle.active = False
         except:
             pass
         
         # Restore slider positions from session metadata
         # Use flag to prevent state saves during restoration
+        print(f"🔍 DEBUG: update_ui_after_state_change() called")
+        print(f"🔍 DEBUG: session.metadata keys: {list(session.metadata.keys())}")
+        
         _skip_slider_state_save["value"] = True
         try:
-            if 'x_slider' in locals() and x_slider is not None and 'y_slider' in locals() and y_slider is not None:
+            # Access sliders from closure scope (not locals())
+            if x_slider is not None and y_slider is not None:
                 # Restore both slider values (handlers will update plots but won't save state)
+                slider_restored = False
                 if 'x_slider_value' in session.metadata:
+                    print(f"🔍 DEBUG: Restoring x_slider.value from {x_slider.value} to {session.metadata['x_slider_value']}")
                     x_slider.value = session.metadata['x_slider_value']
+                    slider_restored = True
+                else:
+                    # No saved value - restore to initial position (middle of range)
+                    initial_x = float(x_slider.start + (x_slider.end - x_slider.start) / 2)
+                    print(f"⚠️ DEBUG: 'x_slider_value' not found in session.metadata - restoring to initial position: {initial_x}")
+                    x_slider.value = initial_x
+                    slider_restored = True
+                    
                 if 'y_slider_value' in session.metadata:
+                    print(f"🔍 DEBUG: Restoring y_slider.value from {y_slider.value} to {session.metadata['y_slider_value']}")
                     y_slider.value = session.metadata['y_slider_value']
-                # Slider change handlers will automatically call show_slice() and draw_cross1()
+                    slider_restored = True
+                else:
+                    # No saved value - restore to initial position (middle of range)
+                    initial_y = float(y_slider.start + (y_slider.end - y_slider.start) / 2)
+                    print(f"⚠️ DEBUG: 'y_slider_value' not found in session.metadata - restoring to initial position: {initial_y}")
+                    y_slider.value = initial_y
+                    slider_restored = True
+                
+                # Explicitly update crosshairs and slice after restoring slider values
+                # This ensures they're updated even if change handlers don't fire
+                # Always update crosshairs/slice if at least one slider was restored, or if we're restoring to initial state
+                if slider_restored:
+                    print(f"✅ DEBUG: Slider values restored, updating crosshairs and slice")
+                    try:
+                        draw_cross1()  # Update crosshairs on Plot1 and Plot3
+                        show_slice()   # Update Plot2 slice
+                        try:
+                            show_slice_b()  # Update Plot2B slice if it exists
+                        except NameError:
+                            pass  # show_slice_b not defined
+                        print(f"✅ DEBUG: Crosshairs and slice updated successfully")
+                    except Exception as e:
+                        print(f"⚠️ Warning: Could not update crosshairs/slice after slider restore: {e}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"⚠️ DEBUG: No slider values to restore - sliders remain at current positions")
+                    # Even if no sliders were restored, update crosshairs/slice to reflect current slider positions
+                    try:
+                        draw_cross1()  # Update crosshairs based on current slider values
+                        show_slice()   # Update Plot2 slice based on current slider values
+                        try:
+                            show_slice_b()  # Update Plot2B slice if it exists
+                        except NameError:
+                            pass
+                        print(f"✅ DEBUG: Crosshairs and slice updated to reflect current slider positions")
+                    except Exception as e:
+                        print(f"⚠️ Warning: Could not update crosshairs/slice: {e}")
+            else:
+                print(f"⚠️ DEBUG: x_slider or y_slider is None or not accessible")
+        except (NameError, AttributeError) as e:
+            print(f"⚠️ Warning: Could not access sliders for restoration: {e}")
+            import traceback
+            traceback.print_exc()
         except Exception as e:
             print(f"⚠️ Warning: Could not restore slider positions: {e}")
+            import traceback
+            traceback.print_exc()
         finally:
             _skip_slider_state_save["value"] = False
 
     # Create custom undo/redo callbacks that also update UI
     def on_undo():
         """Undo callback with UI update."""
+        print(f"🔍 DEBUG: on_undo() called")
+        print(f"🔍 DEBUG: session_history.can_undo() = {session_history.can_undo()}")
+        print(f"🔍 DEBUG: session_history.current_index = {session_history.current_index}")
+        print(f"🔍 DEBUG: session_history.history length = {len(session_history.history)}")
+        
         if session_history.undo():
+            print(f"✅ DEBUG: session_history.undo() returned True")
+            try:
+                print(f"🔍 DEBUG: Current slider values before restore: x={x_slider.value}, y={y_slider.value}")
+            except (NameError, AttributeError):
+                print(f"🔍 DEBUG: Could not access slider values (not in scope)")
+            print(f"🔍 DEBUG: session.metadata keys: {list(session.metadata.keys())}")
+            if 'x_slider_value' in session.metadata:
+                print(f"🔍 DEBUG: session.metadata['x_slider_value'] = {session.metadata['x_slider_value']}")
+            if 'y_slider_value' in session.metadata:
+                print(f"🔍 DEBUG: session.metadata['y_slider_value'] = {session.metadata['y_slider_value']}")
+            
             update_ui_after_state_change()
             undo_redo_callbacks["update"]()
+            try:
+                print(f"✅ DEBUG: After update_ui_after_state_change(), slider values: x={x_slider.value}, y={y_slider.value}")
+            except (NameError, AttributeError):
+                print(f"✅ DEBUG: After update_ui_after_state_change(), could not access slider values")
+            
             if 'status_div' in locals():
                 status_div.text = "Undo successful"
         else:
+            print(f"❌ DEBUG: session_history.undo() returned False")
             if 'status_div' in locals():
                 status_div.text = "Cannot undo - already at initial state"
 
@@ -2669,21 +3014,21 @@ try:
     save_filename_input = create_text_input(
         title="Save Filename:",
         value=get_default_save_filename(),
-        width=350
+        width=200
     )
 
     # Create text input for save directory (optional, defaults to sessions subdirectory)
     save_dir_input = create_text_input(
         title="Save Directory (optional):",
         value="",
-        width=350,
+        width=200,
         placeholder="Leave empty for default sessions directory"
     )
 
     save_session_button = create_button(
         label="Save Session",
         button_type="success",
-        width=150
+        width=120
     )
 
     # Function to refresh session list for loading
@@ -2766,7 +3111,7 @@ try:
         title="Load Session:",
         value="",
         options=["Click 'Refresh' to load sessions"],
-        width=350
+        width=200
     )
 
     # Store session files list (will be updated by refresh)
@@ -2781,7 +3126,7 @@ try:
     refresh_sessions_button = create_button(
         label="Refresh Sessions",
         button_type="default",
-        width=150
+        width=120
     )
 
     def on_refresh_sessions():
@@ -2799,16 +3144,16 @@ try:
     refresh_sessions_button.on_click(on_refresh_sessions)
 
     load_session_button = create_button(
-        label="Load Selected Session",
+        label="Load",
         button_type="primary",
-        width=150
+        width=60
     )
 
     # Create button to go back to dataset selection
     back_to_selection_button = create_button(
         label="Back to Dataset Selection",
         button_type="default",
-        width=200
+        width=150
     )
 
     # Create range inputs using SCLib UI
@@ -2834,7 +3179,7 @@ try:
             # Update toggle label to show "Dynamic" while recalculating
             try:
                 if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
-                    range1_mode_toggle.label = "Dynamic Enabled"
+                    range1_mode_toggle.label = "Auto=On"
             except:
                 pass
 
@@ -2936,6 +3281,23 @@ try:
                     print(f"   current_data.size == 0")
 
     # Create range section with toggle for Plot1
+    # Set initial label based on range mode
+    plot1_initial_label = "Auto=Off" if map_plot.range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+    range1_section, range1_mode_toggle = create_range_section_with_toggle(
+        label="Plot1 Range:",
+        min_title="Min:",
+        max_title="Max:",
+        min_value=map_min_val,
+        max_value=map_max_val,
+        width=100,  # Changed from 120 to 100 to match other widgets
+        toggle_label=plot1_initial_label,
+        toggle_active=(map_plot.range_mode == RangeMode.USER_SPECIFIED),
+        toggle_callback=None,  # Will be set after toggle is created
+        min_callback=on_range_change,
+        max_callback=on_range_change,
+    )
+    
+    # Define callback after toggle is created so we can reference it
     def on_plot1_range_mode_change(attr, old, new):
         """Handle Plot1 range mode toggle (User Specified vs Dynamic)."""
         # Note: toggle_active=True means User Specified, toggle_active=False means Dynamic
@@ -2944,16 +3306,14 @@ try:
             map_plot.range_mode = RangeMode.USER_SPECIFIED
             range1_min_input.disabled = False
             range1_max_input.disabled = False
-            # Update toggle label to "User Specified"
-            if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
-                range1_mode_toggle.label = "User Select Enabled"
+            # Update toggle label to "User selected"
+            range1_mode_toggle.label = "Auto=Off"
         else:  # Toggle is inactive = Dynamic mode
             map_plot.range_mode = RangeMode.DYNAMIC
             range1_min_input.disabled = True
             range1_max_input.disabled = True
             # Update toggle label to "Dynamic"
-            if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
-                range1_mode_toggle.label = "Dynamic Enabled"
+            range1_mode_toggle.label = "Auto=On"
             # Recompute range from current data
             update_plot1_range_dynamic()
         # Save state immediately for mode changes (important state, not frequent)
@@ -2963,22 +3323,9 @@ try:
             session_history.save_state("Range mode changed")
             undo_redo_callbacks["update"]()
         curdoc().add_next_tick_callback(save_state_async)
-
-    # Set initial label based on range mode
-    plot1_initial_label = "User Select Enabled" if map_plot.range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
-    range1_section, range1_mode_toggle = create_range_section_with_toggle(
-        label="Plot1 Range:",
-        min_title="Plot 1 Range Min:",
-        max_title="Range Max:",
-        min_value=map_min_val,
-        max_value=map_max_val,
-        width=120,
-        toggle_label=plot1_initial_label,
-        toggle_active=(map_plot.range_mode == RangeMode.USER_SPECIFIED),
-        toggle_callback=on_plot1_range_mode_change,
-        min_callback=on_range_change,
-        max_callback=on_range_change,
-    )
+    
+    # Attach callback to toggle after it's created
+    range1_mode_toggle.on_change("active", on_plot1_range_mode_change)
 
     # Extract the actual input widgets from the section (they're in a row inside the column)
     # range1_section.children structure: [label_div, row(min_input, max_input)]
@@ -3162,12 +3509,12 @@ try:
     # Now that on_color_scale_change is defined, we can create the selector
     plot1_color_scale_selector = create_color_scale_selector(
         active=0,
-        width=120,
+        width=100,  # Changed from 120 to 100 to match other widgets
         callback=on_color_scale_change
     )
     
     # Add toggle and color scale selector in a row (no label for color scale)
-    range1_section.children.append(row(range1_mode_toggle, plot1_color_scale_selector))
+    range1_section.children.append(row(range1_mode_toggle, plot1_color_scale_selector, spacing=0))
     
     # Sync color scale selector to plot state
     sync_plot_to_color_scale_selector(map_plot, plot1_color_scale_selector)
@@ -3598,18 +3945,124 @@ try:
     # Color scale selector is now inline with range toggle, no separate section needed
     # plot1_color_scale_section is created above when adding to range1_section
 
-    palette_selector = create_palette_selector(
-        value="Viridis256",
-        width=200,
-        callback=on_palette_change
-    )
-    sync_plot_to_palette_selector(map_plot, palette_selector)
-
     palette_section = create_palette_section(
         label="Color Palette:",
         value="Viridis256",
         width=200,
         callback=on_palette_change
+    )
+    
+    # Extract the palette selector from palette_section for syncing
+    # palette_section is a column with [label_div, selector] as children
+    palette_selector = palette_section.children[1] if len(palette_section.children) > 1 else None
+    if palette_selector is not None:
+        sync_plot_to_palette_selector(map_plot, palette_selector)
+
+    # Create Probe Scale control for Plot2 and Plot2b
+    # Initialize base dimensions if not already set (fallback for edge cases)
+    try:
+        _ = plot2_base_area_width  # Check if variable exists
+    except NameError:
+        try:
+            if plot2 is not None:
+                plot2_base_area_width = plot2.width - colorbar_width if hasattr(plot2, 'width') else plot_width_with_colorbar - colorbar_width
+                plot2_base_area_height = plot2.height if hasattr(plot2, 'height') else initial_height
+            else:
+                plot2_base_area_width = plot_width_with_colorbar - colorbar_width
+                plot2_base_area_height = initial_height
+        except:
+            plot2_base_area_width = plot_width_with_colorbar - colorbar_width
+            plot2_base_area_height = initial_height
+    
+    try:
+        _ = plot2b_base_area_width  # Check if variable exists
+    except NameError:
+        try:
+            if plot2b is not None:
+                plot2b_base_area_width = plot2b.width - colorbar_width if hasattr(plot2b, 'width') else plot_width_with_colorbar - colorbar_width
+                plot2b_base_area_height = plot2b.height if hasattr(plot2b, 'height') else initial_height
+            else:
+                plot2b_base_area_width = plot_width_with_colorbar - colorbar_width
+                plot2b_base_area_height = initial_height
+        except:
+            plot2b_base_area_width = plot_width_with_colorbar - colorbar_width
+            plot2b_base_area_height = initial_height
+    
+    # Default probe scale is 100% (1.0)
+    probe_scale_value = 100.0
+    
+    def on_probe_scale_change(attr, old, new):
+        """Handle Probe Scale change - scales Plot2 and Plot2b while preserving aspect ratio."""
+        try:
+            scale_percent = float(new) if new else 100.0
+            scale_factor = scale_percent / 100.0
+            
+            # Scale Plot2
+            if plot2 is not None:
+                try:
+                    # Get base dimensions
+                    base_width = plot2_base_area_width
+                    base_height = plot2_base_area_height
+                    
+                    # Calculate new dimensions preserving aspect ratio
+                    new_width = int(base_width * scale_factor)
+                    new_height = int(base_height * scale_factor)
+                    
+                    # Update plot dimensions (add colorbar width back)
+                    plot2.width = new_width + colorbar_width
+                    plot2.height = new_height
+                    
+                    print(f"🔍 DEBUG: Plot2 scaled to {new_width + colorbar_width}x{new_height} (scale={scale_percent}%)")
+                except Exception as e:
+                    print(f"⚠️ WARNING: Error scaling Plot2: {e}")
+            
+            # Scale Plot2b
+            if plot2b is not None:
+                try:
+                    # Get base dimensions
+                    base_width = plot2b_base_area_width
+                    base_height = plot2b_base_area_height
+                    
+                    # Calculate new dimensions preserving aspect ratio
+                    new_width = int(base_width * scale_factor)
+                    new_height = int(base_height * scale_factor)
+                    
+                    # Update plot dimensions (add colorbar width back)
+                    plot2b.width = new_width + colorbar_width
+                    plot2b.height = new_height
+                    
+                    print(f"🔍 DEBUG: Plot2b scaled to {new_width + colorbar_width}x{new_height} (scale={scale_percent}%)")
+                except Exception as e:
+                    print(f"⚠️ WARNING: Error scaling Plot2b: {e}")
+            
+            # Save state asynchronously
+            from bokeh.io import curdoc
+            def save_state_async():
+                if 'plot2_history' in locals() and plot2_history is not None:
+                    plot2_history.save_state("Probe scale changed")
+                if 'session_history' in locals() and session_history is not None:
+                    session_history.save_state("Probe scale changed")
+                if 'undo_redo_callbacks' in locals() and undo_redo_callbacks:
+                    undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
+        except Exception as e:
+            print(f"⚠️ ERROR in on_probe_scale_change(): {e}")
+            import traceback
+            traceback.print_exc()
+    
+    # Create Probe Scale text input
+    from SCLib_Dashboards.SCDashUI_base_components import create_text_input
+    probe_scale_input = create_text_input(
+        title="Probe Scale (%):",
+        value=str(probe_scale_value),
+        width=100,
+        callback=on_probe_scale_change
+    )
+    
+    # Create Probe Scale section
+    probe_scale_section = column(
+        create_label_div("Probe Scale:", width=200),
+        probe_scale_input,
     )
 
     # Create color scale handlers for Plot2, Plot2B, and Plot3
@@ -3732,6 +4185,14 @@ try:
                         'x': source2.data['x'],
                         'y': source2.data['y']
                     }
+            
+            # Save state immediately for color scale changes (important state, not frequent)
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot2 color scale changed")
+                session_history.save_state("Plot2 color scale changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
         except Exception as e:
             print(f"Error in on_plot2_color_scale_change: {e}")
             import traceback
@@ -3840,6 +4301,14 @@ try:
                         'x': source2b.data['x'],
                         'y': source2b.data['y']
                     }
+            
+            # Save state immediately for color scale changes (important state, not frequent)
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot2B color scale changed")
+                session_history.save_state("Plot2B color scale changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
         except Exception as e:
             print(f"Error in on_plot2b_color_scale_change: {e}")
             import traceback
@@ -3966,6 +4435,14 @@ try:
                     traceback.print_exc()
             else:
                 print(f"⚠️ WARNING: map_plot is None, cannot use update_color_scale() for Plot3")
+            
+            # Save state immediately for color scale changes (important state, not frequent)
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot3 color scale changed")
+                session_history.save_state("Plot3 color scale changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
         except Exception as e:
             print(f"❌ ERROR: Error in on_plot3_color_scale_change: {e}")
             import traceback
@@ -3993,8 +4470,14 @@ try:
             map_plot.plot_shape_mode = PlotShapeMode.ASPECT_RATIO
         # Update plot dimensions
         width, height = map_plot.calculate_plot_dimensions()
-        plot1.width = width
+        # Add colorbar width to total width (Plot1 and Plot3 both have colorbars)
+        width_with_colorbar = width + colorbar_width
+        plot1.width = width_with_colorbar
         plot1.height = height
+        # Plot3 should match Plot1 dimensions
+        if plot3 is not None:
+            plot3.width = width_with_colorbar
+            plot3.height = height
         # Also update Plot1B if it exists
         if plot1b is not None and map_plot_b is not None:
             map_plot_b.plot_shape_mode = map_plot.plot_shape_mode
@@ -4019,8 +4502,14 @@ try:
         try:
             map_plot.plot_width = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
-            plot1.width = width
+            # Add colorbar width to total width (Plot1 and Plot3 both have colorbars)
+            width_with_colorbar = width + colorbar_width
+            plot1.width = width_with_colorbar
             plot1.height = height
+            # Plot3 should match Plot1 dimensions
+            if plot3 is not None:
+                plot3.width = width_with_colorbar
+                plot3.height = height
             # Also update Plot1B if it exists
             if plot1b is not None and map_plot_b is not None:
                 map_plot_b.plot_width = map_plot.plot_width
@@ -4042,8 +4531,14 @@ try:
         try:
             map_plot.plot_height = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
-            plot1.width = width
+            # Add colorbar width to total width (Plot1 and Plot3 both have colorbars)
+            width_with_colorbar = width + colorbar_width
+            plot1.width = width_with_colorbar
             plot1.height = height
+            # Plot3 should match Plot1 dimensions
+            if plot3 is not None:
+                plot3.width = width_with_colorbar
+                plot3.height = height
             # Also update Plot1B if it exists
             if plot1b is not None and map_plot_b is not None:
                 map_plot_b.plot_height = map_plot.plot_height
@@ -4065,8 +4560,14 @@ try:
         try:
             map_plot.plot_scale = float(new)
             width, height = map_plot.calculate_plot_dimensions()
-            plot1.width = width
+            # Add colorbar width to total width (Plot1 and Plot3 both have colorbars)
+            width_with_colorbar = width + colorbar_width
+            plot1.width = width_with_colorbar
             plot1.height = height
+            # Plot3 should match Plot1 dimensions
+            if plot3 is not None:
+                plot3.width = width_with_colorbar
+                plot3.height = height
             # Also update Plot1B if it exists
             if plot1b is not None and map_plot_b is not None:
                 map_plot_b.plot_scale = map_plot.plot_scale
@@ -4088,8 +4589,14 @@ try:
         try:
             map_plot.plot_min_size = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
-            plot1.width = width
+            # Add colorbar width to total width (Plot1 and Plot3 both have colorbars)
+            width_with_colorbar = width + colorbar_width
+            plot1.width = width_with_colorbar
             plot1.height = height
+            # Plot3 should match Plot1 dimensions
+            if plot3 is not None:
+                plot3.width = width_with_colorbar
+                plot3.height = height
             # Also update Plot1B if it exists
             if plot1b is not None and map_plot_b is not None:
                 map_plot_b.plot_min_size = map_plot.plot_min_size
@@ -4111,8 +4618,14 @@ try:
         try:
             map_plot.plot_max_size = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
-            plot1.width = width
+            # Add colorbar width to total width (Plot1 and Plot3 both have colorbars)
+            width_with_colorbar = width + colorbar_width
+            plot1.width = width_with_colorbar
             plot1.height = height
+            # Plot3 should match Plot1 dimensions
+            if plot3 is not None:
+                plot3.width = width_with_colorbar
+                plot3.height = height
             # Also update Plot1B if it exists
             if plot1b is not None and map_plot_b is not None:
                 map_plot_b.plot_max_size = map_plot.plot_max_size
@@ -4163,9 +4676,158 @@ try:
         create_label_div("Plot1 Shape:", width=200),
         plot1_shape_selector,
         plot1_custom_controls,
-        plot1_aspect_controls,
-        plot1_size_limits_controls,
+        # Removed plot1_aspect_controls and plot1_size_limits_controls - not needed with custom map size
     )
+
+    # Plot2 width/height change callbacks
+    def on_plot2_custom_width_change(attr, old, new):
+        """Handle Plot2 custom width change."""
+        try:
+            new_width = int(float(new))
+            # Account for colorbar if Plot2 has one (2D plots have colorbars)
+            if not is_3d_volume and color_mapper2 is not None:
+                # Plot2 has a colorbar, so add colorbar width
+                plot2.width = new_width + colorbar_width
+            else:
+                # Plot2 is 1D, no colorbar
+                plot2.width = new_width
+            # Save state asynchronously
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot2 width changed")
+                session_history.save_state("Plot2 width changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
+        except:
+            pass
+
+    def on_plot2_custom_height_change(attr, old, new):
+        """Handle Plot2 custom height change."""
+        try:
+            new_height = int(float(new))
+            plot2.height = new_height
+            # Save state asynchronously
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot2 height changed")
+                session_history.save_state("Plot2 height changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
+        except:
+            pass
+
+    # Plot2B width/height change callbacks
+    def on_plot2b_custom_width_change(attr, old, new):
+        """Handle Plot2B custom width change."""
+        try:
+            if plot2b is None:
+                return
+            new_width = int(float(new))
+            # Account for colorbar if Plot2B has one (2D plots have colorbars)
+            if plot2b_is_2d and color_mapper2b is not None:
+                # Plot2B has a colorbar, so add colorbar width
+                plot2b.width = new_width + colorbar_width
+            else:
+                # Plot2B is 1D, no colorbar
+                plot2b.width = new_width
+            # Save state asynchronously
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot2B width changed")
+                session_history.save_state("Plot2B width changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
+        except:
+            pass
+
+    def on_plot2b_custom_height_change(attr, old, new):
+        """Handle Plot2B custom height change."""
+        try:
+            if plot2b is None:
+                return
+            new_height = int(float(new))
+            plot2b.height = new_height
+            # Save state asynchronously
+            from bokeh.io import curdoc
+            def save_state_async():
+                plot1_history.save_state("Plot2B height changed")
+                session_history.save_state("Plot2B height changed")
+                undo_redo_callbacks["update"]()
+            curdoc().add_next_tick_callback(save_state_async)
+        except:
+            pass
+
+    # Get initial Plot2 dimensions (accounting for colorbar if present)
+    try:
+        plot2_initial_width = plot2.width
+        plot2_initial_height = plot2.height
+        # Subtract colorbar width if Plot2 has a colorbar (2D plots)
+        if not is_3d_volume and 'colorbar_width' in locals():
+            plot2_initial_width = plot2_initial_width - colorbar_width
+    except (NameError, AttributeError):
+        plot2_initial_width = 400
+        plot2_initial_height = 400
+
+    # Create Plot2 shape controls (simplified - just width/height inputs, no shape mode selector)
+    plot2_custom_width_input = create_text_input(
+        title="Width:",
+        value=str(plot2_initial_width),
+        width=100,
+        callback=on_plot2_custom_width_change
+    )
+
+    plot2_custom_height_input = create_text_input(
+        title="Height:",
+        value=str(plot2_initial_height),
+        width=100,
+        callback=on_plot2_custom_height_change
+    )
+
+    plot2_shape_section = column(
+        create_label_div("Probe 1 Size:", width=200),
+        row(plot2_custom_width_input, plot2_custom_height_input, spacing=5),
+    )
+
+    # Get initial Plot2B dimensions (accounting for colorbar if present)
+    try:
+        if plot2b is not None:
+            plot2b_initial_width = plot2b.width
+            plot2b_initial_height = plot2b.height
+            # Subtract colorbar width if Plot2B has a colorbar (2D plots)
+            if 'plot2b_is_2d' in locals() and plot2b_is_2d and 'colorbar_width' in locals():
+                plot2b_initial_width = plot2b_initial_width - colorbar_width
+        else:
+            plot2b_initial_width = 400
+            plot2b_initial_height = 400
+    except (NameError, AttributeError):
+        plot2b_initial_width = 400
+        plot2b_initial_height = 400
+
+    # Create Plot2B shape controls (simplified - just width/height inputs, no shape mode selector)
+    plot2b_custom_width_input = create_text_input(
+        title="Width:",
+        value=str(plot2b_initial_width),
+        width=100,
+        callback=on_plot2b_custom_width_change
+    )
+
+    plot2b_custom_height_input = create_text_input(
+        title="Height:",
+        value=str(plot2b_initial_height),
+        width=100,
+        callback=on_plot2b_custom_height_change
+    )
+
+    plot2b_shape_section = column(
+        create_label_div("Probe 2 Size:", width=200),
+        row(plot2b_custom_width_input, plot2b_custom_height_input, spacing=5),
+    )
+    # Hide Plot2B shape section if plot2b doesn't exist
+    try:
+        if plot2b is None:
+            plot2b_shape_section.visible = False
+    except NameError:
+        plot2b_shape_section.visible = False
 
     # Create range controls for Plot1B if it exists
     range1b_section = None
@@ -4177,16 +4839,33 @@ try:
                 color_mapper1b.high = map_plot_b.range_max
 
         range1b_min_input, range1b_max_input = create_range_inputs(
-            min_title="Plot 1B Range Min:",
-            max_title="Range Max:",
+            min_title="Min:",
+            max_title="Max:",
             min_value=map1b_min_val,
             max_value=map1b_max_val,
-            width=120,
+            width=100,  # Changed from 120 to 100 to match other widgets
             min_callback=on_range1b_change,
             max_callback=on_range1b_change,
         )
         sync_plot_to_range_inputs(map_plot_b, range1b_min_input, range1b_max_input)
 
+        # Set initial label based on range mode
+        plot1b_initial_label = "Auto=Off" if map_plot_b.range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+        range1b_section, range1b_mode_toggle = create_range_section_with_toggle(
+            label="Plot1B Range:",
+            min_title="Min:",
+            max_title="Max:",
+            min_value=map1b_min_val,
+            max_value=map1b_max_val,
+            width=100,  # Changed from 120 to 100 to match other widgets
+            toggle_label=plot1b_initial_label,
+            toggle_active=(map_plot_b.range_mode == RangeMode.USER_SPECIFIED),
+            toggle_callback=None,  # Will be set after toggle is created
+            min_callback=on_range1b_change,
+            max_callback=on_range1b_change,
+        )
+
+        # Define callback after toggle is created so we can reference it
         def on_plot1b_range_mode_change(attr, old, new):
             """Handle Plot1B range mode toggle."""
             # Note: toggle_active=True means User Specified, toggle_active=False means Dynamic
@@ -4194,33 +4873,18 @@ try:
                 map_plot_b.range_mode = RangeMode.USER_SPECIFIED
                 range1b_min_input.disabled = False
                 range1b_max_input.disabled = False
-                # Update toggle label to "User Specified"
-                if 'range1b_mode_toggle' in locals() and range1b_mode_toggle is not None:
-                    range1b_mode_toggle.label = "User Select Enabled"
+                # Update toggle label to "User selected"
+                range1b_mode_toggle.label = "Auto=Off"
             else:  # Toggle is inactive = Dynamic mode
                 map_plot_b.range_mode = RangeMode.DYNAMIC
                 range1b_min_input.disabled = True
                 range1b_max_input.disabled = True
                 # Update toggle label to "Dynamic"
-                if 'range1b_mode_toggle' in locals() and range1b_mode_toggle is not None:
-                    range1b_mode_toggle.label = "Dynamic Enabled"
-
-        # Set initial label based on range mode
-        plot1b_initial_label = "User Select Enabled" if map_plot_b.range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
-        range1b_section, range1b_mode_toggle = create_range_section_with_toggle(
-            label="Plot1B Range:",
-            min_title="Plot 1B Range Min:",
-            max_title="Range Max:",
-            min_value=map1b_min_val,
-            max_value=map1b_max_val,
-            width=120,
-            toggle_label=plot1b_initial_label,
-            toggle_active=(map_plot_b.range_mode == RangeMode.USER_SPECIFIED),
-            toggle_callback=on_plot1b_range_mode_change,
-            min_callback=on_range1b_change,
-            max_callback=on_range1b_change,
-        )
-
+                range1b_mode_toggle.label = "Auto=On"
+        
+        # Attach callback to toggle after it's created
+        range1b_mode_toggle.on_change("active", on_plot1b_range_mode_change)
+        
         # Add toggle to the section so it's visible
         if range1b_mode_toggle not in range1b_section.children:
             range1b_section.children.append(range1b_mode_toggle)
@@ -4293,43 +4957,24 @@ try:
     range2_min_input = None
     range2_max_input = None
 
-    def on_plot2_range_mode_change(attr, old, new):
-        """Handle Plot2 range mode toggle."""
-        # Note: toggle_active=False means Dynamic mode, toggle_active=True means User Specified
-        # But the callback receives new=True when toggle is active (User Specified), new=False when inactive (Dynamic)
-        if new:  # Toggle is active = User Specified mode
-            range2_min_input.disabled = False
-            range2_max_input.disabled = False
-            # Update toggle label to "User Specified"
-            if 'range2_mode_toggle' in locals() and range2_mode_toggle is not None:
-                range2_mode_toggle.label = "User Select Enabled"
-        else:  # Toggle is inactive = Dynamic mode
-            range2_min_input.disabled = True
-            range2_max_input.disabled = True
-            # Update toggle label to "Dynamic"
-            if 'range2_mode_toggle' in locals() and range2_mode_toggle is not None:
-                range2_mode_toggle.label = "Dynamic Enabled"
-            # Recompute range from current data
-            update_plot2_range_dynamic()
-
     # Determine Plot2 initial range mode and label
     plot2_initial_range_mode = RangeMode.DYNAMIC  # Default
     if probe_2d_plot is not None and hasattr(probe_2d_plot, 'range_mode'):
         plot2_initial_range_mode = probe_2d_plot.range_mode
     elif probe_1d_plot is not None and hasattr(probe_1d_plot, 'range_mode'):
         plot2_initial_range_mode = probe_1d_plot.range_mode
-    plot2_initial_label = "User Select Enabled" if plot2_initial_range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+    plot2_initial_label = "Auto=Off" if plot2_initial_range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
     
     range2_section, range2_mode_toggle = create_range_section_with_toggle(
         label="Plot2 Range:",
-        min_title="Plot2 Range Min:",
-        max_title="Range Max:",
+        min_title="Min:",
+        max_title="Max:",
         min_value=probe_min_val,
         max_value=probe_max_val,
-        width=120,
+        width=100,  # Changed from 120 to 100 to match other widgets
         toggle_label=plot2_initial_label,
         toggle_active=(plot2_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
-        toggle_callback=on_plot2_range_mode_change,
+        toggle_callback=None,  # Will be set after toggle is created
         min_callback=on_range2_change,
         max_callback=on_range2_change,
     )
@@ -4343,16 +4988,37 @@ try:
             print(f"✅ DEBUG: Extracted range2_min_input and range2_max_input from range2_section")
             break
 
+    # Define callback after toggle is created so we can reference it
+    def on_plot2_range_mode_change(attr, old, new):
+        """Handle Plot2 range mode toggle."""
+        # Note: toggle_active=False means Dynamic mode, toggle_active=True means User Specified
+        # But the callback receives new=True when toggle is active (User Specified), new=False when inactive (Dynamic)
+        if new:  # Toggle is active = User Specified mode
+            range2_min_input.disabled = False
+            range2_max_input.disabled = False
+            # Update toggle label to "User selected"
+            range2_mode_toggle.label = "Auto=Off"
+        else:  # Toggle is inactive = Dynamic mode
+            range2_min_input.disabled = True
+            range2_max_input.disabled = True
+            # Update toggle label to "Dynamic"
+            range2_mode_toggle.label = "Auto=On"
+            # Recompute range from current data
+            update_plot2_range_dynamic()
+    
+    # Attach callback to toggle after it's created
+    range2_mode_toggle.on_change("active", on_plot2_range_mode_change)
+
     # Add toggle to the section so it's visible
     # Create color scale selector for Plot2 (no label, inline with toggle)
     plot2_color_scale_selector = create_color_scale_selector(
         active=0,
-        width=120,
+        width=100,  # Changed from 120 to 100 to match other widgets
         callback=on_plot2_color_scale_change
     )
     
     # Add toggle and color scale selector in a row (no label for color scale)
-    range2_section.children.append(row(range2_mode_toggle, plot2_color_scale_selector))
+    range2_section.children.append(row(range2_mode_toggle, plot2_color_scale_selector, spacing=0))
     
     # Sync color scale selector to plot state
     if probe_2d_plot is not None:
@@ -4397,21 +5063,51 @@ try:
         range2b_min_input = None
         range2b_max_input = None
 
+        # Determine Plot2B initial range mode and label
+        plot2b_initial_range_mode = RangeMode.DYNAMIC  # Default
+        if probe_2d_plot_b is not None and hasattr(probe_2d_plot_b, 'range_mode'):
+            plot2b_initial_range_mode = probe_2d_plot_b.range_mode
+        elif probe_1d_plot_b is not None and hasattr(probe_1d_plot_b, 'range_mode'):
+            plot2b_initial_range_mode = probe_1d_plot_b.range_mode
+        plot2b_initial_label = "Auto=Off" if plot2b_initial_range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+        
+        range2b_section, range2b_mode_toggle = create_range_section_with_toggle(
+            label="Plot2B Range:",
+            min_title="Min:",
+            max_title="Max:",
+            min_value=plot2b_min_val,
+            max_value=plot2b_max_val,
+            width=100,  # Changed from 120 to 100 to match other widgets
+            toggle_label=plot2b_initial_label,
+            toggle_active=(plot2b_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
+            toggle_callback=None,  # Will be set after toggle is created
+            min_callback=on_range2b_change,
+            max_callback=on_range2b_change,
+        )
+
+        # Extract the actual input widgets from the section (they're in a row inside the column)
+        for child in range2b_section.children:
+            if hasattr(child, 'children') and len(child.children) == 2:
+                # This is the row containing the two inputs
+                range2b_min_input = child.children[0]  # First input is min
+                range2b_max_input = child.children[1]  # Second input is max
+                print(f"✅ DEBUG: Extracted range2b_min_input and range2b_max_input from range2b_section")
+                break
+
+        # Define callback after toggle is created so we can reference it
         def on_plot2b_range_mode_change(attr, old, new):
             """Handle Plot2B range mode toggle."""
             # Note: toggle_active=True means User Specified, toggle_active=False means Dynamic
             if new:  # Toggle is active = User Specified mode
                 range2b_min_input.disabled = False
                 range2b_max_input.disabled = False
-                # Update toggle label to "User Specified"
-                if 'range2b_mode_toggle' in locals() and range2b_mode_toggle is not None:
-                    range2b_mode_toggle.label = "User Select Enabled"
+                # Update toggle label to "User selected"
+                range2b_mode_toggle.label = "Auto=Off"
             else:  # Toggle is inactive = Dynamic mode
                 range2b_min_input.disabled = True
                 range2b_max_input.disabled = True
                 # Update toggle label to "Dynamic"
-                if 'range2b_mode_toggle' in locals() and range2b_mode_toggle is not None:
-                    range2b_mode_toggle.label = "Dynamic Enabled"
+                range2b_mode_toggle.label = "Auto=On"
                 # Recompute range from current data
                 x_idx = get_x_index()
                 y_idx = get_y_index()
@@ -4495,49 +5191,21 @@ try:
                                     curdoc().add_next_tick_callback(update_func)
                         except:
                             pass
-
-        # Determine Plot2B initial range mode and label
-        plot2b_initial_range_mode = RangeMode.DYNAMIC  # Default
-        if probe_2d_plot_b is not None and hasattr(probe_2d_plot_b, 'range_mode'):
-            plot2b_initial_range_mode = probe_2d_plot_b.range_mode
-        elif probe_1d_plot_b is not None and hasattr(probe_1d_plot_b, 'range_mode'):
-            plot2b_initial_range_mode = probe_1d_plot_b.range_mode
-        plot2b_initial_label = "User Select Enabled" if plot2b_initial_range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
         
-        range2b_section, range2b_mode_toggle = create_range_section_with_toggle(
-            label="Plot2B Range:",
-            min_title="Plot2B Range Min:",
-            max_title="Range Max:",
-            min_value=plot2b_min_val,
-            max_value=plot2b_max_val,
-            width=120,
-            toggle_label=plot2b_initial_label,
-            toggle_active=(plot2b_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
-            toggle_callback=on_plot2b_range_mode_change,
-            min_callback=on_range2b_change,
-            max_callback=on_range2b_change,
-        )
-
-        # Extract the actual input widgets from the section (they're in a row inside the column)
-        for child in range2b_section.children:
-            if hasattr(child, 'children') and len(child.children) == 2:
-                # This is the row containing the two inputs
-                range2b_min_input = child.children[0]  # First input is min
-                range2b_max_input = child.children[1]  # Second input is max
-                print(f"✅ DEBUG: Extracted range2b_min_input and range2b_max_input from range2b_section")
-                break
+        # Attach callback to toggle after it's created
+        range2b_mode_toggle.on_change("active", on_plot2b_range_mode_change)
 
         # Add toggle to the section so it's visible
         # Create color scale selector for Plot2B (no label, inline with toggle)
         plot2b_color_scale_selector = create_color_scale_selector(
             active=0,
-            width=120,
+            width=100,  # Changed from 120 to 100 to match other widgets
             callback=on_plot2b_color_scale_change
         )
         
         # Add toggle and color scale selector in a row (no label for color scale)
         if range2b_mode_toggle not in range2b_section.children:
-            range2b_section.children.append(row(range2b_mode_toggle, plot2b_color_scale_selector))
+            range2b_section.children.append(row(range2b_mode_toggle, plot2b_color_scale_selector, spacing=0))
         
         # Sync color scale selector to plot state
         if probe_2d_plot_b is not None:
@@ -4566,15 +5234,42 @@ try:
             pass
 
     range3_min_input, range3_max_input = create_range_inputs(
-        min_title="Plot3 Range Min:",
-        max_title="Range Max:",
+        min_title="Min:",
+        max_title="Max:",
         min_value=plot3_min_val,
         max_value=plot3_max_val,
-        width=120,
+        width=100,  # Changed from 120 to 100 to match other widgets
         min_callback=on_range3_change,
         max_callback=on_range3_change,
     )
 
+    # Determine Plot3 initial range mode and label (Plot3 uses map_plot for state)
+    plot3_initial_range_mode = map_plot.range_mode if map_plot is not None else RangeMode.DYNAMIC
+    plot3_initial_label = "Auto=Off" if plot3_initial_range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+    
+    range3_section, range3_mode_toggle = create_range_section_with_toggle(
+        label="Plot3 Range:",
+        min_title="Min:",
+        max_title="Max:",
+        min_value=plot3_min_val,
+        max_value=plot3_max_val,
+        width=100,  # Changed from 120 to 100 to match other widgets
+        toggle_label=plot3_initial_label,
+        toggle_active=(plot3_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
+        toggle_callback=None,  # Will be set after toggle is created
+        min_callback=on_range3_change,
+        max_callback=on_range3_change,
+    )
+    
+    # Extract range inputs from the section (they're in a row inside the column)
+    for child in range3_section.children:
+        if hasattr(child, 'children') and len(child.children) == 2:
+            # This is the row containing the two inputs
+            range3_min_input = child.children[0]  # First input is min
+            range3_max_input = child.children[1]  # Second input is max
+            break
+    
+    # Define callback after toggle is created so we can reference it
     def on_plot3_range_mode_change(attr, old, new):
         """Handle Plot3 range mode toggle."""
         # Note: toggle_active=True means User Specified, toggle_active=False means Dynamic
@@ -4582,43 +5277,27 @@ try:
         if new:  # Toggle is active = User Specified mode
             range3_min_input.disabled = False
             range3_max_input.disabled = False
-            # Update toggle label to "User Specified"
-            if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
-                range3_mode_toggle.label = "User Select Enabled"
+            # Update toggle label to "Auto=Off"
+            range3_mode_toggle.label = "Auto=Off"
         else:  # Toggle is inactive = Dynamic mode
             range3_min_input.disabled = True
             range3_max_input.disabled = True
-            # Update toggle label to "Dynamic"
-            if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
-                range3_mode_toggle.label = "Dynamic Enabled"
-
-    # Determine Plot3 initial range mode and label (Plot3 uses map_plot for state)
-    plot3_initial_range_mode = map_plot.range_mode if map_plot is not None else RangeMode.DYNAMIC
-    plot3_initial_label = "User Select Enabled" if plot3_initial_range_mode == RangeMode.USER_SPECIFIED else "Dynamic Enabled"
+            # Update toggle label to "Auto=On"
+            range3_mode_toggle.label = "Auto=On"
     
-    range3_section, range3_mode_toggle = create_range_section_with_toggle(
-        label="Plot3 Range:",
-        min_title="Plot3 Range Min:",
-        max_title="Range Max:",
-        min_value=plot3_min_val,
-        max_value=plot3_max_val,
-        width=120,
-        toggle_label=plot3_initial_label,
-        toggle_active=(plot3_initial_range_mode == RangeMode.USER_SPECIFIED),  # True = User Specified, False = Dynamic
-        toggle_callback=on_plot3_range_mode_change,
-        min_callback=on_range3_change,
-        max_callback=on_range3_change,
-    )
+    # Attach callback to toggle after it's created
+    range3_mode_toggle.on_change("active", on_plot3_range_mode_change)
 
     # Create color scale selector for Plot3 (no label, inline with toggle)
     plot3_color_scale_selector = create_color_scale_selector(
         active=0,
-        width=120,
+        width=100,  # Changed from 120 to 100 to match other widgets
         callback=on_plot3_color_scale_change
     )
     
     # Add toggle and color scale selector in a row (no label for color scale)
-    range3_section.children.append(row(range3_mode_toggle, plot3_color_scale_selector))
+    range3_section.children.append(row(range3_mode_toggle, plot3_color_scale_selector, spacing=0))
+    # Note: Plot3 -> Plot2 computation buttons will be added to range3_section after they're created
     
     # Sync color scale selector to plot state (Plot3 uses map_plot for state)
     sync_plot_to_color_scale_selector(map_plot, plot3_color_scale_selector)
@@ -4831,7 +5510,7 @@ try:
                         if frame is None:
                             break
                         filename = frame.f_code.co_filename
-                        if '4d_dashboardLite.py' in filename:
+                        if '4d_dashboardopt.py' in filename or '4d_dashboardLite.py' in filename:
                             dashboard_file = filename
                             print(f"✅ Found dashboard file from call stack: {dashboard_file}")
                             break
@@ -4842,7 +5521,8 @@ try:
                 if dashboard_file is None or not os.path.exists(dashboard_file):
                     # Try Docker path first (most common in production)
                     possible_paths = [
-                        os.path.join('/app', '4d_dashboardLite.py'),  # Docker path
+                        os.path.join('/app', '4d_dashboardopt.py'),  # Docker path
+                        os.path.join('/app', '4d_dashboardLite.py'),  # Fallback for old name
                     ]
                     
                     # Try to get current file location if __file__ is available
@@ -4852,8 +5532,10 @@ try:
                         # From SCLib_Dashboards to dashboards
                         base_dir = os.path.dirname(os.path.dirname(current_dir))  # Go up to scientistCloudLib
                         possible_paths.extend([
-                            os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
-                            os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                            os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardopt.py'),
+                            os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardopt.py'),
+                            os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),  # Fallback
+                            os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),  # Fallback
                         ])
                     except NameError:
                         # __file__ not available (code executed via exec), skip these paths
@@ -4869,10 +5551,12 @@ try:
                 if dashboard_file is None or not os.path.exists(dashboard_file):
                     try:
                         cwd = os.getcwd()
-                        cwd_path = os.path.join(cwd, '4d_dashboardLite.py')
-                        if os.path.exists(cwd_path):
-                            dashboard_file = cwd_path
-                            print(f"✅ Found dashboard file in CWD: {dashboard_file}")
+                        for filename in ['4d_dashboardopt.py', '4d_dashboardLite.py']:
+                            cwd_path = os.path.join(cwd, filename)
+                            if os.path.exists(cwd_path):
+                                dashboard_file = cwd_path
+                                print(f"✅ Found dashboard file in CWD: {dashboard_file}")
+                                break
                     except:
                         pass
                 
@@ -4886,7 +5570,7 @@ try:
                     else:
                         print(f"⚠️ create_dashboard function not found in {dashboard_file}")
                 else:
-                    print(f"⚠️ Could not find 4d_dashboardLite.py. Tried: {possible_paths}")
+                    print(f"⚠️ Could not find 4d_dashboardopt.py. Tried: {possible_paths}")
             except Exception as e:
                 import traceback
                 print(f"⚠️ Error importing create_dashboard: {e}")
@@ -4919,29 +5603,40 @@ try:
                             import importlib.util
                             import os
                             # Try Docker path first (most common in production)
-                            dashboard_file = '/app/4d_dashboardLite.py'
+                            dashboard_file = '/app/4d_dashboardopt.py'
+                            if not os.path.exists(dashboard_file):
+                                dashboard_file = '/app/4d_dashboardLite.py'  # Fallback for old name
                             if not os.path.exists(dashboard_file):
                                 # Try to get current file location if __file__ is available
                                 try:
                                     current_file = os.path.abspath(__file__)
                                     current_dir = os.path.dirname(current_file)
                                     base_dir = os.path.dirname(os.path.dirname(current_dir))
-                                    dashboard_file = os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py')
+                                    for filename in ['4d_dashboardopt.py', '4d_dashboardLite.py']:
+                                        test_path = os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', filename)
+                                        if os.path.exists(test_path):
+                                            dashboard_file = test_path
+                                            break
                                 except NameError:
                                     # __file__ not available, try sys.path
                                     import sys
                                     for path_dir in sys.path:
                                         if path_dir and os.path.isdir(path_dir):
-                                            test_path = os.path.join(path_dir, '4d_dashboardLite.py')
-                                            if os.path.exists(test_path):
-                                                dashboard_file = test_path
+                                            for filename in ['4d_dashboardopt.py', '4d_dashboardLite.py']:
+                                                test_path = os.path.join(path_dir, filename)
+                                                if os.path.exists(test_path):
+                                                    dashboard_file = test_path
+                                                    break
+                                            if os.path.exists(dashboard_file):
                                                 break
                                     # If still not found, try current working directory
                                     if not os.path.exists(dashboard_file):
                                         cwd = os.getcwd()
-                                        cwd_path = os.path.join(cwd, '4d_dashboardLite.py')
-                                        if os.path.exists(cwd_path):
-                                            dashboard_file = cwd_path
+                                        for filename in ['4d_dashboardopt.py', '4d_dashboardLite.py']:
+                                            cwd_path = os.path.join(cwd, filename)
+                                            if os.path.exists(cwd_path):
+                                                dashboard_file = cwd_path
+                                                break
                             
                             if os.path.exists(dashboard_file):
                                 spec = importlib.util.spec_from_file_location("dashboard_lite", dashboard_file)
@@ -5017,7 +5712,7 @@ try:
     export_log_button = create_button(
         label="Export Change Log",
         button_type="default",
-        width=150
+        width=120
     )
 
     def on_export_log():
@@ -5052,7 +5747,7 @@ try:
     # Create compact save status message (minimal space)
     save_status_div = create_div(
         text="",
-        width=350,
+        width=200,
         styles={
             "font-size": "11px",
             "color": "#28a745",
@@ -5076,7 +5771,8 @@ try:
 
         export_log_button,
         create_label_div("Undo/Redo:", width=200),
-        row(undo_button, redo_button, undo_redo_status),
+        undo_redo_status,
+        row(undo_button, redo_button),
     )
 
     # Create status display
@@ -5092,7 +5788,7 @@ try:
     # Create status display with constrained height to prevent overlap
     status_div = create_div(
         text=status_text,
-        width=400,  # Match tools column width
+        width=260,  # Match tools column width, #was 400
         height=300,  # Set max height
         styles={
             "overflow-y": "auto",
@@ -5106,7 +5802,7 @@ try:
     clear_cache_button = create_button(
         label="Clear Cache & Reload",
         button_type="warning",
-        width=200
+        width=150
     )
 
     def on_clear_cache():
@@ -5220,6 +5916,9 @@ try:
         session_section,
         palette_section,
         plot1_shape_section,
+        plot2_shape_section,  # Plot2 width/height controls
+        plot2b_shape_section,  # Plot2B width/height controls (only shown if plot2b exists)
+        probe_scale_section,  # Probe Scale control for Plot2 and Plot2b
         # Color scale selectors are now inline with range toggles, not in tools_items
     ]
 
@@ -5676,7 +6375,7 @@ try:
 
     # Create buttons to compute Plot2a and Plot2b from Plot3 selection
     compute_plot2a_from_plot3_button = create_button(
-        label="<- Compute Plot2a",
+        label="Recompute Probe1",
         button_type="success",
         width=200
     )
@@ -5684,7 +6383,7 @@ try:
     compute_plot2b_from_plot3_button = None
     if plot2b is not None:
         compute_plot2b_from_plot3_button = create_button(
-            label="<- Compute Plot2b",
+            label="Recompute Probe2",
             button_type="success",
             width=200
         )
@@ -5693,14 +6392,51 @@ try:
     compute_plot2a_from_plot3_button.on_click(lambda: compute_plot2_from_plot3())
     if compute_plot2b_from_plot3_button is not None:
         compute_plot2b_from_plot3_button.on_click(lambda: compute_plot2b_from_plot3())
+    
+    # Add buttons to range3_section (under Linear/Log selector)
+    # Wrap buttons in a row for proper layout
+    if range3_section is not None:
+        button_items = [compute_plot2a_from_plot3_button]
+        if compute_plot2b_from_plot3_button is not None:
+            button_items.append(compute_plot2b_from_plot3_button)
+        range3_section.children.append(row(*button_items, spacing=5))
 
     # Add TapTool to Plot3 for region selection
     tap_tool3 = TapTool()
     plot3.add_tools(tap_tool3)
 
-    # Tap handler for Plot3 to set selection region
+    # Tap handler for Plot3 to update crosshairs and optionally set selection region
     def on_plot3_tap(event):
-        """Handle tap events on Plot3 to set selection region."""
+        """Handle tap events on Plot3 to update crosshair position (synchronized with Plot1) and optionally set selection region."""
+        # First, update crosshairs (same as Plot1)
+        if hasattr(event, 'x') and hasattr(event, 'y'):
+            # Find closest indices in the flipped coordinate arrays (same as Plot1)
+            x_idx = np.argmin(np.abs(plot3_x_coords - event.x))
+            y_idx = np.argmin(np.abs(plot3_y_coords - event.y))
+
+            # Convert back to original coordinate space for sliders
+            # Sliders use original x_coords and y_coords (not flipped)
+            # Temporarily disable state saves to prevent multiple saves
+            _skip_slider_state_save["value"] = True
+            
+            try:
+                # Update both sliders (handlers will update plots but won't save state)
+                if map_plot.needs_flip:
+                    # When flipped: plot3_x_coords is actually y_coords, plot3_y_coords is actually x_coords
+                    x_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
+                    y_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                else:
+                    # Not flipped: plot3_x_coords is x_coords, plot3_y_coords is y_coords
+                    x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                    y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
+                
+                # Slider change handlers will automatically call draw_cross1() (which also calls draw_cross3()) and show_slice()
+                # Save state once for both slider changes (after both are updated)
+                debounced_save_state("Plot3 clicked (both sliders changed)", update_undo_redo=True)
+            finally:
+                _skip_slider_state_save["value"] = False
+        
+        # Also handle selection region if modifier keys are pressed
         x_coord = event.x
         y_coord = event.y
 
@@ -5714,17 +6450,18 @@ try:
         if event.modifiers.get("shift", False):
             # Shift+click: Set min values only
             rect3.set(min_x=x_coord, min_y=y_coord)
+            draw_rect3()
         elif event.modifiers.get("ctrl", False) or event.modifiers.get('meta', False) or event.modifiers.get('cmd', False):
             # Ctrl/Cmd+click: Set max values only
             rect3.set(max_x=x_coord, max_y=y_coord)
-        else:
-            # Regular click: Clear and set both min and max to same value
+            draw_rect3()
+        elif event.modifiers.get("alt", False):
+            # Alt+click: Clear and set both min and max to same value (selection region)
             clear_rect(plot3, rect3)
             rect3.set(min_x=x_coord, min_y=y_coord, max_x=x_coord, max_y=y_coord)
             draw_rect(plot3, rect3, x_coord, x_coord, y_coord, y_coord)
-
-        # Compute Plot2 from Plot3 selection
-        compute_plot2_from_plot3()
+            # Compute Plot2 from Plot3 selection
+            compute_plot2_from_plot3()
 
     # Function to draw rect3 on Plot3
     def draw_rect3():
@@ -5865,7 +6602,11 @@ try:
                 if is_3d_volume:
                     # Update 1D plot
                     source2.data = {"x": x_coords_1d, "y": slice}
-                    # Bokeh 3.x automatically detects data changes, no need for change.emit()
+                    # Explicitly trigger change event to ensure plot updates
+                    try:
+                        source2.change.emit()
+                    except:
+                        pass  # Bokeh 3.x should auto-detect, but emit() ensures immediate update
                     plot2.x_range.start = float(np.min(x_coords_1d))
                     plot2.x_range.end = float(np.max(x_coords_1d))
                     plot2.y_range.start = float(np.min(slice))
@@ -5926,7 +6667,11 @@ try:
                         "dw": [dw],
                         "dh": [dh],
                     }
-                    # Bokeh 3.x automatically detects data changes, no need for change.emit()
+                    # Explicitly trigger change event to ensure plot updates
+                    try:
+                        source2.change.emit()
+                    except:
+                        pass  # Bokeh 3.x should auto-detect, but emit() ensures immediate update
                     
                     # Update plot ranges to match slice dimensions (0 to shape size)
                     plot2.x_range.start = 0.0
@@ -5941,6 +6686,11 @@ try:
                     if color_mapper2 is not None:
                         color_mapper2.low = probe_min
                         color_mapper2.high = probe_max
+                        # Force color mapper update by triggering change
+                        try:
+                            color_mapper2.change.emit()
+                        except:
+                            pass
                     
                     # Update numeric range inputs to percentile-based data range (matching old behavior)
                     try:
@@ -5950,6 +6700,17 @@ try:
                             range2_max_input.value = str(probe_max)
                     except Exception:
                         pass
+                    
+                    # Update image renderer if it exists to ensure visual refresh
+                    try:
+                        if 'image_renderer2' in locals() and image_renderer2 is not None:
+                            # The renderer should automatically update when source2.data changes,
+                            # but we can force a refresh by updating the glyph
+                            if hasattr(image_renderer2, 'glyph'):
+                                # Update glyph data source reference
+                                image_renderer2.data_source = source2
+                    except Exception as e:
+                        print(f"  ⚠️ Could not update image_renderer2: {e}")
                     
                     print(f"  ✅ Updated Plot2: shape={slice.shape}, range=[{probe_min:.3f}, {probe_max:.3f}]")
                     print(f"  ✅ Updated Plot2 dimensions: dw={dw}, dh={dh} (flipped={plot2_needs_flip})")
@@ -6192,7 +6953,8 @@ try:
     # Create tools column using SCLib layout builder
     # Put status_div at the bottom of the tools column
     # Set max_height to prevent overflow and enable scrolling
-    tools = create_tools_column(tools_items, width=400, max_height=800)  # Set max height to prevent overlap
+    tools = create_tools_column(tools_items, width=260, max_height=800)  # Set max height to prevent overlap
+    #was 400  width
 
     # Create plot columns with range inputs above each plot
     # Plot1 column
@@ -6241,11 +7003,7 @@ try:
     if range3_section is not None:
         plot3_items.append(range3_section)
     plot3_items.append(plot3)
-    # Add Plot3 -> Plot2 computation buttons
-    plot3_items.append(create_label_div("Plot3 -> Plot2:", width=200))
-    plot3_items.append(compute_plot2a_from_plot3_button)
-    if compute_plot2b_from_plot3_button is not None:
-        plot3_items.append(compute_plot2b_from_plot3_button)
+    # Note: Plot3 -> Plot2 computation buttons are now in range3_section (under Linear/Log selector)
 
     plot3_col = create_plot_column(plot3_items)
 
@@ -6488,11 +7246,151 @@ try:
         min_y=float(np.min(y_coords)), max_y=float(np.max(y_coords))
     )
 
-    # Create main dashboard layout
-    # Don't pass status_display separately since it's already in the tools column
-    dashboard = create_dashboard_layout(
+    # Create main dashboard layout using optimized layout
+    # Extract controls from range sections for each plot
+    # Each plot's controls: Min input, Max input, dynamic/userselected toggle, Linear/Log selector
+    # Range section structure: [label_div, row(min_input, max_input), row(range_mode_toggle, color_scale_selector)]
+    
+    # Plot1a (Plot1) controls
+    plot1a_controls_items = []
+    if range1_section is not None and len(range1_section.children) >= 2:
+        # Extract min/max row (usually index 1, skip label at index 0)
+        min_max_row = None
+        toggle_selector_row = None
+        for i, child in enumerate(range1_section.children):
+            # Check if it's a Row layout object (has children attribute and is a Row type)
+            if hasattr(child, 'children') and len(getattr(child, 'children', [])) == 2:
+                # Check if it's min/max row (has TextInput widgets) or toggle/selector row
+                if hasattr(child.children[0], 'value') and hasattr(child.children[1], 'value'):
+                    # Likely min/max inputs
+                    min_max_row = child
+                else:
+                    # Likely toggle/selector row
+                    toggle_selector_row = child
+        
+        if min_max_row:
+            # Don't add "Min" and "Max" labels - they're already on the text boxes
+            plot1a_controls_items.append(min_max_row.children[0])  # Min input
+            plot1a_controls_items.append(min_max_row.children[1])  # Max input
+        
+        if toggle_selector_row:
+            # Add toggle and selector
+            plot1a_controls_items.append(toggle_selector_row.children[0])  # Range mode toggle
+            plot1a_controls_items.append(toggle_selector_row.children[1])  # Color scale selector
+    
+    # Plot2a (Plot2) controls
+    plot2a_controls_items = []
+    if range2_section is not None and len(range2_section.children) >= 2:
+        min_max_row = None
+        toggle_selector_row = None
+        for child in range2_section.children:
+            if hasattr(child, 'children') and len(getattr(child, 'children', [])) == 2:
+                if hasattr(child.children[0], 'value') and hasattr(child.children[1], 'value'):
+                    min_max_row = child
+                else:
+                    toggle_selector_row = child
+        
+        if min_max_row:
+            # Don't add "Min" and "Max" labels - they're already on the text boxes
+            plot2a_controls_items.append(min_max_row.children[0])
+            plot2a_controls_items.append(min_max_row.children[1])
+        
+        if toggle_selector_row:
+            plot2a_controls_items.append(toggle_selector_row.children[0])
+            plot2a_controls_items.append(toggle_selector_row.children[1])
+        
+        # Add compute_plot3_button to Plot2a controls (under linear/log button)
+        if compute_plot3_button is not None:
+            plot2a_controls_items.append(compute_plot3_button)
+    
+    # Plot3 controls
+    plot3_controls_items = []
+    if range3_section is not None and len(range3_section.children) >= 2:
+        min_max_row = None
+        toggle_selector_row = None
+        buttons_row = None
+        for child in range3_section.children:
+            if hasattr(child, 'children') and len(getattr(child, 'children', [])) == 2:
+                if hasattr(child.children[0], 'value') and hasattr(child.children[1], 'value'):
+                    min_max_row = child
+                else:
+                    toggle_selector_row = child
+            elif hasattr(child, 'children') and len(getattr(child, 'children', [])) >= 1:
+                # Check if this is the buttons row (contains buttons)
+                if len(child.children) >= 1 and hasattr(child.children[0], 'label'):
+                    # Check if first child is a button (has 'label' attribute and 'on_click' or 'button_type')
+                    if hasattr(child.children[0], 'button_type') or hasattr(child.children[0], 'on_click'):
+                        buttons_row = child
+        
+        if min_max_row:
+            # Don't add "Min" and "Max" labels - they're already on the text boxes
+            plot3_controls_items.append(min_max_row.children[0])
+            plot3_controls_items.append(min_max_row.children[1])
+        
+        if toggle_selector_row:
+            plot3_controls_items.append(toggle_selector_row.children[0])
+            plot3_controls_items.append(toggle_selector_row.children[1])
+        
+        # Add buttons row if it exists (contains compute_plot2a_from_plot3_button and compute_plot2b_from_plot3_button)
+        if buttons_row:
+            for button in buttons_row.children:
+                plot3_controls_items.append(button)
+    
+    # Plot2b controls (if exists)
+    plot2b_controls_items = []
+    if plot2b is not None and range2b_section is not None and len(range2b_section.children) >= 2:
+        min_max_row = None
+        toggle_selector_row = None
+        for child in range2b_section.children:
+            if hasattr(child, 'children') and len(getattr(child, 'children', [])) == 2:
+                if hasattr(child.children[0], 'value') and hasattr(child.children[1], 'value'):
+                    min_max_row = child
+                else:
+                    toggle_selector_row = child
+        
+        if min_max_row:
+            # Don't add "Min" and "Max" labels - they're already on the text boxes
+            plot2b_controls_items.append(min_max_row.children[0])
+            plot2b_controls_items.append(min_max_row.children[1])
+        
+        if toggle_selector_row:
+            plot2b_controls_items.append(toggle_selector_row.children[0])
+            plot2b_controls_items.append(toggle_selector_row.children[1])
+        
+        # Add compute_plot3_from_plot2b_button to Plot2b controls (under linear/log button)
+        if compute_plot3_from_plot2b_button is not None:
+            plot2b_controls_items.append(compute_plot3_from_plot2b_button)
+    
+    # Create control columns for each plot
+    from SCLib_Dashboards import create_plot_column
+    plot1a_controls_col = create_plot_column(plot1a_controls_items) if plot1a_controls_items else create_plot_column([])
+    plot2a_controls_col = create_plot_column(plot2a_controls_items) if plot2a_controls_items else create_plot_column([])
+    plot3_controls_col = create_plot_column(plot3_controls_items) if plot3_controls_items else create_plot_column([])
+    plot2b_controls_col = create_plot_column(plot2b_controls_items) if plot2b_controls_items and plot2b is not None else None
+    
+    # Get sliders column - this should be placed above Plot1a
+    sliders_column_widget = None
+    if 'sliders_column' in locals() and sliders_column is not None:
+        sliders_column_widget = sliders_column
+    
+    # Use optimized dashboard layout
+    from SCLib_Dashboards import create_optimized_dashboard_layout
+    dashboard = create_optimized_dashboard_layout(
         tools_column=tools,
-        plots_row=plots
+        plot1a_controls=plot1a_controls_col,
+        plot1a_plot=plot1,
+        plot2a_controls=plot2a_controls_col,
+        plot2a_plot=plot2 if plot2 is not None else create_div(text="<p>Plot2 not available</p>"),
+        plot3_controls=plot3_controls_col,
+        plot3_plot=plot3,
+        plot2b_controls=plot2b_controls_col,
+        plot2b_plot=plot2b,
+        x_slider=None,  # Not using individual sliders, using sliders_column instead
+        y_slider=None,
+        sliders_column=sliders_column_widget,  # Pass the entire sliders column
+        status_display=None,  # status_div is already in tools column
+        tools_width=260, #was 400
+        controls_width=140,
     )
 
     # Start background memmap cache creation after dashboard is created

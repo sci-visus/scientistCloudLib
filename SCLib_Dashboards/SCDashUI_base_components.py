@@ -119,6 +119,9 @@ def create_button(
     
     widget = Button(**kwargs)
     
+    # Set minimal margin to reduce spacing
+    widget.margin = (1, 0, 1, 0)  # (top, right, bottom, left) - minimal vertical spacing
+    
     if callback:
         widget.on_click(callback)
     
@@ -154,6 +157,9 @@ def create_toggle(
         kwargs["width"] = width
     
     widget = Toggle(**kwargs)
+    
+    # Set minimal margin to reduce spacing
+    widget.margin = (1, 0, 1, 0)  # (top, right, bottom, left) - minimal vertical spacing
     
     if callback:
         widget.on_change("active", callback)
@@ -191,6 +197,9 @@ def create_text_input(
     
     widget = TextInput(**kwargs)
     
+    # Set minimal margin to reduce spacing
+    widget.margin = (1, 0, 1, 0)  # (top, right, bottom, left) - minimal vertical spacing
+    
     if callback:
         widget.on_change("value", callback)
     
@@ -223,6 +232,9 @@ def create_radio_button_group(
         kwargs["width"] = width
     
     widget = RadioButtonGroup(**kwargs)
+    
+    # Set minimal margin to reduce spacing
+    widget.margin = (1, 0, 1, 0)  # (top, right, bottom, left) - minimal vertical spacing
     
     if callback:
         widget.on_change("active", callback)

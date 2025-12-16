@@ -13,7 +13,7 @@ The builder uses the specialized plot classes from SCLib_Dashboards:
 
 import numpy as np
 import time
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from datetime import datetime
 
 # Import specialized plot classes
@@ -378,6 +378,94 @@ class DashboardBuilder:
             traceback.print_exc()
             return None
     
+    def create_optimized_layout(
+        self,
+        tools_column_items: List[Any],
+        plot1a_controls: List[Any],
+        plot1a_plot: Any,
+        plot2a_controls: List[Any],
+        plot2a_plot: Any,
+        plot3_controls: List[Any],
+        plot3_plot: Any,
+        plot2b_controls: Optional[List[Any]] = None,
+        plot2b_plot: Optional[Any] = None,
+        x_slider: Optional[Any] = None,
+        y_slider: Optional[Any] = None,
+        status_display: Optional[Any] = None,
+        tools_width: int = 260, #was 400
+        controls_width: int = 200,
+    ):
+        """
+        Create the optimized dashboard layout with two columns:
+        - Tools column (collapsible) on the left
+        - Plot column on the right with specific layout
+        
+        Args:
+            tools_column_items: List of widgets for the tools column
+            plot1a_controls: List of control widgets for Plot1a (Min, Max, dynamic/userselected, Linear/Log)
+            plot1a_plot: Plot widget for Plot1a
+            plot2a_controls: List of control widgets for Plot2a
+            plot2a_plot: Plot widget for Plot2a
+            plot3_controls: List of control widgets for Plot3
+            plot3_plot: Plot widget for Plot3
+            plot2b_controls: Optional list of control widgets for Plot2b
+            plot2b_plot: Optional plot widget for Plot2b
+            x_slider: Optional X slider widget
+            y_slider: Optional Y slider widget
+            status_display: Optional status display widget
+            tools_width: Width of tools column when expanded
+            controls_width: Width of controls column for each plot
+            
+        Returns:
+            Main dashboard column layout
+        """
+        try:
+            from SCLib_Dashboards import (
+                create_optimized_dashboard_layout,
+                create_tools_column,
+                create_plot_column,
+            )
+            from bokeh.layouts import column
+            
+            print("[TIMING] DashboardBuilder.create_optimized_layout(): start")
+            
+            # Create tools column
+            tools_column = create_tools_column(tools_column_items, width=tools_width)
+            
+            # Create controls columns for each plot
+            plot1a_controls_col = create_plot_column(plot1a_controls)
+            plot2a_controls_col = create_plot_column(plot2a_controls)
+            plot3_controls_col = create_plot_column(plot3_controls)
+            plot2b_controls_col = None
+            if plot2b_controls:
+                plot2b_controls_col = create_plot_column(plot2b_controls)
+            
+            # Create the optimized layout
+            layout = create_optimized_dashboard_layout(
+                tools_column=tools_column,
+                plot1a_controls=plot1a_controls_col,
+                plot1a_plot=plot1a_plot,
+                plot2a_controls=plot2a_controls_col,
+                plot2a_plot=plot2a_plot,
+                plot3_controls=plot3_controls_col,
+                plot3_plot=plot3_plot,
+                plot2b_controls=plot2b_controls_col,
+                plot2b_plot=plot2b_plot,
+                x_slider=x_slider,
+                y_slider=y_slider,
+                status_display=status_display,
+                tools_width=tools_width,
+                controls_width=controls_width,
+            )
+            
+            print(f"[TIMING] optimized layout created: {time.time()-self.t0:.3f}s")
+            return layout
+        except Exception as e:
+            print(f"❌ Error creating optimized layout: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
     def build(self):
         """
         Build the complete dashboard.
@@ -462,8 +550,10 @@ class DashboardBuilder:
             # Fallback: try to generate it on the fly
             print(f"⚠️ 4d_dashboard_implementation.py not found, attempting to generate...")
             try:
-                # Try to extract from 4d_dashboardLite.py if it exists
-                original_file = os.path.join(dashboard_dir, '4d_dashboardLite.py')
+                # Try to extract from 4d_dashboardopt.py if it exists (fallback to 4d_dashboardLite.py)
+                original_file = os.path.join(dashboard_dir, '4d_dashboardopt.py')
+                if not os.path.exists(original_file):
+                    original_file = os.path.join(dashboard_dir, '4d_dashboardLite.py')
                 if os.path.exists(original_file):
                     import re
                     with open(original_file, 'r') as f:
@@ -496,7 +586,7 @@ class DashboardBuilder:
                     else:
                         raise Exception("Could not find create_dashboard function")
                 else:
-                    raise Exception(f"Neither 4d_dashboard_implementation.py nor 4d_dashboardLite.py found")
+                    raise Exception(f"Neither 4d_dashboard_implementation.py nor 4d_dashboardopt.py found")
             except Exception as e:
                 print(f"❌ Could not generate implementation: {e}")
                 return None
@@ -570,6 +660,7 @@ class DashboardBuilder:
                 extract_dataset_path, extract_shape, create_tools_column,
                 create_plot_column, create_plots_row, create_dashboard_layout,
                 create_status_display, create_initialization_layout,
+                create_optimized_dashboard_layout,
                 sync_all_plot_ui, sync_plot_to_range_inputs,
                 sync_range_inputs_to_plot, sync_plot_to_color_scale_selector,
                 sync_color_scale_selector_to_plot, sync_plot_to_palette_selector,
@@ -615,6 +706,7 @@ class DashboardBuilder:
                 'create_dashboard_layout': create_dashboard_layout,
                 'create_status_display': create_status_display,
                 'create_initialization_layout': create_initialization_layout,
+                'create_optimized_dashboard_layout': create_optimized_dashboard_layout,
                 'sync_all_plot_ui': sync_all_plot_ui,
                 'sync_plot_to_range_inputs': sync_plot_to_range_inputs,
                 'sync_range_inputs_to_plot': sync_range_inputs_to_plot,
@@ -640,8 +732,8 @@ class DashboardBuilder:
                 import sys
                 import inspect
                 
-                # Try to find 4d_dashboardLite.py by looking at the call stack
-                # The dashboard builder is called from 4d_dashboardLite.py, so we can find it
+                # Try to find 4d_dashboardopt.py by looking at the call stack
+                # The dashboard builder is called from 4d_dashboardopt.py, so we can find it
                 dashboard_file = None
                 possible_paths = []
                 
@@ -654,7 +746,7 @@ class DashboardBuilder:
                         if frame is None:
                             break
                         filename = frame.f_code.co_filename
-                        if '4d_dashboardLite.py' in filename:
+                        if '4d_dashboardopt.py' in filename or '4d_dashboardLite.py' in filename:
                             dashboard_file = filename
                             print(f"✅ Found dashboard file from call stack: {dashboard_file}")
                             break
@@ -670,18 +762,24 @@ class DashboardBuilder:
                     # .../scientistCloudLib/SCLib_Dashboards/ -> .../scientistcloud/SC_Dashboards/dashboards/
                     base_dir = os.path.dirname(os.path.dirname(current_dir))  # Go up to scientistCloudLib
                     possible_paths = [
-                        os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
-                        os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
+                        os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardopt.py'),
+                        os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardopt.py'),
+                        os.path.join(base_dir, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),  # Fallback
+                        os.path.join(os.path.dirname(base_dir), 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),  # Fallback
                     ]
                     
                     # Method 3: Try current working directory
                     try:
                         cwd = os.getcwd()
                         possible_paths.extend([
-                            os.path.join(cwd, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
-                            os.path.join(cwd, 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),
-                            os.path.join(cwd, 'dashboards', '4d_dashboardLite.py'),
-                            os.path.join(cwd, '4d_dashboardLite.py'),
+                            os.path.join(cwd, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardopt.py'),
+                            os.path.join(cwd, 'SC_Dashboards', 'dashboards', '4d_dashboardopt.py'),
+                            os.path.join(cwd, 'dashboards', '4d_dashboardopt.py'),
+                            os.path.join(cwd, '4d_dashboardopt.py'),
+                            os.path.join(cwd, 'scientistcloud', 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),  # Fallback
+                            os.path.join(cwd, 'SC_Dashboards', 'dashboards', '4d_dashboardLite.py'),  # Fallback
+                            os.path.join(cwd, 'dashboards', '4d_dashboardLite.py'),  # Fallback
+                            os.path.join(cwd, '4d_dashboardLite.py'),  # Fallback
                         ])
                     except:
                         pass
@@ -689,9 +787,10 @@ class DashboardBuilder:
                     # Method 4: Try sys.path
                     for path_dir in sys.path:
                         if path_dir and os.path.isdir(path_dir):
-                            test_path = os.path.join(path_dir, '4d_dashboardLite.py')
-                            if test_path not in possible_paths:
-                                possible_paths.append(test_path)
+                            for filename in ['4d_dashboardopt.py', '4d_dashboardLite.py']:
+                                test_path = os.path.join(path_dir, filename)
+                                if test_path not in possible_paths:
+                                    possible_paths.append(test_path)
                     
                     # Try each path
                     for path in possible_paths:
@@ -710,7 +809,7 @@ class DashboardBuilder:
                     namespace['create_tmp_dashboard'] = dashboard_module.create_tmp_dashboard
                     print("✅ Successfully imported create_tmp_dashboard for back button")
                 else:
-                    print("⚠️ WARNING: create_tmp_dashboard not found in 4d_dashboardLite module")
+                    print("⚠️ WARNING: create_tmp_dashboard not found in 4d_dashboardopt module")
                     raise AttributeError("create_tmp_dashboard not found")
             except Exception as e:
                 error_message = str(e)  # Capture error message as string to avoid scoping issues

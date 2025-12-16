@@ -77,7 +77,7 @@ def create_range_section(
     max_title: str = "Range Max:",
     min_value: Optional[float] = None,
     max_value: Optional[float] = None,
-    width: int = 120,
+    width: int = 100,  # Changed from 120 to 100 (as small as possible)
     min_callback: Optional[Callable] = None,
     max_callback: Optional[Callable] = None,
 ) -> column:
@@ -109,15 +109,16 @@ def create_range_section(
     
     return column(
         #create_label_div(label, width=200),
-        row(min_input, max_input),
-        sizing_mode="stretch_width"
+        row(min_input, max_input, spacing=0),  # Minimal spacing between min and max inputs
+        sizing_mode="stretch_width",
+        spacing=0  # Minimal spacing between widgets
     )
 
 
 def create_color_scale_selector(
     labels: List[str] = None,
     active: int = 0,
-    width: int = 200,
+    width: int = 100,  # Changed from 200 to 100 to match other widgets (as small as possible)
     callback: Optional[Callable] = None,
 ) -> RadioButtonGroup:
     """
@@ -348,7 +349,7 @@ def create_plot_shape_controls(
 def create_range_mode_toggle(
     label: str = "User Specified",
     active: bool = False,
-    width: int = 150,
+    width: int = 100,  # Changed from 150 to 100 to match other widgets (as small as possible)
     callback: Optional[Callable] = None,
 ) -> Toggle:
     """
@@ -377,7 +378,7 @@ def create_range_section_with_toggle(
     max_title: str = "Range Max:",
     min_value: Optional[float] = None,
     max_value: Optional[float] = None,
-    width: int = 120,
+    width: int = 100,  # Changed from 120 to 100 (as small as possible)
     toggle_label: str = "User Specified",
     toggle_active: bool = False,
     toggle_callback: Optional[Callable] = None,
@@ -417,6 +418,7 @@ def create_range_section_with_toggle(
     toggle = create_range_mode_toggle(
         label=toggle_label,
         active=toggle_active,
+        width=width,  # Use same width as inputs for consistency
         callback=toggle_callback
     )
     

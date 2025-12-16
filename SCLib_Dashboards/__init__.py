@@ -135,6 +135,9 @@ from .SCDashUI_layout_builders import (
     create_aligned_plot_columns,
     create_status_display,
     create_initialization_layout,
+    create_plot_with_controls_side_by_side,
+    create_collapsible_tools_column,
+    create_optimized_dashboard_layout,
 )
 
 from .SCDashUI_sync import (
@@ -229,6 +232,9 @@ __all__.extend([
     "create_aligned_plot_columns",
     "create_status_display",
     "create_initialization_layout",
+    "create_plot_with_controls_side_by_side",
+    "create_collapsible_tools_column",
+    "create_optimized_dashboard_layout",
     # State synchronization
     "sync_plot_to_range_inputs",
     "sync_range_inputs_to_plot",
