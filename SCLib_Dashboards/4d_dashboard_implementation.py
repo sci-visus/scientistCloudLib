@@ -2952,6 +2952,57 @@ try:
             traceback.print_exc()
         finally:
             _skip_slider_state_save["value"] = False
+        
+        # Restore Plot2 and Plot2B custom dimensions and probe scale from session metadata
+        try:
+            # Restore Plot2 dimensions
+            if 'plot2_width' in session.metadata and 'plot2_height' in session.metadata and plot2 is not None:
+                plot2_width = session.metadata['plot2_width']
+                plot2_height = session.metadata['plot2_height']
+                # Add colorbar width if Plot2 has a colorbar (2D plots)
+                if not is_3d_volume and color_mapper2 is not None:
+                    plot2.width = plot2_width + colorbar_width
+                else:
+                    plot2.width = plot2_width
+                plot2.height = plot2_height
+                # Update custom width/height inputs
+                if 'plot2_custom_width_input' in locals() and plot2_custom_width_input is not None:
+                    plot2_custom_width_input.value = str(int(plot2_width))
+                if 'plot2_custom_height_input' in locals() and plot2_custom_height_input is not None:
+                    plot2_custom_height_input.value = str(int(plot2_height))
+                print(f"✅ Restored Plot2 dimensions: {plot2_width}x{plot2_height}")
+            
+            # Restore Plot2B dimensions
+            if 'plot2b_width' in session.metadata and 'plot2b_height' in session.metadata and plot2b is not None:
+                plot2b_width = session.metadata['plot2b_width']
+                plot2b_height = session.metadata['plot2b_height']
+                # Add colorbar width if Plot2B has a colorbar (2D plots)
+                if 'plot2b_is_2d' in locals() and plot2b_is_2d and color_mapper2b is not None:
+                    plot2b.width = plot2b_width + colorbar_width
+                else:
+                    plot2b.width = plot2b_width
+                plot2b.height = plot2b_height
+                # Update custom width/height inputs
+                if 'plot2b_custom_width_input' in locals() and plot2b_custom_width_input is not None:
+                    plot2b_custom_width_input.value = str(int(plot2b_width))
+                if 'plot2b_custom_height_input' in locals() and plot2b_custom_height_input is not None:
+                    plot2b_custom_height_input.value = str(int(plot2b_height))
+                print(f"✅ Restored Plot2B dimensions: {plot2b_width}x{plot2b_height}")
+            
+            # Restore probe scale
+            if 'probe_scale' in session.metadata and 'probe_scale_input' in locals() and probe_scale_input is not None:
+                probe_scale_value = session.metadata['probe_scale']
+                probe_scale_input.value = str(probe_scale_value)
+                # Trigger the probe scale change handler to apply the scale
+                try:
+                    on_probe_scale_change(None, None, str(probe_scale_value))
+                except:
+                    pass
+                print(f"✅ Restored probe scale: {probe_scale_value}%")
+        except Exception as e:
+            print(f"⚠️ Warning: Could not restore Plot2/Plot2B dimensions or probe scale: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Create custom undo/redo callbacks that also update UI
     def on_undo():
@@ -4109,6 +4160,12 @@ try:
                 except Exception as e:
                     print(f"⚠️ WARNING: Error scaling Plot2b: {e}")
             
+            # Save probe scale to session metadata immediately (for undo/redo and session save)
+            try:
+                session.metadata['probe_scale'] = scale_percent
+            except:
+                pass
+            
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4765,6 +4822,11 @@ try:
             else:
                 # Plot2 is 1D, no colorbar
                 plot2.width = new_width
+            # Save to session metadata immediately (for undo/redo and session save)
+            try:
+                session.metadata['plot2_width'] = new_width
+            except:
+                pass
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
             # Base dimensions will be updated when probe scale reads current plot size
@@ -4783,6 +4845,11 @@ try:
         try:
             new_height = int(float(new))
             plot2.height = new_height
+            # Save to session metadata immediately (for undo/redo and session save)
+            try:
+                session.metadata['plot2_height'] = new_height
+            except:
+                pass
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
             # Base dimensions will be updated when probe scale reads current plot size
@@ -4810,6 +4877,11 @@ try:
             else:
                 # Plot2B is 1D, no colorbar
                 plot2b.width = new_width
+            # Save to session metadata immediately (for undo/redo and session save)
+            try:
+                session.metadata['plot2b_width'] = new_width
+            except:
+                pass
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
             # Base dimensions will be updated when probe scale reads current plot size
@@ -4830,6 +4902,11 @@ try:
                 return
             new_height = int(float(new))
             plot2b.height = new_height
+            # Save to session metadata immediately (for undo/redo and session save)
+            try:
+                session.metadata['plot2b_height'] = new_height
+            except:
+                pass
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
             # Base dimensions will be updated when probe scale reads current plot size
@@ -5429,6 +5506,38 @@ try:
             # Get writable sessions directory (with fallback if needed)
             sessions_dir = get_writable_sessions_dir(save_dir_path)
             filepath = sessions_dir / filename
+
+            # Save Plot2 and Plot2B custom dimensions and probe scale to session metadata before saving
+            try:
+                # Save Plot2 dimensions (accounting for colorbar if present)
+                if plot2 is not None:
+                    plot2_width = plot2.width
+                    plot2_height = plot2.height
+                    # Subtract colorbar width if Plot2 has a colorbar (2D plots)
+                    if not is_3d_volume and color_mapper2 is not None:
+                        plot2_width = plot2_width - colorbar_width
+                    session.metadata['plot2_width'] = plot2_width
+                    session.metadata['plot2_height'] = plot2_height
+                
+                # Save Plot2B dimensions (accounting for colorbar if present)
+                if plot2b is not None:
+                    plot2b_width = plot2b.width
+                    plot2b_height = plot2b.height
+                    # Subtract colorbar width if Plot2B has a colorbar (2D plots)
+                    if 'plot2b_is_2d' in locals() and plot2b_is_2d and color_mapper2b is not None:
+                        plot2b_width = plot2b_width - colorbar_width
+                    session.metadata['plot2b_width'] = plot2b_width
+                    session.metadata['plot2b_height'] = plot2b_height
+                
+                # Save probe scale value
+                if 'probe_scale_input' in locals() and probe_scale_input is not None:
+                    try:
+                        probe_scale_value = float(probe_scale_input.value) if probe_scale_input.value else 100.0
+                        session.metadata['probe_scale'] = probe_scale_value
+                    except:
+                        pass
+            except Exception as e:
+                print(f"⚠️ Warning: Could not save Plot2/Plot2B dimensions or probe scale to metadata: {e}")
 
             # Save session - include_data=False means NO data arrays, only UI settings
             session.save_session(filepath, include_data=False)
@@ -7478,6 +7587,28 @@ try:
         tools_width=260, #was 400
         controls_width=140,
     )
+    
+    # Set white background for the dashboard using CSS
+    from bokeh.models import Div
+    background_css = Div(
+        text="""
+        <style>
+            body, .bk-root {
+                background-color: white !important;
+            }
+            .bk-root .bk {
+                background-color: white !important;
+            }
+        </style>
+        """,
+        width=0,
+        height=0,
+        margin=(0, 0, 0, 0)
+    )
+    
+    # Wrap dashboard with background CSS
+    from bokeh.layouts import column as bokeh_column
+    dashboard = bokeh_column(background_css, dashboard, sizing_mode="stretch_both")
 
     # Start background memmap cache creation after dashboard is created
     # This allows the dashboard to display immediately while memmap is computed in background
