@@ -4000,38 +4000,112 @@ try:
             # Scale Plot2
             if plot2 is not None:
                 try:
-                    # Get base dimensions
-                    base_width = plot2_base_area_width
-                    base_height = plot2_base_area_height
+                    # Get current dimensions from the plot (which may have been customized)
+                    # This ensures probe scale works from the current custom size, not just the initial size
+                    current_width = plot2.width
+                    current_height = plot2.height
+                    # Subtract colorbar width if present
+                    if not is_3d_volume and color_mapper2 is not None:
+                        current_width = current_width - colorbar_width
+                    
+                    # Use current dimensions as base (they may have been customized)
+                    # If probe scale is being used for the first time or after a custom size change,
+                    # use the current plot dimensions as the base
+                    base_width = current_width
+                    base_height = current_height
+                    
+                    # Check if we should use stored base dimensions (for consistent scaling)
+                    # Only use stored base if current dimensions match them (within tolerance)
+                    try:
+                        if 'plot2_base_area_width' in locals() and 'plot2_base_area_height' in locals():
+                            # If current dimensions are close to stored base, use stored base for consistent scaling
+                            if abs(plot2_base_area_width - current_width) <= 1 and abs(plot2_base_area_height - current_height) <= 1:
+                                base_width = plot2_base_area_width
+                                base_height = plot2_base_area_height
+                            else:
+                                # Current dimensions are different (user customized) - update stored base to current
+                                plot2_base_area_width = current_width
+                                plot2_base_area_height = current_height
+                    except:
+                        # If base dimensions don't exist, use current dimensions and store them
+                        try:
+                            plot2_base_area_width = current_width
+                            plot2_base_area_height = current_height
+                        except:
+                            pass
                     
                     # Calculate new dimensions preserving aspect ratio
                     new_width = int(base_width * scale_factor)
                     new_height = int(base_height * scale_factor)
                     
                     # Update plot dimensions (add colorbar width back)
-                    plot2.width = new_width + colorbar_width
+                    plot2.width = new_width + colorbar_width if not is_3d_volume and color_mapper2 is not None else new_width
                     plot2.height = new_height
                     
-                    print(f"🔍 DEBUG: Plot2 scaled to {new_width + colorbar_width}x{new_height} (scale={scale_percent}%)")
+                    # Update custom width/height inputs to reflect the new scaled dimensions
+                    try:
+                        if 'plot2_custom_width_input' in locals() and plot2_custom_width_input is not None:
+                            plot2_custom_width_input.value = str(new_width)
+                        if 'plot2_custom_height_input' in locals() and plot2_custom_height_input is not None:
+                            plot2_custom_height_input.value = str(new_height)
+                    except:
+                        pass
+                    
+                    print(f"🔍 DEBUG: Plot2 scaled to {new_width + (colorbar_width if not is_3d_volume and color_mapper2 is not None else 0)}x{new_height} (scale={scale_percent}%)")
                 except Exception as e:
                     print(f"⚠️ WARNING: Error scaling Plot2: {e}")
             
             # Scale Plot2b
             if plot2b is not None:
                 try:
-                    # Get base dimensions
-                    base_width = plot2b_base_area_width
-                    base_height = plot2b_base_area_height
+                    # Get current dimensions from the plot (which may have been customized)
+                    current_width = plot2b.width
+                    current_height = plot2b.height
+                    # Subtract colorbar width if present
+                    if plot2b_is_2d and color_mapper2b is not None:
+                        current_width = current_width - colorbar_width
+                    
+                    # Use current dimensions as base (they may have been customized)
+                    base_width = current_width
+                    base_height = current_height
+                    
+                    # Check if we should use stored base dimensions (for consistent scaling)
+                    try:
+                        if 'plot2b_base_area_width' in locals() and 'plot2b_base_area_height' in locals():
+                            # If current dimensions are close to stored base, use stored base for consistent scaling
+                            if abs(plot2b_base_area_width - current_width) <= 1 and abs(plot2b_base_area_height - current_height) <= 1:
+                                base_width = plot2b_base_area_width
+                                base_height = plot2b_base_area_height
+                            else:
+                                # Current dimensions are different (user customized) - update stored base to current
+                                plot2b_base_area_width = current_width
+                                plot2b_base_area_height = current_height
+                    except:
+                        # If base dimensions don't exist, use current dimensions and store them
+                        try:
+                            plot2b_base_area_width = current_width
+                            plot2b_base_area_height = current_height
+                        except:
+                            pass
                     
                     # Calculate new dimensions preserving aspect ratio
                     new_width = int(base_width * scale_factor)
                     new_height = int(base_height * scale_factor)
                     
                     # Update plot dimensions (add colorbar width back)
-                    plot2b.width = new_width + colorbar_width
+                    plot2b.width = new_width + colorbar_width if plot2b_is_2d and color_mapper2b is not None else new_width
                     plot2b.height = new_height
                     
-                    print(f"🔍 DEBUG: Plot2b scaled to {new_width + colorbar_width}x{new_height} (scale={scale_percent}%)")
+                    # Update custom width/height inputs to reflect the new scaled dimensions
+                    try:
+                        if 'plot2b_custom_width_input' in locals() and plot2b_custom_width_input is not None:
+                            plot2b_custom_width_input.value = str(new_width)
+                        if 'plot2b_custom_height_input' in locals() and plot2b_custom_height_input is not None:
+                            plot2b_custom_height_input.value = str(new_height)
+                    except:
+                        pass
+                    
+                    print(f"🔍 DEBUG: Plot2b scaled to {new_width + (colorbar_width if plot2b_is_2d and color_mapper2b is not None else 0)}x{new_height} (scale={scale_percent}%)")
                 except Exception as e:
                     print(f"⚠️ WARNING: Error scaling Plot2b: {e}")
             
@@ -4691,6 +4765,13 @@ try:
             else:
                 # Plot2 is 1D, no colorbar
                 plot2.width = new_width
+            # Update base dimensions so probe scale can work from the new custom size
+            # Store the new custom dimensions as the base for future probe scale operations
+            try:
+                # Use a mutable container approach to update base dimensions
+                # Since we can't directly modify outer scope variables, we'll store them in a way
+                # that probe scale can access the current custom dimensions
+                pass  # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4706,6 +4787,10 @@ try:
         try:
             new_height = int(float(new))
             plot2.height = new_height
+            # Update base dimensions so probe scale can work from the new custom size
+            # Store the new custom dimensions as the base for future probe scale operations
+            try:
+                pass  # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4730,6 +4815,10 @@ try:
             else:
                 # Plot2B is 1D, no colorbar
                 plot2b.width = new_width
+            # Update base dimensions so probe scale can work from the new custom size
+            # Store the new custom dimensions as the base for future probe scale operations
+            try:
+                pass  # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4747,6 +4836,10 @@ try:
                 return
             new_height = int(float(new))
             plot2b.height = new_height
+            # Update base dimensions so probe scale can work from the new custom size
+            # Store the new custom dimensions as the base for future probe scale operations
+            try:
+                pass  # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
