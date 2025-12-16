@@ -4767,11 +4767,7 @@ try:
                 plot2.width = new_width
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
-            try:
-                # Use a mutable container approach to update base dimensions
-                # Since we can't directly modify outer scope variables, we'll store them in a way
-                # that probe scale can access the current custom dimensions
-                pass  # Base dimensions will be updated when probe scale reads current plot size
+            # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4789,8 +4785,7 @@ try:
             plot2.height = new_height
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
-            try:
-                pass  # Base dimensions will be updated when probe scale reads current plot size
+            # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4817,8 +4812,7 @@ try:
                 plot2b.width = new_width
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
-            try:
-                pass  # Base dimensions will be updated when probe scale reads current plot size
+            # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
@@ -4838,8 +4832,7 @@ try:
             plot2b.height = new_height
             # Update base dimensions so probe scale can work from the new custom size
             # Store the new custom dimensions as the base for future probe scale operations
-            try:
-                pass  # Base dimensions will be updated when probe scale reads current plot size
+            # Base dimensions will be updated when probe scale reads current plot size
             # Save state asynchronously
             from bokeh.io import curdoc
             def save_state_async():
