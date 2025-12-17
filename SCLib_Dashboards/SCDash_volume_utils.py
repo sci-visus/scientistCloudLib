@@ -95,7 +95,18 @@ def compute_2d_plot_from_3d_section(
     x2 = max(x1 + 1, get_x_index(x2_coord))
     y2 = max(y1 + 1, get_y_index(y2_coord))
     
-    if is_3d_volume:
+    # Check actual volume shape to handle special case: Plot1 is 1D and volume is 3D (x,z,u)
+    actual_volume_shape = len(volume.shape)
+    
+    if actual_volume_shape == 3 and not is_3d_volume:
+        # Special case: Plot1 is 1D, volume is 3D (x,z,u)
+        # Plot3 is 1D showing x dimension, we select x-range and extract 2D slice (z,u)
+        # y1, y2 are ignored in this case (Plot3 is 1D, so y selection doesn't apply)
+        piece = volume[x1:x2, :, :]  # Extract (x_range, z, u)
+        slice_data = np.mean(piece, axis=0)  # Average over x dimension to get (z, u)
+        
+        return slice_data, None
+    elif is_3d_volume:
         # For 3D: sum over X,Y dimensions to get 1D slice
         piece = volume[x1:x2, y1:y2, :]
         slice_data = np.sum(piece, axis=(0, 1)) / ((x2 - x1) * (y2 - y1))

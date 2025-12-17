@@ -625,20 +625,53 @@ class ProcessNexus(BaseDataProcessor):
             self.preview = self.preview.astype(np.float32)
         else:
             # Ratio mode
-            assert self.presample_dataset.size == self.target_x * self.target_y
-            assert self.postsample_dataset.size == self.target_x * self.target_y
-            presample_rect = np.reshape(self.presample_dataset, (self.target_x, self.target_y))
-            postsample_rect = np.reshape(self.postsample_dataset, (self.target_x, self.target_y))
+            plot1_is_1d = getattr(self, 'plot1_is_1d', False)
+            
+            if plot1_is_1d:
+                # Ratio (1D) mode: presample and postsample are 1D datasets
+                assert self.presample_dataset.size == self.target_x, \
+                    f"Presample dataset size mismatch: dataset has {self.presample_dataset.size} elements, but expected {self.target_x}"
+                assert self.postsample_dataset.size == self.target_x, \
+                    f"Postsample dataset size mismatch: dataset has {self.postsample_dataset.size} elements, but expected {self.target_x}"
+                
+                # For 1D ratio, we compute a 1D preview, but we need to reshape it to 2D for display
+                # Use the volume shape to determine the preview dimensions
+                presample_1d = self.presample_dataset.flatten()
+                postsample_1d = self.postsample_dataset.flatten()
+                
+                self.presample_zeros = np.sum(presample_1d == 0)
+                self.postsample_zeros = np.sum(postsample_1d == 0)
+                
+                epsilon = 1e-10
+                self.presample_conditioned = np.where(presample_1d == 0, epsilon, presample_1d)
+                self.postsample_conditioned = np.where(postsample_1d == 0, epsilon, postsample_1d)
+                
+                # Compute 1D ratio
+                ratio_1d = self.presample_conditioned / self.postsample_conditioned
+                ratio_1d = np.nan_to_num(ratio_1d, nan=0.0, posinf=1.0, neginf=0.0)
+                
+                # For Ratio (1D), create a 2D preview by broadcasting the 1D ratio along the y dimension
+                # This creates a preview where each row is the same 1D ratio
+                self.preview = np.tile(ratio_1d[:, np.newaxis], (1, self.target_y))
+            else:
+                # Ratio (2D) mode: presample and postsample are 2D datasets
+                assert self.presample_dataset.size == self.target_x * self.target_y, \
+                    f"Presample dataset size mismatch: dataset has {self.presample_dataset.size} elements, but expected {self.target_x * self.target_y}"
+                assert self.postsample_dataset.size == self.target_x * self.target_y, \
+                    f"Postsample dataset size mismatch: dataset has {self.postsample_dataset.size} elements, but expected {self.target_x * self.target_y}"
+                
+                presample_rect = np.reshape(self.presample_dataset, (self.target_x, self.target_y))
+                postsample_rect = np.reshape(self.postsample_dataset, (self.target_x, self.target_y))
 
-            self.presample_zeros = np.sum(presample_rect == 0)
-            self.postsample_zeros = np.sum(postsample_rect == 0)
+                self.presample_zeros = np.sum(presample_rect == 0)
+                self.postsample_zeros = np.sum(postsample_rect == 0)
 
-            epsilon = 1e-10
-            self.presample_conditioned = np.where(presample_rect == 0, epsilon, presample_rect)
-            self.postsample_conditioned = np.where(postsample_rect == 0, epsilon, postsample_rect)
+                epsilon = 1e-10
+                self.presample_conditioned = np.where(presample_rect == 0, epsilon, presample_rect)
+                self.postsample_conditioned = np.where(postsample_rect == 0, epsilon, postsample_rect)
 
-            self.preview = self.presample_conditioned / self.postsample_conditioned
-            self.preview = np.nan_to_num(self.preview, nan=0.0, posinf=1.0, neginf=0.0)
+                self.preview = self.presample_conditioned / self.postsample_conditioned
+                self.preview = np.nan_to_num(self.preview, nan=0.0, posinf=1.0, neginf=0.0)
 
             if np.max(self.preview) > np.min(self.preview):
                 self.preview = (self.preview - np.min(self.preview)) / (np.max(self.preview) - np.min(self.preview))

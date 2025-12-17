@@ -321,9 +321,12 @@ try:
         if plot1_is_1d and len(volume.shape) == 3:
             # When Plot1 is 1D and volume is 3D (x,z,u), use z and u dimensions
             rect2 = Rectangle(0, 0, volume.shape[1] - 1, volume.shape[2] - 1)  # Z, U from 3D volume
-        else:
+        elif len(volume.shape) == 4:
             # Normal 4D volume case
             rect2 = Rectangle(0, 0, volume.shape[2] - 1, volume.shape[3] - 1)  # Z, U
+        else:
+            # Fallback for other cases (shouldn't normally happen)
+            rect2 = Rectangle(0, 0, z_size - 1, u_size - 1)  # Use computed z_size and u_size
 
     rect2b = None  # Will be initialized if Plot2B exists
 
@@ -397,8 +400,66 @@ try:
     if plot1_is_1d:
         # Create Plot1 as 1D line plot
         print("🔍 DEBUG: Creating Plot1 as 1D line plot")
-        # Load the actual 1D dataset
-        if hasattr(self.process_4dnexus, 'plot1_single_dataset_picked') and self.process_4dnexus.plot1_single_dataset_picked:
+        plot1_1d_data = None
+        
+        # Check if it's Ratio (1D) mode - compute ratio from presample and postsample
+        if (hasattr(self.process_4dnexus, 'presample_picked') and self.process_4dnexus.presample_picked and
+            hasattr(self.process_4dnexus, 'postsample_picked') and self.process_4dnexus.postsample_picked and
+            not (hasattr(self.process_4dnexus, 'plot1_single_dataset_picked') and self.process_4dnexus.plot1_single_dataset_picked)):
+            # Ratio (1D) mode: compute ratio from presample and postsample
+            print("🔍 DEBUG: Ratio (1D) mode - computing ratio from presample and postsample")
+            try:
+                if hasattr(self.process_4dnexus, 'presample_conditioned') and hasattr(self.process_4dnexus, 'postsample_conditioned'):
+                    # Use already computed conditioned datasets if available
+                    presample_1d = self.process_4dnexus.presample_conditioned
+                    postsample_1d = self.process_4dnexus.postsample_conditioned
+                else:
+                    # Load and compute from raw datasets
+                    presample_data = self.process_4dnexus.load_dataset_by_path(self.process_4dnexus.presample_picked)
+                    postsample_data = self.process_4dnexus.load_dataset_by_path(self.process_4dnexus.postsample_picked)
+                    
+                    if presample_data is not None and postsample_data is not None:
+                        # Convert to numpy arrays if needed
+                        if not isinstance(presample_data, np.ndarray):
+                            try:
+                                presample_data = presample_data[()]
+                            except:
+                                presample_data = np.array(presample_data, dtype=np.float64)
+                        if not isinstance(postsample_data, np.ndarray):
+                            try:
+                                postsample_data = postsample_data[()]
+                            except:
+                                postsample_data = np.array(postsample_data, dtype=np.float64)
+                        
+                        # Flatten to 1D
+                        presample_1d = presample_data.flatten()
+                        postsample_1d = postsample_data.flatten()
+                        
+                        # Condition (replace zeros with epsilon)
+                        epsilon = 1e-10
+                        presample_1d = np.where(presample_1d == 0, epsilon, presample_1d)
+                        postsample_1d = np.where(postsample_1d == 0, epsilon, postsample_1d)
+                    else:
+                        presample_1d = None
+                        postsample_1d = None
+                
+                if presample_1d is not None and postsample_1d is not None:
+                    # Compute 1D ratio
+                    plot1_1d_data = presample_1d / postsample_1d
+                    plot1_1d_data = np.nan_to_num(plot1_1d_data, nan=0.0, posinf=1.0, neginf=0.0)
+                    # Ensure it's a numeric type
+                    if not np.issubdtype(plot1_1d_data.dtype, np.number):
+                        plot1_1d_data = plot1_1d_data.astype(np.float64)
+                    print(f"✅ Computed 1D ratio for Plot1: shape={plot1_1d_data.shape}, dtype={plot1_1d_data.dtype}")
+                else:
+                    print("⚠️ WARNING: Could not load presample/postsample datasets for Ratio (1D), falling back to preview")
+            except Exception as e:
+                print(f"⚠️ ERROR computing Ratio (1D) for Plot1: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # If not Ratio mode, try loading single dataset
+        if plot1_1d_data is None and hasattr(self.process_4dnexus, 'plot1_single_dataset_picked') and self.process_4dnexus.plot1_single_dataset_picked:
             try:
                 plot1_1d_data = self.process_4dnexus.load_dataset_by_path(self.process_4dnexus.plot1_single_dataset_picked)
                 if plot1_1d_data is not None:
@@ -1315,9 +1376,13 @@ try:
         if plot1_is_1d and len(volume.shape) == 3:
             print(f"   For 3D volume (x, z, u) with Plot1 1D: slice has shape (z, u) = (volume.shape[1], volume.shape[2])")
             print(f"   Volume dimensions: z={volume.shape[1]}, u={volume.shape[2]}")
-        else:
+        elif len(volume.shape) == 4:
             print(f"   For 4D volume (x, y, z, u): slice has shape (z, u) = (volume.shape[2], volume.shape[3])")
             print(f"   Volume dimensions: z={volume.shape[2]}, u={volume.shape[3]}")
+        else:
+            print(f"   For volume with shape {volume.shape}: slice dimensions depend on volume structure")
+            if len(volume.shape) >= 2:
+                print(f"   Volume dimensions available: {volume.shape}")
         print(f"   Our data.shape: {plot2_data.shape if plot2_data is not None else 'None'} (after flip if needed)")
         print(f"   px (x_coords) length: {len(plot2_x_coords) if plot2_x_coords is not None else 'None'} (should map to x-axis/width)")
         print(f"   py (y_coords) length: {len(plot2_y_coords) if plot2_y_coords is not None else 'None'} (should map to y-axis/height)")
@@ -1482,15 +1547,39 @@ try:
                         print(f"⚠️ WARNING: Failed to load volume_b for {self.process_4dnexus.volume_picked_b}")
 
             if volume_b is not None:
-                plot2b_is_2d = len(volume_b.shape) == 4
+                # Check if Plot2B should be 2D or 1D
+                # When Plot1 is 1D, a 3D volume should be treated as 2D for Plot2B (showing z,u slice)
+                # When Plot1 is 1D, a 2D volume should be treated as 1D for Plot2B (showing z)
+                if plot1_is_1d:
+                    if len(volume_b.shape) == 3:
+                        # 3D volume (x,z,u) -> Plot2B should be 2D showing (z,u)
+                        plot2b_is_2d = True  # Force 2D plot
+                        print(f"  Plot1 is 1D mode: Volume B is 3D (x,z,u), Plot2B will be 2D showing (z,u)")
+                    elif len(volume_b.shape) == 2:
+                        # 2D volume (x,z) -> Plot2B should be 1D showing z
+                        plot2b_is_2d = False  # Force 1D plot
+                        print(f"  Plot1 is 1D mode: Volume B is 2D (x,z), Plot2B will be 1D showing z")
+                    else:
+                        plot2b_is_2d = len(volume_b.shape) == 4
+                else:
+                    plot2b_is_2d = len(volume_b.shape) == 4
 
                 # Get initial slice
                 x_idx = get_x_index()
                 y_idx = get_y_index()
 
                 if plot2b_is_2d:
-                    # 4D volume: 2D probe plot
-                    initial_slice_b = volume_b[x_idx, y_idx, :, :]
+                    # 2D probe plot - can be from 4D volume OR 3D volume when Plot1 is 1D
+                    if plot1_is_1d and len(volume_b.shape) == 3:
+                        # Volume B is 3D (x,z,u) - when Plot1 is 1D, extract 2D slice (z,u) at x_idx
+                        initial_slice_b = volume_b[x_idx, :, :]
+                        print(f"  Volume B is 3D: Extracting 2D slice (z,u) from 3D volume B at x_index={x_idx}")
+                    elif len(volume_b.shape) == 4:
+                        # Normal 4D volume case (x,y,z,u)
+                        initial_slice_b = volume_b[x_idx, y_idx, :, :]
+                        print(f"  Volume B is 4D: Extracting 2D slice (z,u) from 4D volume B at x_index={x_idx}, y_index={y_idx}")
+                    else:
+                        raise ValueError(f"Unexpected volume_b shape: {volume_b.shape}, expected 3D or 4D")
 
                     # Detect flip for Plot2B
                     plot2b_probe_x_coord_size = None
@@ -1552,7 +1641,9 @@ try:
                             plot2b_probe_y_coords_array = None
 
                     # Map probe coordinates to slice dimensions for Plot2B
-                    # initial_slice_b has shape (z_size, u_size) from volume_b[x, y, :, :]
+                    # initial_slice_b has shape (z_size, u_size) 
+                    # When Plot1 is 1D and volume_b is 3D: from volume_b[x, :, :] -> (z, u)
+                    # When volume_b is 4D: from volume_b[x, y, :, :] -> (z, u)
                     # Dimension 0 (rows, z) = z_size, Dimension 1 (cols, u) = u_size
                     # For PROBE_2DPlot: x_coords maps to columns (dimension 1), y_coords maps to rows (dimension 0)
                     if plot2b_probe_x_coords_array is not None and plot2b_probe_y_coords_array is not None:
@@ -1658,18 +1749,21 @@ try:
                     # No manual tick settings needed - Bokeh will automatically choose appropriate spacing
 
                     # VERIFICATION: For 4D volume (x, y, z, u), Plot2B shows slice (z, u)
-                    # - initial_slice_b = volume_b[:, :, :, :] gives shape (z, u) = (volume_b.shape[2], volume_b.shape[3])
+                    # - initial_slice_b shape depends on volume_b dimensions
                     # - We CANNOT assume data.shape[0] = y-axis and data.shape[1] = x-axis
-                    # - Instead: z is from volume_b.shape[2], u is from volume_b.shape[3]
                     # - Bokeh image() interprets: data.shape[0] = rows = y-axis (height), data.shape[1] = cols = x-axis (width)
                     # - So we need to ensure z and u are correctly mapped to y and x axes based on coordinate arrays
                     print("🔍 VERIFICATION: Plot2B Bokeh image() data format expectations:")
-                    print(f"   For 4D volume (x, y, z, u): slice has shape (z, u) = (volume_b.shape[2], volume_b.shape[3])")
+                    if plot1_is_1d and len(volume_b.shape) == 3:
+                        print(f"   For 3D volume (x, z, u) with Plot1 1D: slice has shape (z, u) = (volume_b.shape[1], volume_b.shape[2])")
+                        print(f"   Volume dimensions: z={volume_b.shape[1]}, u={volume_b.shape[2]}")
+                    else:
+                        print(f"   For 4D volume (x, y, z, u): slice has shape (z, u) = (volume_b.shape[2], volume_b.shape[3])")
+                        if 'volume_b' in locals() or 'volume_b' in globals():
+                            print(f"   Volume dimensions: z={volume_b.shape[2]}, u={volume_b.shape[3]}")
                     print(f"   Bokeh interprets: data.shape[0] = rows = y-axis (height)")
                     print(f"   Bokeh interprets: data.shape[1] = cols = x-axis (width)")
                     print(f"   Our data.shape: {plot2b_data.shape if plot2b_data is not None else 'None'} (after flip if needed)")
-                    if 'volume_b' in locals() or 'volume_b' in globals():
-                        print(f"   Volume dimensions: z={volume_b.shape[2]}, u={volume_b.shape[3]}")
                     print(f"   Our x_coords (px) length: {len(plot2b_x_coords) if plot2b_x_coords is not None else 'None'} (should match data.shape[1])")
                     print(f"   Our y_coords (py) length: {len(plot2b_y_coords) if plot2b_y_coords is not None else 'None'} (should match data.shape[0])")
                     if plot2b_data is not None and plot2b_x_coords is not None and plot2b_y_coords is not None:
@@ -1731,10 +1825,25 @@ try:
                     plot2b_original_max = probe2b_max_val
 
                     # Initialize rect2b for Plot2B selection
-                    rect2b = Rectangle(0, 0, volume_b.shape[2] - 1, volume_b.shape[3] - 1)
+                    # Handle both 3D and 4D volumes
+                    if plot1_is_1d and len(volume_b.shape) == 3:
+                        # Volume B is 3D (x,z,u) - use z and u dimensions
+                        rect2b = Rectangle(0, 0, volume_b.shape[1] - 1, volume_b.shape[2] - 1)  # Z, U from 3D volume
+                    else:
+                        # Normal 4D volume case
+                        rect2b = Rectangle(0, 0, volume_b.shape[2] - 1, volume_b.shape[3] - 1)  # Z, U
                 else:
-                    # 3D volume: 1D probe plot
-                    initial_slice_1d_b = volume_b[x_idx, y_idx, :]
+                    # 1D probe plot - can be from 3D volume OR 2D volume when Plot1 is 1D
+                    if plot1_is_1d and len(volume_b.shape) == 2:
+                        # Volume B is 2D (x,z) - when Plot1 is 1D, extract 1D slice z at x_idx
+                        initial_slice_1d_b = volume_b[x_idx, :]
+                        print(f"  Volume B is 2D: Extracting 1D slice z from 2D volume B at x_index={x_idx}")
+                    elif len(volume_b.shape) == 3:
+                        # Normal 3D volume case (x,y,z)
+                        initial_slice_1d_b = volume_b[x_idx, y_idx, :]
+                        print(f"  Volume B is 3D: Extracting 1D slice z from 3D volume B at x_index={x_idx}, y_index={y_idx}")
+                    else:
+                        raise ValueError(f"Unexpected volume_b shape for 1D Plot2B: {volume_b.shape}, expected 2D or 3D")
                     # Store for later use in range controls
                     probe2b_min_val = float(np.percentile(initial_slice_1d_b[~np.isnan(initial_slice_1d_b)], 1))
                     probe2b_max_val = float(np.percentile(initial_slice_1d_b[~np.isnan(initial_slice_1d_b)], 99))
@@ -1796,7 +1905,16 @@ try:
                     plot2b.line("x", "y", source=source2b, line_width=2)
 
                     # Initialize rect2b for Plot2B selection (1D)
-                    rect2b = Rectangle(0, 0, volume_b.shape[2] - 1, volume_b.shape[2] - 1)
+                    # Handle both 2D and 3D volumes
+                    if plot1_is_1d and len(volume_b.shape) == 2:
+                        # Volume B is 2D (x,z) - use z dimension
+                        rect2b = Rectangle(0, 0, volume_b.shape[1] - 1, volume_b.shape[1] - 1)
+                    elif len(volume_b.shape) == 3:
+                        # Normal 3D volume case (x,y,z)
+                        rect2b = Rectangle(0, 0, volume_b.shape[2] - 1, volume_b.shape[2] - 1)
+                    else:
+                        # Fallback
+                        rect2b = Rectangle(0, 0, 0, 0)
         except Exception as e:
             import traceback
             print(f"Failed to create Plot2B: {e}")
@@ -1875,24 +1993,42 @@ try:
         plot3.xaxis.axis_label = "X"
         plot3.yaxis.axis_label = "Y"
 
-    # Create empty source3; Plot3 will be populated on demand
-    source3 = ColumnDataSource(
-        data={
-            "image": [],
-            "x": [],
-            "y": [],
-            "dw": [],
-            "dh": [],
-        }
-    )
-
-    # Create color mapper for Plot3
-    color_mapper3 = LinearColorMapper(palette="Viridis256", low=0.0, high=1.0)
-    image_renderer3 = plot3.image(
-        "image", source=source3, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper3
-    )
-    colorbar3 = ColorBar(color_mapper=color_mapper3, title="", location=(1, 0))
-    plot3.add_layout(colorbar3, "right")
+    # Create Plot3 renderer based on Plot1 type (1D line plot or 2D image)
+    image_renderer3 = None
+    line_renderer3 = None
+    source3 = None
+    source3_1d = None
+    color_mapper3 = None
+    colorbar3 = None
+    
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # Plot3 should be a 1D line plot when Plot1 is 1D
+        source3_1d = ColumnDataSource(
+            data={
+                "x": [],
+                "y": [],
+            }
+        )
+        # Create line renderer for 1D plot
+        line_renderer3 = plot3.line("x", "y", source=source3_1d, line_width=2, line_color="blue")
+    else:
+        # Plot3 should be a 2D image when Plot1 is 2D
+        source3 = ColumnDataSource(
+            data={
+                "image": [],
+                "x": [],
+                "y": [],
+                "dw": [],
+                "dh": [],
+            }
+        )
+        # Create color mapper for Plot3
+        color_mapper3 = LinearColorMapper(palette="Viridis256", low=0.0, high=1.0)
+        image_renderer3 = plot3.image(
+            "image", source=source3, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper3
+        )
+        colorbar3 = ColorBar(color_mapper=color_mapper3, title="", location=(1, 0))
+        plot3.add_layout(colorbar3, "right")
 
     # Create sliders using SCLib UI (compact with inline labels)
     x_slider = create_slider(
@@ -2159,7 +2295,11 @@ try:
             return
 
         x_idx = get_x_index()
-        y_idx = get_y_index()
+        # When Plot1 is 1D, there's no y_idx - use x_idx to select volume slice
+        if plot1_is_1d:
+            y_idx = None  # Not used when Plot1 is 1D
+        else:
+            y_idx = get_y_index()
 
         if plot2b_is_2d:
             # 4D volume: update 2D image plot
@@ -2191,7 +2331,15 @@ try:
                             self.process_4dnexus._cached_volume_b_path = self.process_4dnexus.volume_picked_b
 
                     if volume_b is not None:
-                        new_slice_b = volume_b[x_idx, y_idx, :, :]
+                        # Extract 2D slice - handle both 3D and 4D volumes
+                        if plot1_is_1d and len(volume_b.shape) == 3:
+                            # Volume B is 3D (x,z,u) - when Plot1 is 1D, extract 2D slice (z,u) at x_idx
+                            new_slice_b = volume_b[x_idx, :, :]
+                        elif len(volume_b.shape) == 4:
+                            # Normal 4D volume case (x,y,z,u)
+                            new_slice_b = volume_b[x_idx, y_idx, :, :]
+                        else:
+                            raise ValueError(f"Unexpected volume_b shape: {volume_b.shape}, expected 3D or 4D")
 
                         # Update probe_2d_plot_b's data and use its flipped methods
                         probe_2d_plot_b.data = new_slice_b
@@ -2322,7 +2470,15 @@ try:
                             self.process_4dnexus._cached_volume_b_path = self.process_4dnexus.volume_picked_b
 
                     if volume_b is not None:
-                        slice_1d_b = volume_b[x_idx, y_idx, :]
+                        # Extract 1D slice - handle both 2D and 3D volumes
+                        if plot1_is_1d and len(volume_b.shape) == 2:
+                            # Volume B is 2D (x,z) - when Plot1 is 1D, extract 1D slice z at x_idx
+                            slice_1d_b = volume_b[x_idx, :]
+                        elif len(volume_b.shape) == 3:
+                            # Normal 3D volume case (x,y,z)
+                            slice_1d_b = volume_b[x_idx, y_idx, :]
+                        else:
+                            raise ValueError(f"Unexpected volume_b shape for 1D Plot2B: {volume_b.shape}, expected 2D or 3D")
 
                         # Try to use probe coordinates if available
                         if hasattr(self.process_4dnexus, 'probe_x_coords_picked_b') and self.process_4dnexus.probe_x_coords_picked_b:
@@ -5986,7 +6142,15 @@ try:
                                     self.process_4dnexus._cached_volume_b_path = self.process_4dnexus.volume_picked_b
 
                             if volume_b is not None:
-                                current_slice = volume_b[x_idx, y_idx, :, :]
+                                # Extract 2D slice - handle both 3D and 4D volumes
+                                if plot1_is_1d and len(volume_b.shape) == 3:
+                                    # Volume B is 3D (x,z,u) - when Plot1 is 1D, extract 2D slice (z,u) at x_idx
+                                    current_slice = volume_b[x_idx, :, :]
+                                elif len(volume_b.shape) == 4:
+                                    # Normal 4D volume case (x,y,z,u)
+                                    current_slice = volume_b[x_idx, y_idx, :, :]
+                                else:
+                                    raise ValueError(f"Unexpected volume_b shape: {volume_b.shape}, expected 3D or 4D")
                                 # Get coordinate sizes for flip detection
                                 plot2b_probe_x_coord_size_local = None
                                 plot2b_probe_y_coord_size_local = None
@@ -6035,7 +6199,15 @@ try:
                                     self.process_4dnexus._cached_volume_b_path = self.process_4dnexus.volume_picked_b
 
                             if volume_b is not None:
-                                current_slice = volume_b[x_idx, y_idx, :]
+                                # Extract 1D slice - handle both 2D and 3D volumes
+                                if plot1_is_1d and len(volume_b.shape) == 2:
+                                    # Volume B is 2D (x,z) - when Plot1 is 1D, extract 1D slice z at x_idx
+                                    current_slice = volume_b[x_idx, :]
+                                elif len(volume_b.shape) == 3:
+                                    # Normal 3D volume case (x,y,z)
+                                    current_slice = volume_b[x_idx, y_idx, :]
+                                else:
+                                    raise ValueError(f"Unexpected volume_b shape for 1D Plot2B: {volume_b.shape}, expected 2D or 3D")
                                 if current_slice is not None and current_slice.size > 0:
                                     new_min = float(np.percentile(current_slice[~np.isnan(current_slice)], 1))
                                     new_max = float(np.percentile(current_slice[~np.isnan(current_slice)], 99))
@@ -6881,10 +7053,18 @@ try:
                                      not (np.isnan(left_val) or np.isnan(right_val) or 
                                           np.isnan(bottom_val) or np.isnan(top_val)))
 
-                # Force 4D path if volume has 4 dimensions (should not be 3D)
+                # Check volume dimensions and Plot1 mode
                 is_actually_3d = len(volume.shape) == 3
+                # When Plot1 is 1D and volume is 3D, treat it like 4D (Plot2 shows 2D slice)
+                if is_actually_3d and plot1_is_1d:
+                    # When Plot1 is 1D, 3D volume (x,z,u) means Plot2 shows (z,u)
+                    # Sum over selected (z,u) region to get 1D result (x)
+                    # This is handled in the 4D path below
+                    is_actually_3d = False  # Use 4D path logic
+                
                 if is_actually_3d:
-                    # For 3D: sum over Z dimension for selected range
+                    # Normal 3D case: When Plot1 is 2D, 3D volume means Plot2 shows 1D probe
+                    # Sum over Z dimension for selected range to get 2D (x,y)
                     if use_box_annotation:
                         # Convert annotation coordinates to indices (use extracted values)
                         if hasattr(self.process_4dnexus, 'probe_x_coords_picked') and self.process_4dnexus.probe_x_coords_picked:
@@ -6914,6 +7094,7 @@ try:
                         z_hi = min(z_lo + 1, volume.shape[2])
 
                     print(f"  ✅ Using Z range: {z_lo} to {z_hi}")
+                    # Normal 3D case: sum over Z dimension to get 2D (x,y)
                     piece = volume[:, :, z_lo:z_hi]
                     img = np.sum(piece, axis=2)  # sum over Z dimension
                 else:
@@ -6988,14 +7169,15 @@ try:
 
                     # Extract only the selected region (this should be fast if bounds are correct)
                     t_slice = time.time()
-                    if len(volume.shape) == 3:
-                        # Volume is 3D (x,z,u) - extract slice at all x positions
+                    if len(volume.shape) == 3 and plot1_is_1d:
+                        # Volume is 3D (x,z,u) when Plot1 is 1D - extract slice at all x positions
+                        # Plot2 shows (z,u), so sum over selected (z,u) to get 1D (x)
                         print(f"  🔄 Extracting volume slice: volume[:, {z_lo}:{z_hi}, {u_lo}:{u_hi}]")
                         piece = volume[:, z_lo:z_hi, u_lo:u_hi]
                         print(f"  ⏱️  Slicing took {time.time() - t_slice:.3f}s. Piece shape: {piece.shape}")
-                        print(f"  🔄 Summing over Z and U dimensions...")
+                        print(f"  🔄 Summing over Z and U dimensions to get 1D result...")
                         t_sum = time.time()
-                        img = np.sum(piece, axis=(1, 2))  # sum over Z and U (axes 1 and 2)
+                        img = np.sum(piece, axis=(1, 2))  # sum over Z and U (axes 1 and 2) to get 1D (x)
                     elif len(volume.shape) == 4:
                         # Normal 4D volume case (x,y,z,u)
                         print(f"  🔄 Extracting volume slice: volume[:, :, {z_lo}:{z_hi}, {u_lo}:{u_hi}]")
@@ -7003,9 +7185,9 @@ try:
                         print(f"  ⏱️  Slicing took {time.time() - t_slice:.3f}s. Piece shape: {piece.shape}")
                         print(f"  🔄 Summing over Z and U dimensions...")
                         t_sum = time.time()
-                        img = np.sum(piece, axis=(2, 3))  # sum over Z and U (axes 2 and 3)
+                        img = np.sum(piece, axis=(2, 3))  # sum over Z and U (axes 2 and 3) to get 2D (x,y)
                     else:
-                        raise ValueError(f"Unexpected volume shape: {volume.shape}, expected 3D or 4D")
+                        raise ValueError(f"Unexpected volume shape: {volume.shape}, expected 3D (with Plot1 1D) or 4D")
                     t_slice_done = time.time()
                     t_sum_done = time.time()
                     print(f"  ⏱️  Summing took {t_sum_done - t_sum:.3f}s. Result shape: {img.shape}")
@@ -7033,53 +7215,88 @@ try:
                 # Track that Plot3 was computed from Plot2a (main volume)
                 plot3_source_volume[0] = 'volume'  # Track which volume Plot3 was computed from
 
-                # Update source3 data in a separate callback to ensure plot redraws
-                def update_plot3_source():
-                    source3.data = {
-                        "image": [plot3_img_data],
-                        "x": [plot3_x_start],
-                        "dw": [plot3_x_end - plot3_x_start],
-                        "y": [plot3_y_start],
-                        "dh": [plot3_y_end - plot3_y_start],
-                    }
-                    # Bokeh 3.x automatically detects data changes, no need for change.emit()
-
-                # Schedule the update in the next Bokeh tick
-                curdoc().add_next_tick_callback(update_plot3_source)
-
-                # Update range based on mode (use the image data we just computed)
-                try:
-                    if range3_min_input is not None and range3_min_input.disabled:
-                        # Dynamic mode - compute from actual image data
-                        plot3_min = float(np.percentile(plot3_img_data[~np.isnan(plot3_img_data) & ~np.isinf(plot3_img_data)], 1))
-                        plot3_max = float(np.percentile(plot3_img_data[~np.isnan(plot3_img_data) & ~np.isinf(plot3_img_data)], 99))
-                        color_mapper3.low = plot3_min
-                        color_mapper3.high = plot3_max
-                        # Update range inputs so user can see the computed values
-                        update_range_inputs_safely(
-                            range3_min_input, range3_max_input, plot3_min, plot3_max, use_callback=False
-                        )
-                        print(f"  ✅ Plot3 range updated dynamically: min={plot3_min:.6f}, max={plot3_max:.6f}")
+                # Update Plot3 based on Plot1 type (1D line plot or 2D image)
+                if plot1_is_1d and plot1_1d_plot is not None and source3_1d is not None:
+                    # Plot3 should be a 1D line plot when Plot1 is 1D
+                    # img is 1D, so create line plot data
+                    if len(img.shape) == 1:
+                        # Use plot3_x_coords for x-axis
+                        plot3_x_data = plot3_x_coords if plot3_x_coords is not None else np.arange(len(img))
+                        plot3_y_data = img
                     else:
-                        # User Specified mode - use input values or default [0, 1] for normalized data
-                        try:
-                            if range3_min_input is not None and range3_min_input.value:
-                                min_val = float(range3_min_input.value)
-                            else:
-                                min_val = 0.0
-                            if range3_max_input is not None and range3_max_input.value:
-                                max_val = float(range3_max_input.value)
-                            else:
-                                max_val = 1.0
-                            color_mapper3.low = min_val
-                            color_mapper3.high = max_val
-                        except:
+                        # If somehow 2D, flatten it
+                        plot3_x_data = plot3_x_coords if plot3_x_coords is not None else np.arange(img.size)
+                        plot3_y_data = img.flatten()
+                    
+                    def update_plot3_source_1d():
+                        source3_1d.data = {
+                            "x": plot3_x_data,
+                            "y": plot3_y_data,
+                        }
+                        # Update y_range to fit the data
+                        if len(plot3_y_data) > 0:
+                            y_min = float(np.min(plot3_y_data))
+                            y_max = float(np.max(plot3_y_data))
+                            if y_max > y_min:
+                                plot3.y_range.start = y_min - 0.1 * (y_max - y_min)
+                                plot3.y_range.end = y_max + 0.1 * (y_max - y_min)
+                    
+                    # Schedule the update in the next Bokeh tick
+                    curdoc().add_next_tick_callback(update_plot3_source_1d)
+                else:
+                    # Plot3 should be a 2D image when Plot1 is 2D
+                    def update_plot3_source():
+                        source3.data = {
+                            "image": [plot3_img_data],
+                            "x": [plot3_x_start],
+                            "dw": [plot3_x_end - plot3_x_start],
+                            "y": [plot3_y_start],
+                            "dh": [plot3_y_end - plot3_y_start],
+                        }
+                        # Bokeh 3.x automatically detects data changes, no need for change.emit()
+
+                    # Schedule the update in the next Bokeh tick
+                    curdoc().add_next_tick_callback(update_plot3_source)
+
+                # Update range based on mode (only for 2D images, not 1D line plots)
+                if not (plot1_is_1d and plot1_1d_plot is not None):
+                    # Only update color mapper for 2D images
+                    try:
+                        if range3_min_input is not None and range3_min_input.disabled:
+                            # Dynamic mode - compute from actual image data
+                            plot3_min = float(np.percentile(plot3_img_data[~np.isnan(plot3_img_data) & ~np.isinf(plot3_img_data)], 1))
+                            plot3_max = float(np.percentile(plot3_img_data[~np.isnan(plot3_img_data) & ~np.isinf(plot3_img_data)], 99))
+                            if color_mapper3 is not None:
+                                color_mapper3.low = plot3_min
+                                color_mapper3.high = plot3_max
+                            # Update range inputs so user can see the computed values
+                            update_range_inputs_safely(
+                                range3_min_input, range3_max_input, plot3_min, plot3_max, use_callback=False
+                            )
+                            print(f"  ✅ Plot3 range updated dynamically: min={plot3_min:.6f}, max={plot3_max:.6f}")
+                        else:
+                            # User Specified mode - use input values or default [0, 1] for normalized data
+                            try:
+                                if range3_min_input is not None and range3_min_input.value:
+                                    min_val = float(range3_min_input.value)
+                                else:
+                                    min_val = 0.0
+                                if range3_max_input is not None and range3_max_input.value:
+                                    max_val = float(range3_max_input.value)
+                                else:
+                                    max_val = 1.0
+                                if color_mapper3 is not None:
+                                    color_mapper3.low = min_val
+                                    color_mapper3.high = max_val
+                            except:
+                                if color_mapper3 is not None:
+                                    color_mapper3.low = 0.0
+                                    color_mapper3.high = 1.0
+                    except NameError:
+                        # Range inputs not defined yet - use default [0, 1] for normalized data
+                        if color_mapper3 is not None:
                             color_mapper3.low = 0.0
                             color_mapper3.high = 1.0
-                except NameError:
-                    # Range inputs not defined yet - use default [0, 1] for normalized data
-                    color_mapper3.low = 0.0
-                    color_mapper3.high = 1.0
 
                 print(f"  ✅ Plot3 computed successfully. Image shape: {plot3_img_data.shape}")
                 t_end = _time.time()
@@ -7135,23 +7352,36 @@ try:
             
             try:
                 if not plot2b_is_2d:
-                    # For 3D: sum over Z dimension
+                    # Plot2B is 1D - sum over Z dimension
                     if selection_left_2b is not None and selection_right_2b is not None:
                         z1, z2 = selection_left_2b, selection_right_2b
                         print(f"  ✅ Using BoxSelectTool selection (plot2b): z=[{z1}, {z2}]")
                     else:
                         z1, z2 = rect2b.min_x, rect2b.max_x
                         print(f"  ⚠️ Using rect2b (fallback): z=[{z1}, {z2}]")
-                    z_lo, z_hi = (int(z1), int(z2)) if z1 <= z2 else (int(z2), int(z1))
-                    z_lo = max(0, min(z_lo, volume_b.shape[2]-1))
-                    z_hi = max(0, min(z_hi, volume_b.shape[2]-1))
-                    if z_hi <= z_lo:
-                        z_hi = min(z_lo + 1, volume_b.shape[2])
-
-                    piece = volume_b[:, :, z_lo:z_hi]
-                    img = np.sum(piece, axis=2)
+                    
+                    # Determine correct dimension indices based on Plot1 mode and volume_b shape
+                    if plot1_is_1d and len(volume_b.shape) == 2:
+                        # When Plot1 is 1D and volume_b is 2D (x,z), Plot2B shows 1D (z)
+                        # Sum over z to get 1D (x)
+                        z_lo, z_hi = (int(z1), int(z2)) if z1 <= z2 else (int(z2), int(z1))
+                        z_lo = max(0, min(z_lo, volume_b.shape[1]-1))
+                        z_hi = max(0, min(z_hi, volume_b.shape[1]-1))
+                        if z_hi <= z_lo:
+                            z_hi = min(z_lo + 1, volume_b.shape[1])
+                        piece = volume_b[:, z_lo:z_hi]
+                        img = np.sum(piece, axis=1)  # sum over z to get 1D (x)
+                    else:
+                        # Normal 3D case: volume_b is (x,y,z), sum over z to get 2D (x,y)
+                        z_lo, z_hi = (int(z1), int(z2)) if z1 <= z2 else (int(z2), int(z1))
+                        z_lo = max(0, min(z_lo, volume_b.shape[2]-1))
+                        z_hi = max(0, min(z_hi, volume_b.shape[2]-1))
+                        if z_hi <= z_lo:
+                            z_hi = min(z_lo + 1, volume_b.shape[2])
+                        piece = volume_b[:, :, z_lo:z_hi]
+                        img = np.sum(piece, axis=2)  # sum over z to get 2D (x,y)
                 else:
-                    # For 4D: sum over Z and U dimensions
+                    # Plot2B is 2D - sum over Z and U dimensions
                     plot2b_needs_flip = probe_2d_plot_b.needs_flip if hasattr(probe_2d_plot_b, 'needs_flip') else False
                     
                     # Use BoxSelectTool selection if available
@@ -7177,17 +7407,33 @@ try:
 
                     z_lo, z_hi = (int(z1), int(z2)) if z1 <= z2 else (int(z2), int(z1))
                     u_lo, u_hi = (int(u1), int(u2)) if u1 <= u2 else (int(u2), int(u1))
-                    z_lo = max(0, min(z_lo, volume_b.shape[2]-1))
-                    z_hi = max(0, min(z_hi, volume_b.shape[2]-1))
-                    u_lo = max(0, min(u_lo, volume_b.shape[3]-1))
-                    u_hi = max(0, min(u_hi, volume_b.shape[3]-1))
-                    if z_hi <= z_lo:
-                        z_hi = min(z_lo + 1, volume_b.shape[2])
-                    if u_hi <= u_lo:
-                        u_hi = min(u_lo + 1, volume_b.shape[3])
-
-                    piece = volume_b[:, :, z_lo:z_hi, u_lo:u_hi]
-                    img = np.sum(piece, axis=(2, 3))
+                    
+                    # Determine correct dimension indices based on Plot1 mode and volume_b shape
+                    if plot1_is_1d and len(volume_b.shape) == 3:
+                        # When Plot1 is 1D and volume_b is 3D (x,z,u), Plot2B shows 2D (z,u)
+                        # Sum over (z,u) to get 1D (x)
+                        z_lo = max(0, min(z_lo, volume_b.shape[1]-1))
+                        z_hi = max(0, min(z_hi, volume_b.shape[1]-1))
+                        u_lo = max(0, min(u_lo, volume_b.shape[2]-1))
+                        u_hi = max(0, min(u_hi, volume_b.shape[2]-1))
+                        if z_hi <= z_lo:
+                            z_hi = min(z_lo + 1, volume_b.shape[1])
+                        if u_hi <= u_lo:
+                            u_hi = min(u_lo + 1, volume_b.shape[2])
+                        piece = volume_b[:, z_lo:z_hi, u_lo:u_hi]
+                        img = np.sum(piece, axis=(1, 2))  # sum over z and u to get 1D (x)
+                    else:
+                        # Normal 4D case: volume_b is (x,y,z,u), sum over (z,u) to get 2D (x,y)
+                        z_lo = max(0, min(z_lo, volume_b.shape[2]-1))
+                        z_hi = max(0, min(z_hi, volume_b.shape[2]-1))
+                        u_lo = max(0, min(u_lo, volume_b.shape[3]-1))
+                        u_hi = max(0, min(u_hi, volume_b.shape[3]-1))
+                        if z_hi <= z_lo:
+                            z_hi = min(z_lo + 1, volume_b.shape[2])
+                        if u_hi <= u_lo:
+                            u_hi = min(u_lo + 1, volume_b.shape[3])
+                        piece = volume_b[:, :, z_lo:z_hi, u_lo:u_hi]
+                        img = np.sum(piece, axis=(2, 3))  # sum over z and u to get 2D (x,y)
 
                 # Normalize to [0,1]
                 img = np.nan_to_num(img, nan=0.0, posinf=0.0, neginf=0.0)
@@ -7212,53 +7458,88 @@ try:
                 # Track that Plot3 was computed from Plot2b (volume_b)
                 plot3_source_volume[0] = 'volume_b'  # Track which volume Plot3 was computed from
 
-                # Update source3 data in a separate callback to ensure plot redraws
-                def update_plot3_source_2b():
-                    source3.data = {
-                        "image": [plot3_img_data_2b],
-                        "x": [plot3_x_start_2b],
-                        "dw": [plot3_x_end_2b - plot3_x_start_2b],
-                        "y": [plot3_y_start_2b],
-                        "dh": [plot3_y_end_2b - plot3_y_start_2b],
-                    }
-                    # Bokeh 3.x automatically detects data changes, no need for change.emit()
-
-                # Schedule the update in the next Bokeh tick
-                curdoc().add_next_tick_callback(update_plot3_source_2b)
-
-                # Update range based on mode (use the image data we just computed)
-                try:
-                    if range3_min_input is not None and range3_min_input.disabled:
-                        # Dynamic mode - compute from actual image data
-                        plot3_min = float(np.percentile(plot3_img_data_2b[~np.isnan(plot3_img_data_2b) & ~np.isinf(plot3_img_data_2b)], 1))
-                        plot3_max = float(np.percentile(plot3_img_data_2b[~np.isnan(plot3_img_data_2b) & ~np.isinf(plot3_img_data_2b)], 99))
-                        color_mapper3.low = plot3_min
-                        color_mapper3.high = plot3_max
-                        # Update range inputs so user can see the computed values
-                        update_range_inputs_safely(
-                            range3_min_input, range3_max_input, plot3_min, plot3_max, use_callback=False
-                        )
-                        print(f"  ✅ Plot3 range updated dynamically: min={plot3_min:.6f}, max={plot3_max:.6f}")
+                # Update Plot3 based on Plot1 type (1D line plot or 2D image)
+                if plot1_is_1d and plot1_1d_plot is not None and source3_1d is not None:
+                    # Plot3 should be a 1D line plot when Plot1 is 1D
+                    # img is 1D, so create line plot data
+                    if len(img.shape) == 1:
+                        # Use plot3_x_coords for x-axis
+                        plot3_x_data_2b = plot3_x_coords if plot3_x_coords is not None else np.arange(len(img))
+                        plot3_y_data_2b = img
                     else:
-                        # User Specified mode - use input values or default [0, 1] for normalized data
-                        try:
-                            if range3_min_input is not None and range3_min_input.value:
-                                min_val = float(range3_min_input.value)
-                            else:
-                                min_val = 0.0
-                            if range3_max_input is not None and range3_max_input.value:
-                                max_val = float(range3_max_input.value)
-                            else:
-                                max_val = 1.0
-                            color_mapper3.low = min_val
-                            color_mapper3.high = max_val
-                        except:
+                        # If somehow 2D, flatten it
+                        plot3_x_data_2b = plot3_x_coords if plot3_x_coords is not None else np.arange(img.size)
+                        plot3_y_data_2b = img.flatten()
+                    
+                    def update_plot3_source_2b_1d():
+                        source3_1d.data = {
+                            "x": plot3_x_data_2b,
+                            "y": plot3_y_data_2b,
+                        }
+                        # Update y_range to fit the data
+                        if len(plot3_y_data_2b) > 0:
+                            y_min = float(np.min(plot3_y_data_2b))
+                            y_max = float(np.max(plot3_y_data_2b))
+                            if y_max > y_min:
+                                plot3.y_range.start = y_min - 0.1 * (y_max - y_min)
+                                plot3.y_range.end = y_max + 0.1 * (y_max - y_min)
+                    
+                    # Schedule the update in the next Bokeh tick
+                    curdoc().add_next_tick_callback(update_plot3_source_2b_1d)
+                else:
+                    # Plot3 should be a 2D image when Plot1 is 2D
+                    def update_plot3_source_2b():
+                        source3.data = {
+                            "image": [plot3_img_data_2b],
+                            "x": [plot3_x_start_2b],
+                            "dw": [plot3_x_end_2b - plot3_x_start_2b],
+                            "y": [plot3_y_start_2b],
+                            "dh": [plot3_y_end_2b - plot3_y_start_2b],
+                        }
+                        # Bokeh 3.x automatically detects data changes, no need for change.emit()
+
+                    # Schedule the update in the next Bokeh tick
+                    curdoc().add_next_tick_callback(update_plot3_source_2b)
+
+                # Update range based on mode (only for 2D images, not 1D line plots)
+                if not (plot1_is_1d and plot1_1d_plot is not None):
+                    # Only update color mapper for 2D images
+                    try:
+                        if range3_min_input is not None and range3_min_input.disabled:
+                            # Dynamic mode - compute from actual image data
+                            plot3_min = float(np.percentile(plot3_img_data_2b[~np.isnan(plot3_img_data_2b) & ~np.isinf(plot3_img_data_2b)], 1))
+                            plot3_max = float(np.percentile(plot3_img_data_2b[~np.isnan(plot3_img_data_2b) & ~np.isinf(plot3_img_data_2b)], 99))
+                            if color_mapper3 is not None:
+                                color_mapper3.low = plot3_min
+                                color_mapper3.high = plot3_max
+                            # Update range inputs so user can see the computed values
+                            update_range_inputs_safely(
+                                range3_min_input, range3_max_input, plot3_min, plot3_max, use_callback=False
+                            )
+                            print(f"  ✅ Plot3 range updated dynamically: min={plot3_min:.6f}, max={plot3_max:.6f}")
+                        else:
+                            # User Specified mode - use input values or default [0, 1] for normalized data
+                            try:
+                                if range3_min_input is not None and range3_min_input.value:
+                                    min_val = float(range3_min_input.value)
+                                else:
+                                    min_val = 0.0
+                                if range3_max_input is not None and range3_max_input.value:
+                                    max_val = float(range3_max_input.value)
+                                else:
+                                    max_val = 1.0
+                                if color_mapper3 is not None:
+                                    color_mapper3.low = min_val
+                                    color_mapper3.high = max_val
+                            except:
+                                if color_mapper3 is not None:
+                                    color_mapper3.low = 0.0
+                                    color_mapper3.high = 1.0
+                    except NameError:
+                        # Range inputs not defined yet - use default [0, 1] for normalized data
+                        if color_mapper3 is not None:
                             color_mapper3.low = 0.0
                             color_mapper3.high = 1.0
-                except NameError:
-                    # Range inputs not defined yet - use default [0, 1] for normalized data
-                    color_mapper3.low = 0.0
-                    color_mapper3.high = 1.0
 
                 print(f"  ✅ Plot3 computed successfully from Plot2B. Image shape: {plot3_img_data_2b.shape}")
             except Exception as e:
