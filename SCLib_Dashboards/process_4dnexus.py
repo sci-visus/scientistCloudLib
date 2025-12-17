@@ -472,7 +472,8 @@ class Process4dNexus:
             self.volume_picked = "map_mi_sic_0p33mm_002/data/PIL11"
         if self.x_coords_picked is None:
             self.x_coords_picked = "map_mi_sic_0p33mm_002/data/samx"
-        if self.y_coords_picked is None:
+        # Only set default y_coords if Plot1 is not 1D (when Plot1 is 1D, y_coords should remain None)
+        if self.y_coords_picked is None and not getattr(self, 'plot1_is_1d', False):
             self.y_coords_picked = "map_mi_sic_0p33mm_002/data/samz"
         # Only set presample/postsample defaults if not in single dataset mode
         if getattr(self, 'plot1_single_dataset_picked', None) is None:
@@ -506,21 +507,28 @@ class Process4dNexus:
                 print(f"WARNING: unable to open volume_picked_b '{self.volume_picked_b}': {_e}")
         # Load coordinate datasets and ensure they're at least 1D
         x_coords_raw = np.array(f.get(self.x_coords_picked))
-        y_coords_raw = np.array(f.get(self.y_coords_picked))
         
-        # Ensure arrays are at least 1D (handle scalar or 0D arrays)
+        # Only load y_coords if it's not None (skip when Plot1 is 1D)
+        if self.y_coords_picked is not None:
+            y_coords_raw = np.array(f.get(self.y_coords_picked))
+            # Ensure arrays are at least 1D (handle scalar or 0D arrays)
+            if y_coords_raw.ndim == 0:
+                self.y_coords_dataset = np.array([y_coords_raw])
+            else:
+                self.y_coords_dataset = np.atleast_1d(y_coords_raw)
+            print(f"  Loaded y_coords: shape={self.y_coords_dataset.shape}, ndim={self.y_coords_dataset.ndim}")
+        else:
+            # When Plot1 is 1D, y_coords_dataset should be None
+            self.y_coords_dataset = None
+            print(f"  y_coords is None (Plot1 is 1D mode)")
+        
+        # Ensure x_coords array is at least 1D
         if x_coords_raw.ndim == 0:
             self.x_coords_dataset = np.array([x_coords_raw])
         else:
             self.x_coords_dataset = np.atleast_1d(x_coords_raw)
-            
-        if y_coords_raw.ndim == 0:
-            self.y_coords_dataset = np.array([y_coords_raw])
-        else:
-            self.y_coords_dataset = np.atleast_1d(y_coords_raw)
         
         print(f"  Loaded x_coords: shape={self.x_coords_dataset.shape}, ndim={self.x_coords_dataset.ndim}")
-        print(f"  Loaded y_coords: shape={self.y_coords_dataset.shape}, ndim={self.y_coords_dataset.ndim}")
         
         # Check if we're in single dataset mode for Plot1
         if getattr(self, 'plot1_single_dataset_picked', None):
@@ -577,45 +585,70 @@ class Process4dNexus:
         # Verify coordinate dimensions match volume dimensions
         print(f"  Volume shape: {self.volume_dataset.shape}")
         print(f"  X coords length: {len(self.x_coords_dataset) if hasattr(self.x_coords_dataset, '__len__') else 'N/A (scalar)'}")
-        print(f"  Y coords length: {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'N/A (scalar)'}")
+        print(f"  Y coords length: {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'N/A (None)'}")
         
         if not hasattr(self.x_coords_dataset, '__len__') or len(self.x_coords_dataset) != self.volume_dataset.shape[0]:
             raise ValueError(
                 f"X coordinates dimension mismatch: volume has {self.volume_dataset.shape[0]} elements in first dimension, "
                 f"but x_coords has {len(self.x_coords_dataset) if hasattr(self.x_coords_dataset, '__len__') else 'scalar'} elements"
             )
-        if not hasattr(self.y_coords_dataset, '__len__') or len(self.y_coords_dataset) != self.volume_dataset.shape[1]:
-            raise ValueError(
-                f"Y coordinates dimension mismatch: volume has {self.volume_dataset.shape[1]} elements in second dimension, "
-                f"but y_coords has {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'scalar'} elements"
-            )
+        # Only check y_coords dimensions if y_coords_dataset is not None (skip when Plot1 is 1D)
+        if self.y_coords_dataset is not None:
+            if not hasattr(self.y_coords_dataset, '__len__') or len(self.y_coords_dataset) != self.volume_dataset.shape[1]:
+                raise ValueError(
+                    f"Y coordinates dimension mismatch: volume has {self.volume_dataset.shape[1]} elements in second dimension, "
+                    f"but y_coords has {len(self.y_coords_dataset) if hasattr(self.y_coords_dataset, '__len__') else 'scalar'} elements"
+                )
+            self.target_y = self.y_coords_dataset.shape[0]
+        else:
+            # When Plot1 is 1D, use volume shape for target_y
+            self.target_y = self.volume_dataset.shape[1] if len(self.volume_dataset.shape) > 1 else 1
 
         self.target_x = self.x_coords_dataset.shape[0]
-        self.target_y = self.y_coords_dataset.shape[0]
         self.target_size = self.target_x * self.target_y
 
         # Create preview based on mode
         if getattr(self, 'plot1_single_dataset_picked', None):
             # Single dataset mode: use the dataset directly
+            plot1_is_1d = getattr(self, 'plot1_is_1d', False)
+            
             try:
-                print(f"  Single dataset shape: {self.single_dataset.shape}, size: {self.single_dataset.size}")
-                print(f"  Target size: {self.target_x} x {self.target_y} = {self.target_x * self.target_y}")
-                
-                # Flatten the dataset if it's not already 1D
-                if self.single_dataset.ndim > 1:
-                    single_dataset_flat = self.single_dataset.flatten()
+                if plot1_is_1d:
+                    # When Plot1 is 1D, the single dataset is 1D and used for Plot1, not for preview
+                    # Use the volume for preview instead
+                    print(f"  Plot1 is 1D mode - using volume for preview")
+                    print(f"  Volume shape: {self.volume_dataset.shape}")
+                    if self.volume_dataset.ndim >= 2:
+                        # Take a slice from the volume for preview (e.g., first slice)
+                        if self.volume_dataset.ndim == 2:
+                            self.preview = np.array(self.volume_dataset)
+                        elif self.volume_dataset.ndim == 3:
+                            self.preview = np.array(self.volume_dataset[0, :, :])
+                        else:  # 4D
+                            self.preview = np.array(self.volume_dataset[0, 0, :, :])
+                    else:
+                        # Fallback: create a simple preview
+                        self.preview = np.zeros((self.target_x, self.target_y), dtype=np.float32)
                 else:
-                    single_dataset_flat = self.single_dataset
-                
-                if single_dataset_flat.size != self.target_x * self.target_y:
-                    raise ValueError(
-                        f"Single dataset size mismatch: dataset has {single_dataset_flat.size} elements, "
-                        f"but expected {self.target_x * self.target_y} (from {self.target_x} x {self.target_y} coords)"
-                    )
-                preview_rect = np.reshape(single_dataset_flat, (self.target_x, self.target_y))
-                
-                # Clean the data - replace any inf and nan values
-                self.preview = np.nan_to_num(preview_rect, nan=0.0, posinf=0.0, neginf=0.0)
+                    # Normal 2D single dataset mode - validate size and reshape
+                    print(f"  Single dataset shape: {self.single_dataset.shape}, size: {self.single_dataset.size}")
+                    print(f"  Target size: {self.target_x} x {self.target_y} = {self.target_x * self.target_y}")
+                    
+                    # Flatten the dataset if it's not already 1D
+                    if self.single_dataset.ndim > 1:
+                        single_dataset_flat = self.single_dataset.flatten()
+                    else:
+                        single_dataset_flat = self.single_dataset
+                    
+                    if single_dataset_flat.size != self.target_x * self.target_y:
+                        raise ValueError(
+                            f"Single dataset size mismatch: dataset has {single_dataset_flat.size} elements, "
+                            f"but expected {self.target_x * self.target_y} (from {self.target_x} x {self.target_y} coords)"
+                        )
+                    preview_rect = np.reshape(single_dataset_flat, (self.target_x, self.target_y))
+                    
+                    # Clean the data - replace any inf and nan values
+                    self.preview = np.nan_to_num(preview_rect, nan=0.0, posinf=0.0, neginf=0.0)
                 
                 # Normalize the data for rendering
                 if np.max(self.preview) > np.min(self.preview):
@@ -710,7 +743,7 @@ class Process4dNexus:
 
         print(f"  Volume shape: {volume_memmap.shape}")
         print(f"  X coords shape: {self.x_coords_dataset.shape}")
-        print(f"  Y coords shape: {self.y_coords_dataset.shape}")
+        print(f"  Y coords shape: {self.y_coords_dataset.shape if self.y_coords_dataset is not None else 'None (Plot1 is 1D)'}")
         print(f"  Preview shape: {self.preview.shape if self.preview is not None else 'None'}")
     
         if self.presample_dataset is not None and self.postsample_dataset is not None:

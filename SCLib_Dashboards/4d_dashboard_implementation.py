@@ -177,11 +177,43 @@ try:
     print(f"Successfully loaded data:")
     print(f"  Volume shape: {volume.shape}")
     print(f"  X coords shape: {x_coords.shape}")
-    print(f"  Y coords shape: {y_coords.shape}")
+    print(f"  Y coords shape: {y_coords.shape if y_coords is not None else 'None (Plot1 is 1D)'}")
 
+    # Check if Plot1 is 1D
+    plot1_is_1d = getattr(self.process_4dnexus, 'plot1_is_1d', False)
+    
     # Check if volume is 3D or 4D
-    is_3d_volume = len(volume.shape) == 3
+    # When Plot1 is 1D, a 3D volume should be treated as 2D for Plot2 (showing z,u slice)
+    # When Plot1 is 1D, a 2D volume should be treated as 1D for Plot2 (showing z)
+    if plot1_is_1d:
+        if len(volume.shape) == 3:
+            # 3D volume (x,z,u) -> Plot2 should be 2D showing (z,u)
+            is_3d_volume = False  # Force 2D plot
+            print(f"  Plot1 is 1D mode: Volume is 3D (x,z,u), Plot2 will be 2D showing (z,u)")
+        elif len(volume.shape) == 2:
+            # 2D volume (x,z) -> Plot2 should be 1D showing z
+            is_3d_volume = True  # Force 1D plot
+            print(f"  Plot1 is 1D mode: Volume is 2D (x,z), Plot2 will be 1D showing z")
+        else:
+            is_3d_volume = len(volume.shape) == 3
+    else:
+        is_3d_volume = len(volume.shape) == 3
+    
     print(f"  Volume dimensionality: {'3D (1D probe plot)' if is_3d_volume else '4D (2D probe plot)'}")
+
+    # Helper variables for dimension indices (for Plot2 z and u dimensions)
+    # When Plot1 is 1D and volume is 3D: z is at index 1, u is at index 2
+    # When volume is 4D: z is at index 2, u is at index 3
+    if plot1_is_1d and len(volume.shape) == 3:
+        z_dim_idx = 1  # z dimension index in volume
+        u_dim_idx = 2  # u dimension index in volume
+        z_size = volume.shape[1]  # size of z dimension
+        u_size = volume.shape[2]  # size of u dimension
+    else:
+        z_dim_idx = 2  # z dimension index in volume (for 4D)
+        u_dim_idx = 3  # u dimension index in volume (for 4D)
+        z_size = volume.shape[2] if len(volume.shape) > 2 else 0  # size of z dimension
+        u_size = volume.shape[3] if len(volume.shape) > 3 else 0  # size of u dimension
 
     # Import datetime
     from datetime import datetime
@@ -285,7 +317,13 @@ try:
     if is_3d_volume:
         rect2 = Rectangle(0, 0, volume.shape[2] - 1, volume.shape[2] - 1)  # 1D probe
     else:
-        rect2 = Rectangle(0, 0, volume.shape[2] - 1, volume.shape[3] - 1)  # Z, U
+        # For 4D volume OR 3D volume when Plot1 is 1D
+        if plot1_is_1d and len(volume.shape) == 3:
+            # When Plot1 is 1D and volume is 3D (x,z,u), use z and u dimensions
+            rect2 = Rectangle(0, 0, volume.shape[1] - 1, volume.shape[2] - 1)  # Z, U from 3D volume
+        else:
+            # Normal 4D volume case
+            rect2 = Rectangle(0, 0, volume.shape[2] - 1, volume.shape[3] - 1)  # Z, U
 
     rect2b = None  # Will be initialized if Plot2B exists
 
@@ -350,107 +388,195 @@ try:
     elif hasattr(self.process_4dnexus, 'preview_picked') and self.process_4dnexus.preview_picked:
         plot1_title = self.process_4dnexus.preview_picked
 
-    # Create Plot1 (Map view) using SCLib MAP_2DPlot class
-    # Pass original labels - the plot object will handle flipping via its methods
-    map_plot = MAP_2DPlot(
-        title=plot1_title,
-        data=preview,
-        x_coords=x_coords,
-        y_coords=y_coords,
-        palette="Viridis256",
-        color_scale=ColorScale.LINEAR,
-        range_mode=RangeMode.DYNAMIC,
-        crosshairs_enabled=True,
-        x_axis_label=original_map_x_label,  # Original label - will be swapped by get_flipped_x_axis_label() if needed
-        y_axis_label=original_map_y_label,  # Original label - will be swapped by get_flipped_y_axis_label() if needed
-        needs_flip=plot1_needs_flip,
-        track_changes=True,
-    )
+    # Create Plot1 - either 1D line plot or 2D map plot
+    map_plot = None
+    plot1_1d_plot = None
+    plot1_1d_data = None
+    plot1_1d_x_coords = None
+    
+    if plot1_is_1d:
+        # Create Plot1 as 1D line plot
+        print("🔍 DEBUG: Creating Plot1 as 1D line plot")
+        # Load the actual 1D dataset
+        if hasattr(self.process_4dnexus, 'plot1_single_dataset_picked') and self.process_4dnexus.plot1_single_dataset_picked:
+            try:
+                plot1_1d_data = self.process_4dnexus.load_dataset_by_path(self.process_4dnexus.plot1_single_dataset_picked)
+                if plot1_1d_data is not None:
+                    # Convert to numpy array if it's an HDF5 dataset reference or not already a numpy array
+                    # np should be available in namespace from builder
+                    if not isinstance(plot1_1d_data, np.ndarray):
+                        # It's likely an HDF5 dataset reference (h5py Dataset), convert to numpy array
+                        # Try multiple methods to read the data safely
+                        try:
+                            # Method 1: Use [()] indexing (most reliable for h5py datasets)
+                            plot1_1d_data = plot1_1d_data[()]
+                        except:
+                            try:
+                                # Method 2: Use read() method if available
+                                if hasattr(plot1_1d_data, 'read'):
+                                    plot1_1d_data = plot1_1d_data.read()
+                                else:
+                                    # Method 3: Use np.array conversion
+                                    plot1_1d_data = np.array(plot1_1d_data, dtype=np.float64)
+                            except:
+                                try:
+                                    # Method 4: Try slicing to force read
+                                    plot1_1d_data = plot1_1d_data[:]
+                                except Exception as e2:
+                                    print(f"⚠️ WARNING: Could not convert HDF5 dataset to numpy array: {e2}")
+                                    plot1_1d_data = None
+                    # Ensure it's 1D
+                    if plot1_1d_data.ndim > 1:
+                        plot1_1d_data = plot1_1d_data.flatten()
+                    # Ensure it's a numeric type that supports isnan (convert to float64 if needed)
+                    if not np.issubdtype(plot1_1d_data.dtype, np.number):
+                        plot1_1d_data = plot1_1d_data.astype(np.float64)
+                    elif plot1_1d_data.dtype == np.object_ or plot1_1d_data.dtype.kind not in ['f', 'i', 'u', 'c']:
+                        # If it's object dtype or not a numeric kind, convert to float64
+                        plot1_1d_data = plot1_1d_data.astype(np.float64)
+                    print(f"✅ Loaded 1D dataset for Plot1: shape={plot1_1d_data.shape}, dtype={plot1_1d_data.dtype}")
+                else:
+                    print("⚠️ WARNING: Could not load 1D dataset for Plot1, falling back to preview")
+                    plot1_1d_data = None
+            except Exception as e:
+                print(f"⚠️ ERROR loading 1D dataset for Plot1: {e}")
+                import traceback
+                traceback.print_exc()
+                plot1_1d_data = None
+        
+        # Use x_coords for the 1D plot
+        if plot1_1d_data is not None and x_coords is not None:
+            plot1_1d_x_coords = x_coords
+            # Create PROBE_1DPlot for Plot1
+            plot1_1d_plot = PROBE_1DPlot(
+                title=plot1_title,
+                data=plot1_1d_data,
+                x_coords=plot1_1d_x_coords,
+                palette="Viridis256",
+                color_scale=ColorScale.LINEAR,
+                range_mode=RangeMode.DYNAMIC,
+                track_changes=True,
+            )
+            # Add to session
+            session.add_plot("plot1", plot1_1d_plot)
+            print("✅ Created Plot1 as 1D line plot")
+        else:
+            print("⚠️ WARNING: Could not create 1D plot for Plot1, falling back to 2D preview")
+            plot1_is_1d = False  # Fall back to 2D mode
+    
+    if not plot1_is_1d:
+        # Create Plot1 as 2D map plot (original behavior)
+        map_plot = MAP_2DPlot(
+            title=plot1_title,
+            data=preview,
+            x_coords=x_coords,
+            y_coords=y_coords,
+            palette="Viridis256",
+            color_scale=ColorScale.LINEAR,
+            range_mode=RangeMode.DYNAMIC,
+            crosshairs_enabled=True,
+            x_axis_label=original_map_x_label,  # Original label - will be swapped by get_flipped_x_axis_label() if needed
+            y_axis_label=original_map_y_label,  # Original label - will be swapped by get_flipped_y_axis_label() if needed
+            needs_flip=plot1_needs_flip,
+            track_changes=True,
+        )
 
-    # Add plot to session
-    session.add_plot("plot1", map_plot)
-
-    # Create plot history for undo/redo
-    # Reduced max_history from 50 to 20 for better performance
-    plot1_history = PlotStateHistory(map_plot, max_history=20)
-
-    # Get flipped data and coordinates for Bokeh plot - ALWAYS use flipped methods
-    # This ensures consistency - if needs_flip is True, these return flipped versions
-    plot1_data = map_plot.get_flipped_data()
-    plot1_x_coords = map_plot.get_flipped_x_coords()
-    plot1_y_coords = map_plot.get_flipped_y_coords()
+    # Add plot to session and create history
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # Already added to session above
+        plot1_history = PlotStateHistory(plot1_1d_plot, max_history=20)
+        # For 1D plot, use the 1D data and coordinates
+        plot1_data = None  # Not used for 1D line plot
+        plot1_x_coords = plot1_1d_x_coords
+        plot1_y_coords = None
+    else:
+        # Add 2D map plot to session
+        session.add_plot("plot1", map_plot)
+        # Create plot history for undo/redo
+        # Reduced max_history from 50 to 20 for better performance
+        plot1_history = PlotStateHistory(map_plot, max_history=20)
+        # Get flipped data and coordinates for Bokeh plot - ALWAYS use flipped methods
+        # This ensures consistency - if needs_flip is True, these return flipped versions
+        plot1_data = map_plot.get_flipped_data()
+        plot1_x_coords = map_plot.get_flipped_x_coords()
+        plot1_y_coords = map_plot.get_flipped_y_coords()
 
     print("🔍 DEBUG: Plot1 Data and Coordinates:")
-    print(f"  map_plot.needs_flip: {map_plot.needs_flip}")
-    print(f"  Original preview.shape: {preview.shape if preview is not None else 'None'}")
-    print(f"  plot1_data.shape: {plot1_data.shape if plot1_data is not None else 'None'}")
-    print(f"  Original x_coords length: {len(x_coords) if x_coords is not None else 'None'}")
-    print(f"  Original y_coords length: {len(y_coords) if y_coords is not None else 'None'}")
-    print(f"  plot1_x_coords length: {len(plot1_x_coords) if plot1_x_coords is not None else 'None'}")
-    print(f"  plot1_y_coords length: {len(plot1_y_coords) if plot1_y_coords is not None else 'None'}")
-    print(f"  plot1_x_coords range: [{np.min(plot1_x_coords):.2f}, {np.max(plot1_x_coords):.2f}]" if plot1_x_coords is not None else "  plot1_x_coords: None")
-    print(f"  plot1_y_coords range: [{np.min(plot1_y_coords):.2f}, {np.max(plot1_y_coords):.2f}]" if plot1_y_coords is not None else "  plot1_y_coords: None")
-    print(f"  X axis label: {map_plot.get_flipped_x_axis_label()}")
-    print(f"  Y axis label: {map_plot.get_flipped_y_axis_label()}")
-    print(f"  Data shape matches coords: data.shape[1]={plot1_data.shape[1] if plot1_data is not None else 'N/A'} == len(plot1_x_coords)={len(plot1_x_coords) if plot1_x_coords is not None else 'N/A'}, data.shape[0]={plot1_data.shape[0] if plot1_data is not None else 'N/A'} == len(plot1_y_coords)={len(plot1_y_coords) if plot1_y_coords is not None else 'N/A'}")
-    if plot1_data is not None and plot1_x_coords is not None and plot1_y_coords is not None:
-        # Bokeh image() interprets data as (rows, cols) = (height, width)
-        # So data.shape[1] (columns) should match x_coords (width)
-        # And data.shape[0] (rows) should match y_coords (height)
-        if plot1_data.shape[1] != len(plot1_x_coords) or plot1_data.shape[0] != len(plot1_y_coords):
-            print(f"  ⚠️ WARNING: Data shape {plot1_data.shape} does NOT match coordinate lengths!")
-            print(f"     Expected: data.shape[1]={plot1_data.shape[1]} == len(x_coords)={len(plot1_x_coords)}")
-            print(f"     Expected: data.shape[0]={plot1_data.shape[0]} == len(y_coords)={len(plot1_y_coords)}")
-        else:
-            print(f"  ✅ Data shape matches coordinate lengths")
-            print(f"     data.shape[1]={plot1_data.shape[1]} == len(x_coords)={len(plot1_x_coords)} (columns/width)")
-            print(f"     data.shape[0]={plot1_data.shape[0]} == len(y_coords)={len(plot1_y_coords)} (rows/height)")
-    print(f"  X axis label (from get_flipped_x_axis_label): {map_plot.get_flipped_x_axis_label()}")
-    print(f"  Y axis label (from get_flipped_y_axis_label): {map_plot.get_flipped_y_axis_label()}")
-    print(f"  X ticks will show values from: plot1_x_coords (first few: {plot1_x_coords[:3] if len(plot1_x_coords) >= 3 else plot1_x_coords})")
-    print(f"  Y ticks will show values from: plot1_y_coords (first few: {plot1_y_coords[:3] if len(plot1_y_coords) >= 3 else plot1_y_coords})")
-    # Check if data orientation matches what we expect
-    if plot1_data is not None and preview is not None and map_plot.needs_flip:
-        print(f"  🔄 FLIPPED: Checking data orientation...")
-        print(f"     Original data.shape: {preview.shape}")
-        print(f"     Transposed data.shape: {plot1_data.shape}")
-        print(f"     Original data[0,0]={preview[0,0]}, Transposed data[0,0]={plot1_data[0,0]} (should be original[0,0] if no transpose)")
-        print(f"     Original data[-1,-1]={preview[-1,-1]}, Transposed data[-1,-1]={plot1_data[-1,-1]} (should be original[-1,-1] if no transpose)")
-        print(f"     Original data[0,-1]={preview[0,-1]}, Transposed data[0,-1]={plot1_data[0,-1]} (should be original[-1,0] if transposed)")
-        print(f"     Original data[-1,0]={preview[-1,0]}, Transposed data[-1,0]={plot1_data[-1,0]} (should be original[0,-1] if transposed)")
-        # Verify transpose: transposed[i,j] should equal original[j,i]
-        if plot1_data[0,0] == preview[0,0] and plot1_data[-1,-1] == preview[-1,-1]:
-            print(f"     ⚠️ WARNING: Data might not be transposed! Corner values match original.")
-        if plot1_data[0,-1] == preview[-1,0] and plot1_data[-1,0] == preview[0,-1]:
-            print(f"     ✅ Data appears to be correctly transposed")
-        # Check coordinate mapping
-        print(f"     Original x_coords (px, length {len(x_coords)}): first={x_coords[0]:.2f}, last={x_coords[-1]:.2f}")
-        print(f"     Original y_coords (py, length {len(y_coords)}): first={y_coords[0]:.2f}, last={y_coords[-1]:.2f}")
-        print(f"     Flipped x_coords (length {len(plot1_x_coords)}): first={plot1_x_coords[0]:.2f}, last={plot1_x_coords[-1]:.2f} (ALWAYS px, goes on x-axis)")
-        print(f"     Flipped y_coords (length {len(plot1_y_coords)}): first={plot1_y_coords[0]:.2f}, last={plot1_y_coords[-1]:.2f} (ALWAYS py, goes on y-axis)")
-        print(f"     X axis label: {map_plot.get_flipped_x_axis_label()} (swapped if data transposed)")
-        print(f"     Y axis label: {map_plot.get_flipped_y_axis_label()} (swapped if data transposed)")
-        # Verify coordinate-to-data mapping
-        # IMPORTANT: px (x_coords) ALWAYS goes on x-axis, py (y_coords) ALWAYS goes on y-axis
-        # We only transpose the DATA if dimensions don't match, but coordinates never swap
-        print(f"     🔍 Coordinate-to-Data Mapping Verification:")
-        print(f"        Logic: px (x_coords) ALWAYS on x-axis, py (y_coords) ALWAYS on y-axis")
-        print(f"        Data.shape[1]={plot1_data.shape[1]} (x-axis/width) should match len(plot1_x_coords)={len(plot1_x_coords)} (px)")
-        print(f"        Data.shape[0]={plot1_data.shape[0]} (y-axis/height) should match len(plot1_y_coords)={len(plot1_y_coords)} (py)")
-        if plot1_data.shape[1] == len(plot1_x_coords) and plot1_data.shape[0] == len(plot1_y_coords):
-            print(f"        ✅ Coordinate lengths match data dimensions")
-        else:
-            print(f"        ⚠️ WARNING: Coordinate lengths DO NOT match data dimensions!")
-            print(f"           This will cause misalignment between data and axes!")
+    if plot1_is_1d and plot1_1d_plot is not None:
+        print(f"  Plot1 is 1D line plot")
+        print(f"  plot1_1d_data.shape: {plot1_1d_data.shape if plot1_1d_data is not None else 'None'}")
+        print(f"  plot1_x_coords length: {len(plot1_x_coords) if plot1_x_coords is not None else 'None'}")
+        print(f"  plot1_x_coords range: [{np.min(plot1_x_coords):.2f}, {np.max(plot1_x_coords):.2f}]" if plot1_x_coords is not None else "  plot1_x_coords: None")
+        print(f"  X axis label: {original_map_x_label}")
+        print(f"  Y axis label: Intensity")
+    else:
+        print(f"  map_plot.needs_flip: {map_plot.needs_flip if map_plot is not None else 'N/A'}")
+        print(f"  Original preview.shape: {preview.shape if preview is not None else 'None'}")
+        print(f"  plot1_data.shape: {plot1_data.shape if plot1_data is not None else 'None'}")
+        print(f"  Original x_coords length: {len(x_coords) if x_coords is not None else 'None'}")
+        print(f"  Original y_coords length: {len(y_coords) if y_coords is not None else 'None'}")
+        print(f"  plot1_x_coords length: {len(plot1_x_coords) if plot1_x_coords is not None else 'None'}")
+        print(f"  plot1_y_coords length: {len(plot1_y_coords) if plot1_y_coords is not None else 'None'}")
+        print(f"  plot1_x_coords range: [{np.min(plot1_x_coords):.2f}, {np.max(plot1_x_coords):.2f}]" if plot1_x_coords is not None else "  plot1_x_coords: None")
+        print(f"  plot1_y_coords range: [{np.min(plot1_y_coords):.2f}, {np.max(plot1_y_coords):.2f}]" if plot1_y_coords is not None else "  plot1_y_coords: None")
+        print(f"  X axis label: {map_plot.get_flipped_x_axis_label() if map_plot is not None else 'N/A'}")
+        print(f"  Y axis label: {map_plot.get_flipped_y_axis_label() if map_plot is not None else 'N/A'}")
+    if not plot1_is_1d or plot1_1d_plot is None:
+        print(f"  Data shape matches coords: data.shape[1]={plot1_data.shape[1] if plot1_data is not None else 'N/A'} == len(plot1_x_coords)={len(plot1_x_coords) if plot1_x_coords is not None else 'N/A'}, data.shape[0]={plot1_data.shape[0] if plot1_data is not None else 'N/A'} == len(plot1_y_coords)={len(plot1_y_coords) if plot1_y_coords is not None else 'N/A'}")
+        if plot1_data is not None and plot1_x_coords is not None and plot1_y_coords is not None:
+            # Bokeh image() interprets data as (rows, cols) = (height, width)
+            # So data.shape[1] (columns) should match x_coords (width)
+            # And data.shape[0] (rows) should match y_coords (height)
+            if plot1_data.shape[1] != len(plot1_x_coords) or plot1_data.shape[0] != len(plot1_y_coords):
+                print(f"  ⚠️ WARNING: Data shape {plot1_data.shape} does NOT match coordinate lengths!")
+                print(f"     Expected: data.shape[1]={plot1_data.shape[1]} == len(x_coords)={len(plot1_x_coords)}")
+                print(f"     Expected: data.shape[0]={plot1_data.shape[0]} == len(y_coords)={len(plot1_y_coords)}")
+            else:
+                print(f"  ✅ Data shape matches coordinate lengths")
+                print(f"     data.shape[1]={plot1_data.shape[1]} == len(x_coords)={len(plot1_x_coords)} (columns/width)")
+                print(f"     data.shape[0]={plot1_data.shape[0]} == len(y_coords)={len(plot1_y_coords)} (rows/height)")
+        print(f"  X axis label (from get_flipped_x_axis_label): {map_plot.get_flipped_x_axis_label() if map_plot is not None else 'N/A'}")
+        print(f"  Y axis label (from get_flipped_y_axis_label): {map_plot.get_flipped_y_axis_label() if map_plot is not None else 'N/A'}")
+        print(f"  X ticks will show values from: plot1_x_coords (first few: {plot1_x_coords[:3] if plot1_x_coords is not None and len(plot1_x_coords) >= 3 else plot1_x_coords if plot1_x_coords is not None else 'None'})")
+        print(f"  Y ticks will show values from: plot1_y_coords (first few: {plot1_y_coords[:3] if plot1_y_coords is not None and len(plot1_y_coords) >= 3 else plot1_y_coords if plot1_y_coords is not None else 'None (Plot1 is 1D)'})")
+        # Check if data orientation matches what we expect
+        if plot1_data is not None and preview is not None and map_plot is not None and map_plot.needs_flip:
+            print(f"  🔄 FLIPPED: Checking data orientation...")
+            print(f"     Original data.shape: {preview.shape}")
+            print(f"     Transposed data.shape: {plot1_data.shape}")
+            print(f"     Original data[0,0]={preview[0,0]}, Transposed data[0,0]={plot1_data[0,0]} (should be original[0,0] if no transpose)")
+            print(f"     Original data[-1,-1]={preview[-1,-1]}, Transposed data[-1,-1]={plot1_data[-1,-1]} (should be original[-1,-1] if no transpose)")
+            print(f"     Original data[0,-1]={preview[0,-1]}, Transposed data[0,-1]={plot1_data[0,-1]} (should be original[-1,0] if transposed)")
+            print(f"     Original data[-1,0]={preview[-1,0]}, Transposed data[-1,0]={plot1_data[-1,0]} (should be original[0,-1] if transposed)")
+            # Verify transpose: transposed[i,j] should equal original[j,i]
+            if plot1_data[0,0] == preview[0,0] and plot1_data[-1,-1] == preview[-1,-1]:
+                print(f"     ⚠️ WARNING: Data might not be transposed! Corner values match original.")
+            if plot1_data[0,-1] == preview[-1,0] and plot1_data[-1,0] == preview[0,-1]:
+                print(f"     ✅ Data appears to be correctly transposed")
+            # Check coordinate mapping
+            print(f"     Original x_coords (px, length {len(x_coords) if x_coords is not None else 0}): first={x_coords[0]:.2f}, last={x_coords[-1]:.2f}" if x_coords is not None else "     Original x_coords: None")
+            print(f"     Original y_coords (py, length {len(y_coords) if y_coords is not None else 0}): first={y_coords[0]:.2f}, last={y_coords[-1]:.2f}" if y_coords is not None else "     Original y_coords: None (Plot1 is 1D)")
+            print(f"     Flipped x_coords (length {len(plot1_x_coords) if plot1_x_coords is not None else 0}): first={plot1_x_coords[0]:.2f}, last={plot1_x_coords[-1]:.2f} (ALWAYS px, goes on x-axis)" if plot1_x_coords is not None else "     Flipped x_coords: None")
+            print(f"     Flipped y_coords (length {len(plot1_y_coords) if plot1_y_coords is not None else 0}): first={plot1_y_coords[0]:.2f}, last={plot1_y_coords[-1]:.2f} (ALWAYS py, goes on y-axis)" if plot1_y_coords is not None else "     Flipped y_coords: None (Plot1 is 1D)")
+            print(f"     X axis label: {map_plot.get_flipped_x_axis_label()} (swapped if data transposed)")
+            print(f"     Y axis label: {map_plot.get_flipped_y_axis_label()} (swapped if data transposed)")
+            # Verify coordinate-to-data mapping
+            # IMPORTANT: px (x_coords) ALWAYS goes on x-axis, py (y_coords) ALWAYS goes on y-axis
+            # We only transpose the DATA if dimensions don't match, but coordinates never swap
+            if plot1_y_coords is not None:
+                print(f"     🔍 Coordinate-to-Data Mapping Verification:")
+                print(f"        Logic: px (x_coords) ALWAYS on x-axis, py (y_coords) ALWAYS on y-axis")
+                print(f"        Data.shape[1]={plot1_data.shape[1]} (x-axis/width) should match len(plot1_x_coords)={len(plot1_x_coords) if plot1_x_coords is not None else 0} (px)")
+                print(f"        Data.shape[0]={plot1_data.shape[0]} (y-axis/height) should match len(plot1_y_coords)={len(plot1_y_coords)} (py)")
+                if plot1_data.shape[1] == len(plot1_x_coords) and plot1_data.shape[0] == len(plot1_y_coords):
+                    print(f"        ✅ Coordinate lengths match data dimensions")
+                else:
+                    print(f"        ⚠️ WARNING: Coordinate lengths DO NOT match data dimensions!")
+                    print(f"           This will cause misalignment between data and axes!")
+            else:
+                print(f"     ⚠️ Skipping coordinate mapping verification (Plot1 is 1D, no y_coords)")
 
-    # Calculate initial range values from 1st and 99th percentiles
-    map_min_val = float(np.percentile(plot1_data[~np.isnan(plot1_data)], 1))
-    map_max_val = float(np.percentile(plot1_data[~np.isnan(plot1_data)], 99))
-
-    # Set initial range values in map_plot
-    map_plot.range_min = map_min_val
-    map_plot.range_max = map_max_val
-
+    # Calculate initial range values and create color mapper
     # Initialize color mapper and renderer variables (needed for nonlocal in callbacks)
     color_mapper1 = None
     image_renderer1 = None
@@ -463,101 +589,200 @@ try:
     color_mapper3 = None
     image_renderer3 = None
     
-    # Create color mapper (store in variable for later updates)
-    color_mapper1 = LinearColorMapper(palette=map_plot.palette, low=map_min_val, high=map_max_val)
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # For 1D plot, calculate range from 1D data
+        map_min_val = float(np.percentile(plot1_1d_data[~np.isnan(plot1_1d_data)], 1))
+        map_max_val = float(np.percentile(plot1_1d_data[~np.isnan(plot1_1d_data)], 99))
+        # Set initial range values in plot1_1d_plot
+        plot1_1d_plot.range_min = map_min_val
+        plot1_1d_plot.range_max = map_max_val
+        # No color mapper for 1D line plots
+        color_mapper1 = None
+    else:
+        # Calculate initial range values from 1st and 99th percentiles for 2D plot
+        map_min_val = float(np.percentile(plot1_data[~np.isnan(plot1_data)], 1))
+        map_max_val = float(np.percentile(plot1_data[~np.isnan(plot1_data)], 99))
+        # Set initial range values in map_plot
+        if map_plot is not None:
+            map_plot.range_min = map_min_val
+            map_plot.range_max = map_max_val
+        # Create color mapper (store in variable for later updates)
+        color_mapper1 = LinearColorMapper(palette=map_plot.palette if map_plot is not None else "Viridis256", low=map_min_val, high=map_max_val)
 
-    # Calculate initial plot dimensions from map_plot (respects user settings: Square, Custom, Aspect ratio)
-    initial_width, initial_height = map_plot.calculate_plot_dimensions()
-    
-    # Add extra width to account for vertical colorbar on the right (typically ~60 pixels)
-    colorbar_width = 60
-    plot_width_with_colorbar = initial_width + colorbar_width
-    plot_height = initial_height
+    # Calculate initial plot dimensions
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # For 1D plots, use default dimensions (no colorbar needed)
+        initial_width = 400
+        initial_height = 400
+        colorbar_width = 0  # No colorbar for 1D line plots
+        plot_width_with_colorbar = initial_width
+        plot_height = initial_height
+    else:
+        # Calculate initial plot dimensions from map_plot (respects user settings: Square, Custom, Aspect ratio)
+        initial_width, initial_height = map_plot.calculate_plot_dimensions() if map_plot is not None else (400, 400)
+        # Add extra width to account for vertical colorbar on the right (typically ~60 pixels)
+        colorbar_width = 60
+        plot_width_with_colorbar = initial_width + colorbar_width
+        plot_height = initial_height
     
     # For Plot1, we use match_aspect=True to maintain 1:1 aspect ratio based on coordinate ranges
     # The map_plot.calculate_plot_dimensions() already respects user settings, so we just add colorbar width
-    print(f"🔍 DEBUG: Plot1 dimensions from map_plot: {initial_width}x{initial_height}, with colorbar={plot_width_with_colorbar}x{plot_height}")
-
-    # Create Bokeh figure for Plot1 (use calculated dimensions)
-    # Use match_aspect=True to maintain 1:1 aspect ratio based on coordinate ranges
-    plot1 = figure(
-        title=plot1_title,
-        x_range=(float(np.min(plot1_x_coords)), float(np.max(plot1_x_coords))),
-        y_range=(float(np.min(plot1_y_coords)), float(np.max(plot1_y_coords))),
-        tools="pan,wheel_zoom,box_zoom,reset,tap",
-        match_aspect=True,  # Maintain 1:1 aspect ratio based on coordinate ranges
-        width=plot_width_with_colorbar,
-        height=plot_height,
-    )
-
-    # Set axis labels (already swapped in map_plot if needed)
-    plot1.xaxis.axis_label = map_plot.get_flipped_x_axis_label()
-    plot1.yaxis.axis_label = map_plot.get_flipped_y_axis_label()
-
-    # Set ticks on Plot1 from flipped coordinate arrays
-    # The coordinates are already in the correct order from get_flipped_x_coords/y_coords
-    set_ticks_from_coords_both_axes(
-        plot1,
-        x_coords=plot1_x_coords,
-        y_coords=plot1_y_coords,
-        x_sample_interval=15,
-        y_sample_interval=15,
-    )
-
-    # VERIFICATION: Bokeh image() expects data as (rows, cols) = (height, width)
-    # Standard NumPy convention: array[row, col] where:
-    # - shape[0] = number of rows = vertical dimension = y-axis (height) → should match y_coords length
-    # - shape[1] = number of columns = horizontal dimension = x-axis (width) → should match x_coords length
-    # This is why data.shape[1] maps to x-axis (width) and data.shape[0] maps to y-axis (height)
-    print("🔍 VERIFICATION: Bokeh image() data format expectations:")
-    print(f"   NumPy convention: array[row, col] → shape[0]=rows (y-axis/height), shape[1]=cols (x-axis/width)")
-    print(f"   Bokeh interprets: data.shape[0] = rows = y-axis (height)")
-    print(f"   Bokeh interprets: data.shape[1] = cols = x-axis (width)")
-    print(f"   Our data.shape: {plot1_data.shape if plot1_data is not None else 'None'}")
-    print(f"   Our x_coords length: {len(plot1_x_coords) if plot1_x_coords is not None else 'None'} (should match data.shape[1])")
-    print(f"   Our y_coords length: {len(plot1_y_coords) if plot1_y_coords is not None else 'None'} (should match data.shape[0])")
-    if plot1_data is not None and plot1_x_coords is not None and plot1_y_coords is not None:
-        if plot1_data.shape[1] == len(plot1_x_coords) and plot1_data.shape[0] == len(plot1_y_coords):
-            print(f"   ✅ VERIFIED: Data format matches Bokeh expectations!")
-            print(f"      data.shape[1]={plot1_data.shape[1]} == len(x_coords)={len(plot1_x_coords)} (x-axis/width)")
-            print(f"      data.shape[0]={plot1_data.shape[0]} == len(y_coords)={len(plot1_y_coords)} (y-axis/height)")
-        else:
-            print(f"   ❌ ERROR: Data format does NOT match Bokeh expectations!")
-            print(f"      data.shape[1]={plot1_data.shape[1]} != len(x_coords)={len(plot1_x_coords)}")
-            print(f"      data.shape[0]={plot1_data.shape[0]} != len(y_coords)={len(plot1_y_coords)}")
-            print(f"      This will cause misalignment between data and axes!")
-
-    # Create data source for Plot1
-    source1 = ColumnDataSource(
-        data={
-            "image": [plot1_data],
-            "x": [float(np.min(plot1_x_coords))],
-            "y": [float(np.min(plot1_y_coords))],
-            "dw": [float(np.max(plot1_x_coords) - np.min(plot1_x_coords))],
-            "dh": [float(np.max(plot1_y_coords) - np.min(plot1_y_coords))],
-        }
-    )
-
-    # Add image renderer
-    try:
-        image_renderer1 = plot1.image(
-            "image", source=source1, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper1
+    # Create Bokeh figure for Plot1 - either 1D line plot or 2D image plot
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # Create 1D line plot
+        print(f"🔍 DEBUG: Creating Plot1 as 1D line plot")
+        plot1 = figure(
+            title=plot1_title,
+            x_range=(float(np.min(plot1_x_coords)), float(np.max(plot1_x_coords))),
+            y_range=(float(np.min(plot1_1d_data)), float(np.max(plot1_1d_data))),
+            tools="pan,wheel_zoom,box_zoom,reset,tap",
+            width=plot_width_with_colorbar,
+            height=plot_height,
         )
-        print("✅ Plot1 image renderer created successfully")
-    except Exception as e:
-        print(f"⚠️ ERROR creating Plot1 image renderer: {e}")
-        import traceback
-        traceback.print_exc()
+        # Set axis labels
+        plot1.xaxis.axis_label = original_map_x_label
+        plot1.yaxis.axis_label = "Intensity"
+        # Set ticks from x coordinates
+        if plot1_x_coords is not None:
+            set_ticks_from_coords(plot1, plot1_x_coords, axis='x', num_ticks=10)
+    else:
+        # Create 2D image plot (original behavior)
+        print(f"🔍 DEBUG: Plot1 dimensions from map_plot: {initial_width}x{initial_height}, with colorbar={plot_width_with_colorbar}x{plot_height}")
+        # Use match_aspect=True to maintain 1:1 aspect ratio based on coordinate ranges
+        # When Plot1 is 1D, plot1_y_coords is None, so derive y_range from data shape
+        if plot1_y_coords is not None:
+            plot1_y_range = (float(np.min(plot1_y_coords)), float(np.max(plot1_y_coords)))
+            use_match_aspect = True  # Maintain 1:1 aspect ratio based on coordinate ranges
+        else:
+            # When Plot1 is 1D, use data shape for y_range (y-axis is just index-based)
+            # Use plot1_1d_data if available, otherwise fallback
+            if plot1_is_1d and plot1_1d_data is not None:
+                data_shape_0 = plot1_1d_data.shape[0]
+            elif plot1_data is not None:
+                data_shape_0 = plot1_data.shape[0]
+            else:
+                data_shape_0 = len(plot1_x_coords) if plot1_x_coords is not None else 1
+            plot1_y_range = (0, float(data_shape_0 - 1))
+            use_match_aspect = False  # Don't match aspect when y-axis is index-based
+        
+        plot1 = figure(
+            title=plot1_title,
+            x_range=(float(np.min(plot1_x_coords)), float(np.max(plot1_x_coords))),
+            y_range=plot1_y_range,
+            tools="pan,wheel_zoom,box_zoom,reset,tap",
+            match_aspect=use_match_aspect,  # Maintain 1:1 aspect ratio based on coordinate ranges (only when y_coords exist)
+            width=plot_width_with_colorbar,
+            height=plot_height,
+        )
 
-    # Create colorbar
-    try:
-        colorbar1 = ColorBar(color_mapper=color_mapper1, title="", location=(1, 0))
-        plot1.add_layout(colorbar1, "right")
-        print("✅ Plot1 colorbar added successfully")
-    except Exception as e:
-        print(f"⚠️ ERROR adding Plot1 colorbar: {e}")
-        import traceback
-        traceback.print_exc()
+        # Set axis labels (already swapped in map_plot if needed)
+        if map_plot is not None:
+            plot1.xaxis.axis_label = map_plot.get_flipped_x_axis_label()
+            plot1.yaxis.axis_label = map_plot.get_flipped_y_axis_label()
+
+    # Set ticks on Plot1 from flipped coordinate arrays (only for 2D plots)
+    # The coordinates are already in the correct order from get_flipped_x_coords/y_coords
+    if not plot1_is_1d or plot1_1d_plot is None:
+        set_ticks_from_coords_both_axes(
+            plot1,
+            x_coords=plot1_x_coords,
+            y_coords=plot1_y_coords,
+            x_sample_interval=15,
+            y_sample_interval=15,
+        )
+
+    # VERIFICATION: Bokeh expectations for Plot1
+    if plot1_is_1d and plot1_1d_plot is not None:
+        print("🔍 VERIFICATION: Plot1 is 1D line plot")
+        print(f"   Our data.shape: {plot1_1d_data.shape if plot1_1d_data is not None else 'None'}")
+        print(f"   Our x_coords length: {len(plot1_x_coords) if plot1_x_coords is not None else 'None'} (should match data length)")
+        if plot1_1d_data is not None and plot1_x_coords is not None:
+            if len(plot1_1d_data) == len(plot1_x_coords):
+                print(f"   ✅ VERIFIED: 1D data format matches expectations!")
+                print(f"      data length={len(plot1_1d_data)} == len(x_coords)={len(plot1_x_coords)}")
+            else:
+                print(f"   ❌ ERROR: 1D data format does NOT match expectations!")
+                print(f"      data length={len(plot1_1d_data)} != len(x_coords)={len(plot1_x_coords)}")
+    else:
+        # VERIFICATION: Bokeh image() expects data as (rows, cols) = (height, width)
+        # Standard NumPy convention: array[row, col] where:
+        # - shape[0] = number of rows = vertical dimension = y-axis (height) → should match y_coords length
+        # - shape[1] = number of columns = horizontal dimension = x-axis (width) → should match x_coords length
+        # This is why data.shape[1] maps to x-axis (width) and data.shape[0] maps to y-axis (height)
+        print("🔍 VERIFICATION: Bokeh image() data format expectations:")
+        print(f"   NumPy convention: array[row, col] → shape[0]=rows (y-axis/height), shape[1]=cols (x-axis/width)")
+        print(f"   Bokeh interprets: data.shape[0] = rows = y-axis (height)")
+        print(f"   Bokeh interprets: data.shape[1] = cols = x-axis (width)")
+        print(f"   Our data.shape: {plot1_data.shape if plot1_data is not None else 'None'}")
+        print(f"   Our x_coords length: {len(plot1_x_coords) if plot1_x_coords is not None else 'None'} (should match data.shape[1])")
+        print(f"   Our y_coords length: {len(plot1_y_coords) if plot1_y_coords is not None else 'None'} (should match data.shape[0])")
+        if plot1_data is not None and plot1_x_coords is not None and plot1_y_coords is not None:
+            if plot1_data.shape[1] == len(plot1_x_coords) and plot1_data.shape[0] == len(plot1_y_coords):
+                print(f"   ✅ VERIFIED: Data format matches Bokeh expectations!")
+                print(f"      data.shape[1]={plot1_data.shape[1]} == len(x_coords)={len(plot1_x_coords)} (x-axis/width)")
+                print(f"      data.shape[0]={plot1_data.shape[0]} == len(y_coords)={len(plot1_y_coords)} (y-axis/height)")
+            else:
+                print(f"   ❌ ERROR: Data format does NOT match Bokeh expectations!")
+                print(f"      data.shape[1]={plot1_data.shape[1]} != len(x_coords)={len(plot1_x_coords)}")
+                print(f"      data.shape[0]={plot1_data.shape[0]} != len(y_coords)={len(plot1_y_coords)}")
+                print(f"      This will cause misalignment between data and axes!")
+
+    # Create data source and renderer for Plot1 - either 1D line or 2D image
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # Create 1D line plot
+        source1 = ColumnDataSource(data={"x": plot1_x_coords, "y": plot1_1d_data})
+        plot1.line("x", "y", source=source1, line_width=2, line_color="blue")
+        print("✅ Plot1 line renderer created successfully")
+        # No colorbar for 1D line plots
+        colorbar1 = None
+    else:
+        # Create 2D image plot (original behavior)
+        # When Plot1 is 1D, plot1_y_coords is None, so use data shape for y position and height
+        if plot1_y_coords is not None:
+            plot1_y_pos = float(np.min(plot1_y_coords))
+            plot1_y_height = float(np.max(plot1_y_coords) - np.min(plot1_y_coords))
+        else:
+            # When Plot1 is 1D, y-axis is just index-based (0 to shape[0]-1)
+            # Use plot1_1d_data if available, otherwise fallback
+            if plot1_is_1d and plot1_1d_data is not None:
+                data_shape_0 = plot1_1d_data.shape[0]
+            elif plot1_data is not None:
+                data_shape_0 = plot1_data.shape[0]
+            else:
+                data_shape_0 = len(plot1_x_coords) if plot1_x_coords is not None else 1
+            plot1_y_pos = 0.0
+            plot1_y_height = float(data_shape_0 - 1)
+        
+        source1 = ColumnDataSource(
+            data={
+                "image": [plot1_data],
+                "x": [float(np.min(plot1_x_coords))],
+                "y": [plot1_y_pos],
+                "dw": [float(np.max(plot1_x_coords) - np.min(plot1_x_coords))],
+                "dh": [plot1_y_height],
+            }
+        )
+
+        # Add image renderer
+        try:
+            image_renderer1 = plot1.image(
+                "image", source=source1, x="x", y="y", dw="dw", dh="dh", color_mapper=color_mapper1
+            )
+            print("✅ Plot1 image renderer created successfully")
+        except Exception as e:
+            print(f"⚠️ ERROR creating Plot1 image renderer: {e}")
+            import traceback
+            traceback.print_exc()
+
+        # Create colorbar
+        try:
+            colorbar1 = ColorBar(color_mapper=color_mapper1, title="", location=(1, 0))
+            plot1.add_layout(colorbar1, "right")
+            print("✅ Plot1 colorbar added successfully")
+        except Exception as e:
+            print(f"⚠️ ERROR adding Plot1 colorbar: {e}")
+            import traceback
+            traceback.print_exc()
 
     # Add TapTool to Plot1 for crosshair positioning
     try:
@@ -573,59 +798,84 @@ try:
     def draw_cross1():
         """Draw crosshairs on Plot1 based on current slider values."""
         try:
-            # First, clear any old crosshair renderers from Plot1 using stored references
-            if hasattr(rect1, 'h1line') and rect1.h1line is not None:
-                try:
-                    if rect1.h1line in plot1.renderers:
-                        plot1.renderers.remove(rect1.h1line)
-                except (ValueError, AttributeError):
-                    pass
-                rect1.h1line = None
-            
-            if hasattr(rect1, 'v1line') and rect1.v1line is not None:
-                try:
-                    if rect1.v1line in plot1.renderers:
-                        plot1.renderers.remove(rect1.v1line)
-                except (ValueError, AttributeError):
-                    pass
-                rect1.v1line = None
-            
-            # Also clear map_plot's stored renderers if they're on Plot1
-            if hasattr(map_plot, '_crosshair_h_line') and map_plot._crosshair_h_line is not None:
-                try:
-                    if map_plot._crosshair_h_line in plot1.renderers:
-                        plot1.renderers.remove(map_plot._crosshair_h_line)
-                except (ValueError, AttributeError):
-                    pass
-                map_plot._crosshair_h_line = None
-            
-            if hasattr(map_plot, '_crosshair_v_line') and map_plot._crosshair_v_line is not None:
-                try:
-                    if map_plot._crosshair_v_line in plot1.renderers:
-                        plot1.renderers.remove(map_plot._crosshair_v_line)
-                except (ValueError, AttributeError):
-                    pass
-                map_plot._crosshair_v_line = None
-            
-            x_index = get_x_index()
-            y_index = get_y_index()
+            if plot1_is_1d and plot1_1d_plot is not None:
+                # For 1D plots, only draw a vertical line at the x position
+                # First, clear any old crosshair renderers
+                if hasattr(rect1, 'v1line') and rect1.v1line is not None:
+                    try:
+                        if rect1.v1line in plot1.renderers:
+                            plot1.renderers.remove(rect1.v1line)
+                    except (ValueError, AttributeError):
+                        pass
+                    rect1.v1line = None
+                
+                x_index = get_x_index()
+                if plot1_x_coords is not None and x_index < len(plot1_x_coords):
+                    x_coord = plot1_x_coords[x_index]
+                    # Draw vertical line
+                    rect1.v1line = plot1.line(
+                        [x_coord, x_coord],
+                        [plot1.y_range.start, plot1.y_range.end],
+                        line_color='red',
+                        line_width=2,
+                        line_dash='dashed'
+                    )
+            else:
+                # For 2D plots, draw both horizontal and vertical crosshairs
+                # First, clear any old crosshair renderers from Plot1 using stored references
+                if hasattr(rect1, 'h1line') and rect1.h1line is not None:
+                    try:
+                        if rect1.h1line in plot1.renderers:
+                            plot1.renderers.remove(rect1.h1line)
+                    except (ValueError, AttributeError):
+                        pass
+                    rect1.h1line = None
+                
+                if hasattr(rect1, 'v1line') and rect1.v1line is not None:
+                    try:
+                        if rect1.v1line in plot1.renderers:
+                            plot1.renderers.remove(rect1.v1line)
+                    except (ValueError, AttributeError):
+                        pass
+                    rect1.v1line = None
+                
+                # Also clear map_plot's stored renderers if they're on Plot1
+                if map_plot is not None:
+                    if hasattr(map_plot, '_crosshair_h_line') and map_plot._crosshair_h_line is not None:
+                        try:
+                            if map_plot._crosshair_h_line in plot1.renderers:
+                                plot1.renderers.remove(map_plot._crosshair_h_line)
+                        except (ValueError, AttributeError):
+                            pass
+                        map_plot._crosshair_h_line = None
+                    
+                    if hasattr(map_plot, '_crosshair_v_line') and map_plot._crosshair_v_line is not None:
+                        try:
+                            if map_plot._crosshair_v_line in plot1.renderers:
+                                plot1.renderers.remove(map_plot._crosshair_v_line)
+                        except (ValueError, AttributeError):
+                            pass
+                        map_plot._crosshair_v_line = None
+                
+                x_index = get_x_index()
+                y_index = get_y_index()
 
-            # Get coordinates using flipped coordinate arrays
-            # These are already in the correct order for the plot
-            if plot1_x_coords is None or plot1_y_coords is None:
-                print("⚠️ WARNING: plot1_x_coords or plot1_y_coords is None in draw_cross1()")
-                return
+                # Get coordinates using flipped coordinate arrays
+                # These are already in the correct order for the plot
+                if plot1_x_coords is None or plot1_y_coords is None:
+                    print("⚠️ WARNING: plot1_x_coords or plot1_y_coords is None in draw_cross1()")
+                    return
 
-            # Use the utility function from the plot library
-            draw_crosshairs_from_indices(
-                map_plot=map_plot,
-                bokeh_figure=plot1,
-                x_index=x_index,
-                y_index=y_index,
-                x_coords=plot1_x_coords,
-                y_coords=plot1_y_coords,
-                rect_storage=rect1,
-            )
+                # Use the utility function from the plot library
+                draw_crosshairs_from_indices(
+                    map_plot=map_plot,
+                    bokeh_figure=plot1,
+                    x_index=x_index,
+                    y_index=y_index,
+                    x_coords=plot1_x_coords,
+                    y_coords=plot1_y_coords,
+                    rect_storage=rect1,
+                )
         except Exception as e:
             print(f"⚠️ ERROR in draw_cross1(): {e}")
             import traceback
@@ -764,8 +1014,14 @@ try:
     box_annotation_2 = None  # Only created for 2D plots (4D volumes)
 
     if is_3d_volume:
-        # 1D plot for 3D volume
-        initial_slice_1d = volume[volume.shape[0]//2, volume.shape[1]//2, :]
+        # 1D plot for 3D volume OR 2D volume when Plot1 is 1D
+        if plot1_is_1d and len(volume.shape) == 2:
+            # When Plot1 is 1D and volume is 2D (x,z), take slice at x_index to get z
+            initial_slice_1d = volume[volume.shape[0]//2, :]
+            print(f"  Plot1 is 1D: Extracting 1D slice (z) from 2D volume at x_index={volume.shape[0]//2}")
+        else:
+            # Normal 3D volume case
+            initial_slice_1d = volume[volume.shape[0]//2, volume.shape[1]//2, :]
 
         # Try to load probe coordinates for Plot2 1D
         plot2_x_coords_1d = None
@@ -834,8 +1090,18 @@ try:
         source2 = ColumnDataSource(data={"x": plot2_x_coords_1d, "y": initial_slice_1d})
         plot2.line("x", "y", source=source2, line_width=2, line_color="blue")
     else:
-        # 2D plot for 4D volume
-        initial_slice = volume[volume.shape[0]//2, volume.shape[1]//2, :, :]
+        # 2D plot for 4D volume OR 3D volume when Plot1 is 1D
+        if len(volume.shape) == 3:
+            # Volume is 3D (x,z,u) - this happens when Plot1 is 1D or when we have a 3D volume
+            # Take slice at x_index to get (z,u)
+            initial_slice = volume[volume.shape[0]//2, :, :]
+            print(f"  Volume is 3D: Extracting 2D slice (z,u) from 3D volume at x_index={volume.shape[0]//2}")
+        elif len(volume.shape) == 4:
+            # Normal 4D volume case (x,y,z,u)
+            initial_slice = volume[volume.shape[0]//2, volume.shape[1]//2, :, :]
+            print(f"  Volume is 4D: Extracting 2D slice (z,u) from 4D volume at x_index={volume.shape[0]//2}, y_index={volume.shape[1]//2}")
+        else:
+            raise ValueError(f"Unexpected volume shape: {volume.shape}, expected 3D or 4D")
 
         # Detect if probe coordinates need flipping
         print("=" * 80)
@@ -1040,13 +1306,18 @@ try:
         plot2.xaxis.axis_label = probe_2d_plot.get_flipped_x_axis_label() or original_probe_x_label
         plot2.yaxis.axis_label = probe_2d_plot.get_flipped_y_axis_label() or original_probe_y_label
 
-        # VERIFICATION: For 4D volume (x, y, z, u), Plot2 shows slice (z, u)
-        # - initial_slice = volume[:, :, :, :] gives shape (z, u) = (volume.shape[2], volume.shape[3])
+        # VERIFICATION: For 4D volume (x, y, z, u) OR 3D volume when Plot1 is 1D, Plot2 shows slice (z, u)
+        # - For 4D: initial_slice = volume[:, :, :, :] gives shape (z, u) = (volume.shape[2], volume.shape[3])
+        # - For 3D when Plot1 is 1D: initial_slice = volume[x, :, :] gives shape (z, u) = (volume.shape[1], volume.shape[2])
         # - Bokeh interprets: data.shape[0] = rows = y-axis (height), data.shape[1] = cols = x-axis (width)
         # - After flipping (if needed): data.shape[1] should match x_coords, data.shape[0] should match y_coords
         print("🔍 VERIFICATION: Plot2 data and coordinate mapping:")
-        print(f"   For 4D volume (x, y, z, u): slice has shape (z, u) = (volume.shape[2], volume.shape[3])")
-        print(f"   Volume dimensions: z={volume.shape[2]}, u={volume.shape[3]}")
+        if plot1_is_1d and len(volume.shape) == 3:
+            print(f"   For 3D volume (x, z, u) with Plot1 1D: slice has shape (z, u) = (volume.shape[1], volume.shape[2])")
+            print(f"   Volume dimensions: z={volume.shape[1]}, u={volume.shape[2]}")
+        else:
+            print(f"   For 4D volume (x, y, z, u): slice has shape (z, u) = (volume.shape[2], volume.shape[3])")
+            print(f"   Volume dimensions: z={volume.shape[2]}, u={volume.shape[3]}")
         print(f"   Our data.shape: {plot2_data.shape if plot2_data is not None else 'None'} (after flip if needed)")
         print(f"   px (x_coords) length: {len(plot2_x_coords) if plot2_x_coords is not None else 'None'} (should map to x-axis/width)")
         print(f"   py (y_coords) length: {len(plot2_y_coords) if plot2_y_coords is not None else 'None'} (should map to y-axis/height)")
@@ -1130,11 +1401,26 @@ try:
 
     def get_y_index(coord=None):
         """Get Y index from coordinate or slider value."""
+        # When Plot1 is 1D, y_coords is None - return middle index of volume's second dimension
+        if y_coords is None:
+            if len(volume.shape) >= 2:
+                return volume.shape[1] // 2  # Return middle of second dimension
+            else:
+                return 0
+        
         if coord is None:
             # Try to get from slider if it exists, otherwise use middle value
             try:
-                coord = y_slider.value
-            except (NameError, AttributeError):
+                # Check if y_slider exists in the enclosing scope
+                if y_slider is not None:
+                    try:
+                        coord = y_slider.value
+                    except (AttributeError, TypeError):
+                        coord = float(np.min(y_coords) + (np.max(y_coords) - np.min(y_coords)) / 2)
+                else:
+                    coord = float(np.min(y_coords) + (np.max(y_coords) - np.min(y_coords)) / 2)
+            except NameError:
+                # y_slider doesn't exist in scope, use middle value
                 coord = float(np.min(y_coords) + (np.max(y_coords) - np.min(y_coords)) / 2)
         # Find closest index
         idx = np.argmin(np.abs(y_coords - coord))
@@ -1518,9 +1804,19 @@ try:
 
     # Create Plot3 (Additional view) - empty initially, populated from Plot2 selections
     # Plot3 should match Plot1's orientation (respects flip) (smaller size: 300x300)
-    # Use flipped coordinates from map_plot to ensure consistency
-    plot3_x_coords = map_plot.get_flipped_x_coords()
-    plot3_y_coords = map_plot.get_flipped_y_coords()
+    # Use flipped coordinates from map_plot to ensure consistency, or use plot1 coordinates if Plot1 is 1D
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # When Plot1 is 1D, use the same coordinates as Plot1
+        plot3_x_coords = plot1_x_coords
+        plot3_y_coords = None  # Plot1 is 1D, so no y_coords
+    elif map_plot is not None:
+        # Use flipped coordinates from map_plot
+        plot3_x_coords = map_plot.get_flipped_x_coords()
+        plot3_y_coords = map_plot.get_flipped_y_coords()
+    else:
+        # Fallback: use plot1 coordinates directly
+        plot3_x_coords = plot1_x_coords
+        plot3_y_coords = plot1_y_coords
 
     # Add BoxSelectTool for rectangle region selection on Plot3 with persistent=True to keep box visible
     box_select_3 = BoxSelectTool(dimensions="both", persistent=True)  # Select both x and y ranges, keep box visible
@@ -1528,13 +1824,30 @@ try:
     plot3_title = getattr(self.process_4dnexus, 'volume_picked', None) or "Projection -- generated"
     
     # Plot3 should use the exact same dimensions as Plot1 since they show the same type of data
+    # When Plot1 is 1D, plot3_y_coords is None, so derive y_range from data shape (same as Plot1)
+    if plot3_y_coords is not None:
+        plot3_y_range = (float(np.min(plot3_y_coords)), float(np.max(plot3_y_coords)))
+        use_match_aspect_3 = True  # Maintain 1:1 aspect ratio based on coordinate ranges
+    else:
+        # When Plot1 is 1D, use data shape for y_range (y-axis is just index-based)
+        if plot1_is_1d and plot1_1d_data is not None:
+            # Use plot1_1d_data for 1D case
+            plot3_y_range = (float(np.min(plot1_1d_data)), float(np.max(plot1_1d_data)))
+        elif plot1_data is not None:
+            # Use plot1_data for 2D case (fallback)
+            plot3_y_range = (0, float(plot1_data.shape[0] - 1))
+        else:
+            # Ultimate fallback
+            plot3_y_range = (0, 100)
+        use_match_aspect_3 = False  # Don't match aspect when y-axis is index-based or 1D
+    
     # Use the same dimensions calculated for Plot1 (respects user settings and includes colorbar width)
     plot3 = figure(
         title=plot3_title,
         tools="pan,wheel_zoom,box_zoom,reset,tap",
         x_range=(float(np.min(plot3_x_coords)), float(np.max(plot3_x_coords))),
-        y_range=(float(np.min(plot3_y_coords)), float(np.max(plot3_y_coords))),
-        match_aspect=True,  # Maintain 1:1 aspect ratio based on coordinate ranges (same as Plot1)
+        y_range=plot3_y_range,
+        match_aspect=use_match_aspect_3,  # Maintain 1:1 aspect ratio based on coordinate ranges (only when y_coords exist)
         width=plot_width_with_colorbar,  # Same width as Plot1 (includes colorbar)
         height=plot_height,  # Same height as Plot1
     )
@@ -1548,8 +1861,19 @@ try:
     )
     plot3.add_layout(box_annotation_3)
 
-    plot3.xaxis.axis_label = map_plot.get_flipped_x_axis_label()
-    plot3.yaxis.axis_label = map_plot.get_flipped_y_axis_label()
+    # Set axis labels for Plot3
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # When Plot1 is 1D, use the same axis labels as Plot1
+        plot3.xaxis.axis_label = original_map_x_label if 'original_map_x_label' in locals() else "X"
+        plot3.yaxis.axis_label = "Intensity"
+    elif map_plot is not None:
+        # Use flipped axis labels from map_plot
+        plot3.xaxis.axis_label = map_plot.get_flipped_x_axis_label()
+        plot3.yaxis.axis_label = map_plot.get_flipped_y_axis_label()
+    else:
+        # Fallback
+        plot3.xaxis.axis_label = "X"
+        plot3.yaxis.axis_label = "Y"
 
     # Create empty source3; Plot3 will be populated on demand
     source3 = ColumnDataSource(
@@ -1580,32 +1904,52 @@ try:
         width=200
     )
 
-    y_slider = create_slider(
-        title="",  # No title, we'll add label inline
-        start=float(np.min(y_coords)),
-        end=float(np.max(y_coords)),
-        value=float(np.min(y_coords) + (np.max(y_coords) - np.min(y_coords)) / 2),
-        step=0.01,
-        width=200
-    )
+    # Only create y_slider when y_coords exists (not when Plot1 is 1D)
+    y_slider = None
+    if y_coords is not None:
+        y_slider = create_slider(
+            title="",  # No title, we'll add label inline
+            start=float(np.min(y_coords)),
+            end=float(np.max(y_coords)),
+            value=float(np.min(y_coords) + (np.max(y_coords) - np.min(y_coords)) / 2),
+            step=0.01,
+            width=200
+        )
     
     # Create compact slider layout with inline labels (all on one line)
-    sliders_row = row(
-        create_label_div("X:", width=30), x_slider,
-        create_label_div("Y:", width=30), y_slider,
-        sizing_mode="stretch_width"
-    )
+    # When Plot1 is 1D, only show x_slider
+    if y_slider is not None:
+        sliders_row = row(
+            create_label_div("X:", width=30), x_slider,
+            create_label_div("Y:", width=30), y_slider,
+            sizing_mode="stretch_width"
+        )
+    else:
+        sliders_row = row(
+            create_label_div("X:", width=30), x_slider,
+            sizing_mode="stretch_width"
+        )
     sliders_column = column(sliders_row, sizing_mode="stretch_width")
 
     # Function to update Plot2 based on crosshair position
     def show_slice():
         """Update Plot2 based on current crosshair position (x_index, y_index)."""
         x_idx = get_x_index()
-        y_idx = get_y_index()
+        
+        # When Plot1 is 1D, there's no y_idx - use x_idx to select volume slice
+        if plot1_is_1d:
+            y_idx = None  # Not used when Plot1 is 1D
+        else:
+            y_idx = get_y_index()
 
         if is_3d_volume:
             # For 3D: update 1D line plot
-            slice_1d = volume[x_idx, y_idx, :]
+            if plot1_is_1d and len(volume.shape) == 2:
+                # When Plot1 is 1D and volume is 2D (x,z), take slice at x_idx to get z
+                slice_1d = volume[x_idx, :]
+            else:
+                # Normal 3D volume case
+                slice_1d = volume[x_idx, y_idx, :]
             # Try to use probe coordinates if available
             if hasattr(self.process_4dnexus, 'probe_x_coords_picked') and self.process_4dnexus.probe_x_coords_picked:
                 try:
@@ -1686,8 +2030,15 @@ try:
                 _plot2_zoom_state["y_range"]["min"] = probe_min
                 _plot2_zoom_state["y_range"]["max"] = probe_max
         else:
-            # For 4D: update 2D image plot
-            slice_2d = volume[x_idx, y_idx, :, :]  # This is (z, u)
+            # For 4D: update 2D image plot OR 3D volume when Plot1 is 1D
+            if len(volume.shape) == 3:
+                # Volume is 3D (x,z,u) - take slice at x_idx to get (z,u)
+                slice_2d = volume[x_idx, :, :]  # This is (z, u)
+            elif len(volume.shape) == 4:
+                # Normal 4D volume case (x,y,z,u)
+                slice_2d = volume[x_idx, y_idx, :, :]  # This is (z, u)
+            else:
+                raise ValueError(f"Unexpected volume shape: {volume.shape}, expected 3D or 4D")
 
             # Update probe_2d_plot's data and use its flipped methods
             probe_2d_plot.data = slice_2d
@@ -2182,7 +2533,8 @@ try:
     # Connect slider callbacks
     try:
         x_slider.on_change("value", on_x_slider_change)
-        y_slider.on_change("value", on_y_slider_change)
+        if y_slider is not None:
+            y_slider.on_change("value", on_y_slider_change)
         print("✅ Sliders connected successfully")
     except Exception as e:
         print(f"⚠️ ERROR connecting sliders: {e}")
@@ -2197,7 +2549,19 @@ try:
         if hasattr(event, 'x') and hasattr(event, 'y'):
             # Find closest indices in the flipped coordinate arrays
             x_idx = np.argmin(np.abs(plot1_x_coords - event.x))
-            y_idx = np.argmin(np.abs(plot1_y_coords - event.y))
+            # When Plot1 is 1D, plot1_y_coords is None, so use index-based y_idx
+            if plot1_y_coords is not None:
+                y_idx = np.argmin(np.abs(plot1_y_coords - event.y))
+            else:
+                # When Plot1 is 1D, y-axis is index-based (0 to shape[0]-1)
+                # Use plot1_1d_data if available, otherwise fallback
+                if plot1_is_1d and plot1_1d_data is not None:
+                    data_shape_0 = plot1_1d_data.shape[0]
+                elif plot1_data is not None:
+                    data_shape_0 = plot1_data.shape[0]
+                else:
+                    data_shape_0 = len(plot1_x_coords) if plot1_x_coords is not None else 1
+                y_idx = max(0, min(int(round(event.y)), data_shape_0 - 1))
 
             # Convert back to original coordinate space for sliders
             # Sliders use original x_coords and y_coords (not flipped)
@@ -2205,15 +2569,21 @@ try:
             _skip_slider_state_save["value"] = True
             
             try:
-                # Update both sliders (handlers will update plots but won't save state)
-                if map_plot.needs_flip:
+                # Update sliders (handlers will update plots but won't save state)
+                # When Plot1 is 1D, y_coords is None, so only update x_slider
+                if y_coords is None:
+                    # Plot1 is 1D - only update x_slider
+                    x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                elif map_plot.needs_flip:
                     # When flipped: plot1_x_coords is actually y_coords, plot1_y_coords is actually x_coords
                     x_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
-                    y_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                    if y_slider is not None:
+                        y_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
                 else:
                     # Not flipped: plot1_x_coords is x_coords, plot1_y_coords is y_coords
                     x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
-                    y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
+                    if y_slider is not None:
+                        y_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
                 
                 # Slider change handlers will automatically call draw_cross1() (which also calls draw_cross3()) and show_slice()
                 # Save state once for both slider changes (after both are updated)
@@ -2963,12 +3333,17 @@ try:
     # Create UI update function (defined after color_mapper1 is created)
     def update_ui_after_state_change():
         """Update UI widgets after state change (undo/redo/load)."""
-        sync_plot_to_range_inputs(map_plot, range1_min_input, range1_max_input)
+        # Sync Plot1 range inputs
+        if plot1_is_1d and plot1_1d_plot is not None:
+            sync_plot_to_range_inputs(plot1_1d_plot, range1_min_input, range1_max_input)
+        elif map_plot is not None:
+            sync_plot_to_range_inputs(map_plot, range1_min_input, range1_max_input)
         # Sync color scale selectors for all plots
         try:
             from SCLib_Dashboards.SCDashUI_sync import sync_plot_to_color_scale_selector
-            # Sync Plot1 color scale selector
-            sync_plot_to_color_scale_selector(map_plot, plot1_color_scale_selector)
+            # Sync Plot1 color scale selector (only for 2D plots)
+            if not plot1_is_1d and map_plot is not None:
+                sync_plot_to_color_scale_selector(map_plot, plot1_color_scale_selector)
             
             # Sync Plot2 color scale selector if it exists
             try:
@@ -2996,31 +3371,51 @@ try:
             except Exception as e:
                 print(f"⚠️ DEBUG: Could not sync Plot2B color scale selector: {e}")
             
-            # Sync Plot3 color scale selector (Plot3 uses map_plot for state)
+            # Sync Plot3 color scale selector (Plot3 uses map_plot for state, or plot1_1d_plot if Plot1 is 1D)
             try:
                 if 'plot3_color_scale_selector' in locals() and plot3_color_scale_selector is not None:
-                    sync_plot_to_color_scale_selector(map_plot, plot3_color_scale_selector)
+                    # Plot3 doesn't have color scale for 1D plots, so only sync for 2D plots
+                    if not plot1_is_1d and map_plot is not None:
+                        sync_plot_to_color_scale_selector(map_plot, plot3_color_scale_selector)
             except Exception as e:
                 print(f"⚠️ DEBUG: Could not sync Plot3 color scale selector: {e}")
         except Exception as e:
             print(f"⚠️ DEBUG: Error syncing color scale selectors: {e}")
-        sync_plot_to_palette_selector(map_plot, palette_selector)
-        # Update Bokeh color mapper if needed
-        if hasattr(map_plot, 'range_min') and hasattr(map_plot, 'range_max'):
-            color_mapper1.low = map_plot.range_min
-            color_mapper1.high = map_plot.range_max
-        if map_plot.palette != color_mapper1.palette:
-            color_mapper1.palette = map_plot.palette
+        
+        # Sync Plot1 palette and color mapper (only for 2D plots)
+        if plot1_is_1d and plot1_1d_plot is not None:
+            # For 1D plots, sync to plot1_1d_plot if needed
+            if plot1_1d_plot is not None and palette_selector is not None:
+                sync_plot_to_palette_selector(plot1_1d_plot, palette_selector)
+        else:
+            if map_plot is not None:
+                sync_plot_to_palette_selector(map_plot, palette_selector)
+                # Update Bokeh color mapper if needed
+                if color_mapper1 is not None:
+                    if hasattr(map_plot, 'range_min') and hasattr(map_plot, 'range_max'):
+                        color_mapper1.low = map_plot.range_min
+                        color_mapper1.high = map_plot.range_max
+                    if map_plot.palette != color_mapper1.palette:
+                        color_mapper1.palette = map_plot.palette
         
         # Sync Plot1 range mode toggle label and active state
         try:
             if 'range1_mode_toggle' in locals() and range1_mode_toggle is not None:
-                if map_plot.range_mode == RangeMode.USER_SPECIFIED:
-                    range1_mode_toggle.label = "Auto=Off"
-                    range1_mode_toggle.active = True
-                else:
-                    range1_mode_toggle.label = "Auto=On"
-                    range1_mode_toggle.active = False
+                if plot1_is_1d and plot1_1d_plot is not None:
+                    # For 1D plots, check plot1_1d_plot range mode
+                    if plot1_1d_plot.range_mode == RangeMode.USER_SPECIFIED:
+                        range1_mode_toggle.label = "Auto=Off"
+                        range1_mode_toggle.active = True
+                    else:
+                        range1_mode_toggle.label = "Auto=On"
+                        range1_mode_toggle.active = False
+                elif map_plot is not None:
+                    if map_plot.range_mode == RangeMode.USER_SPECIFIED:
+                        range1_mode_toggle.label = "Auto=Off"
+                        range1_mode_toggle.active = True
+                    else:
+                        range1_mode_toggle.label = "Auto=On"
+                        range1_mode_toggle.active = False
         except:
             pass
         
@@ -3077,12 +3472,13 @@ try:
         # Sync Plot3 range mode toggle if it exists (Plot3 uses map_plot for state)
         try:
             if 'range3_mode_toggle' in locals() and range3_mode_toggle is not None:
-                if map_plot.range_mode == RangeMode.USER_SPECIFIED:
-                    range3_mode_toggle.label = "Auto=Off"
-                    range3_mode_toggle.active = True
-                else:
-                    range3_mode_toggle.label = "Auto=On"
-                    range3_mode_toggle.active = False
+                if map_plot is not None:
+                    if map_plot.range_mode == RangeMode.USER_SPECIFIED:
+                        range3_mode_toggle.label = "Auto=Off"
+                        range3_mode_toggle.active = True
+                    else:
+                        range3_mode_toggle.label = "Auto=On"
+                        range3_mode_toggle.active = False
         except:
             pass
         
@@ -3434,6 +3830,13 @@ try:
     # Function to update Plot1 range dynamically based on static map data
     def update_plot1_range_dynamic():
         """Update Plot1 range to 1st and 99th percentiles of static map data (Plot1's own data, not slice data)."""
+        # Skip for 1D plots (no color mapper to update)
+        if plot1_is_1d and plot1_1d_plot is not None:
+            return
+        
+        if map_plot is None:
+            return
+            
         print(f"🔍 DEBUG: update_plot1_range_dynamic() called, range_mode={map_plot.range_mode}")
         if map_plot.range_mode == RangeMode.DYNAMIC:
             # Update toggle label to show "Dynamic" while recalculating
@@ -3448,7 +3851,11 @@ try:
             current_data = None
             try:
                 # Primary source: get data directly from map_plot
-                current_data = map_plot.get_flipped_data()
+                if map_plot is not None:
+                    current_data = map_plot.get_flipped_data()
+                elif plot1_is_1d and plot1_1d_data is not None:
+                    # For 1D plots, use plot1_1d_data
+                    current_data = plot1_1d_data
                 if current_data is not None and current_data.size == 0:
                     current_data = None
                 else:
@@ -3542,7 +3949,15 @@ try:
 
     # Create range section with toggle for Plot1
     # Set initial label based on range mode
-    plot1_initial_label = "Auto=Off" if map_plot.range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+    if plot1_is_1d and plot1_1d_plot is not None:
+        plot1_initial_label = "Auto=Off" if plot1_1d_plot.range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+        plot1_initial_active = (plot1_1d_plot.range_mode == RangeMode.USER_SPECIFIED)
+    elif map_plot is not None:
+        plot1_initial_label = "Auto=Off" if map_plot.range_mode == RangeMode.USER_SPECIFIED else "Auto=On"
+        plot1_initial_active = (map_plot.range_mode == RangeMode.USER_SPECIFIED)
+    else:
+        plot1_initial_label = "Auto=On"
+        plot1_initial_active = False
     range1_section, range1_mode_toggle = create_range_section_with_toggle(
         label="Plot1 Range:",
         min_title="Min:",
@@ -3551,7 +3966,7 @@ try:
         max_value=map_max_val,
         width=100,  # Changed from 120 to 100 to match other widgets
         toggle_label=plot1_initial_label,
-        toggle_active=(map_plot.range_mode == RangeMode.USER_SPECIFIED),
+        toggle_active=plot1_initial_active,
         toggle_callback=None,  # Will be set after toggle is created
         min_callback=on_range_change,
         max_callback=on_range_change,
@@ -3563,19 +3978,26 @@ try:
         # Note: toggle_active=True means User Specified, toggle_active=False means Dynamic
         # The callback receives new=True when toggle is active (User Specified), new=False when inactive (Dynamic)
         if new:  # Toggle is active = User Specified mode
-            map_plot.range_mode = RangeMode.USER_SPECIFIED
+            if plot1_is_1d and plot1_1d_plot is not None:
+                plot1_1d_plot.range_mode = RangeMode.USER_SPECIFIED
+            elif map_plot is not None:
+                map_plot.range_mode = RangeMode.USER_SPECIFIED
             range1_min_input.disabled = False
             range1_max_input.disabled = False
             # Update toggle label to "User selected"
             range1_mode_toggle.label = "Auto=Off"
         else:  # Toggle is inactive = Dynamic mode
-            map_plot.range_mode = RangeMode.DYNAMIC
+            if plot1_is_1d and plot1_1d_plot is not None:
+                plot1_1d_plot.range_mode = RangeMode.DYNAMIC
+            elif map_plot is not None:
+                map_plot.range_mode = RangeMode.DYNAMIC
             range1_min_input.disabled = True
             range1_max_input.disabled = True
             # Update toggle label to "Dynamic"
             range1_mode_toggle.label = "Auto=On"
-            # Recompute range from current data
-            update_plot1_range_dynamic()
+            # Recompute range from current data (only for 2D plots, 1D plots don't have color mapper)
+            if not plot1_is_1d or plot1_1d_plot is None:
+                update_plot1_range_dynamic()
         # Save state immediately for mode changes (important state, not frequent)
         from bokeh.io import curdoc
         def save_state_async():
@@ -3602,10 +4024,16 @@ try:
 
     # Sync initial state from plot to the extracted inputs
     if range1_min_input is not None and range1_max_input is not None:
-        sync_plot_to_range_inputs(map_plot, range1_min_input, range1_max_input)
+        if plot1_is_1d and plot1_1d_plot is not None:
+            # For 1D plots, sync from plot1_1d_plot
+            sync_plot_to_range_inputs(plot1_1d_plot, range1_min_input, range1_max_input)
+        elif map_plot is not None:
+            # For 2D plots, sync from map_plot
+            sync_plot_to_range_inputs(map_plot, range1_min_input, range1_max_input)
 
     # Initialize dynamic range if in dynamic mode (ensures range is calculated from actual data)
-    if map_plot.range_mode == RangeMode.DYNAMIC:
+    # Only for 2D plots (1D plots don't have color mapper to update)
+    if not plot1_is_1d and map_plot is not None and map_plot.range_mode == RangeMode.DYNAMIC:
         update_plot1_range_dynamic()
 
     # Create color scale and palette selectors using SCLib UI
@@ -3777,7 +4205,13 @@ try:
     range1_section.children.append(row(range1_mode_toggle, plot1_color_scale_selector, spacing=0))
     
     # Sync color scale selector to plot state
-    sync_plot_to_color_scale_selector(map_plot, plot1_color_scale_selector)
+    # For 1D plots, color scale doesn't apply (no color mapper), so skip sync
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # 1D plots don't have color scale, so we can skip syncing or set a default
+        # The color scale selector might not be visible/used for 1D plots anyway
+        pass
+    elif map_plot is not None:
+        sync_plot_to_color_scale_selector(map_plot, plot1_color_scale_selector)
 
     def on_palette_change(attr, old, new):
         """Handle palette change for all plots."""
@@ -4216,7 +4650,11 @@ try:
     # palette_section is a column with [label_div, selector] as children
     palette_selector = palette_section.children[1] if len(palette_section.children) > 1 else None
     if palette_selector is not None:
-        sync_plot_to_palette_selector(map_plot, palette_selector)
+        if plot1_is_1d and plot1_1d_plot is not None:
+            # For 1D plots, sync to plot1_1d_plot (though 1D plots may not use palette)
+            sync_plot_to_palette_selector(plot1_1d_plot, palette_selector)
+        elif map_plot is not None:
+            sync_plot_to_palette_selector(map_plot, palette_selector)
 
     # Create Probe Scale control for Plot2 and Plot2b
     # Initialize base dimensions if not already set (fallback for edge cases)
@@ -4802,6 +5240,13 @@ try:
     # Create plot shape controls for Plot1
     def on_plot1_shape_change(attr, old, new):
         """Handle Plot1 shape mode change."""
+        # For 1D plots, shape mode doesn't apply, so skip
+        if plot1_is_1d:
+            return
+        
+        if map_plot is None:
+            return
+            
         if new == 0:  # Square
             map_plot.plot_shape_mode = PlotShapeMode.SQUARE
         elif new == 1:  # Custom
@@ -4839,6 +5284,9 @@ try:
 
     def on_plot1_custom_width_change(attr, old, new):
         """Handle Plot1 custom width change."""
+        # For 1D plots, shape controls don't apply
+        if plot1_is_1d or map_plot is None:
+            return
         try:
             map_plot.plot_width = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
@@ -4868,6 +5316,9 @@ try:
 
     def on_plot1_custom_height_change(attr, old, new):
         """Handle Plot1 custom height change."""
+        # For 1D plots, shape controls don't apply
+        if plot1_is_1d or map_plot is None:
+            return
         try:
             map_plot.plot_height = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
@@ -4897,6 +5348,9 @@ try:
 
     def on_plot1_scale_change(attr, old, new):
         """Handle Plot1 scale change."""
+        # For 1D plots, shape controls don't apply
+        if plot1_is_1d or map_plot is None:
+            return
         try:
             map_plot.plot_scale = float(new)
             width, height = map_plot.calculate_plot_dimensions()
@@ -4926,6 +5380,9 @@ try:
 
     def on_plot1_min_size_change(attr, old, new):
         """Handle Plot1 min size change."""
+        # For 1D plots, shape controls don't apply
+        if plot1_is_1d or map_plot is None:
+            return
         try:
             map_plot.plot_min_size = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
@@ -4955,6 +5412,9 @@ try:
 
     def on_plot1_max_size_change(attr, old, new):
         """Handle Plot1 max size change."""
+        # For 1D plots, shape controls don't apply
+        if plot1_is_1d or map_plot is None:
+            return
         try:
             map_plot.plot_max_size = int(float(new))
             width, height = map_plot.calculate_plot_dimensions()
@@ -4984,10 +5444,30 @@ try:
 
     # Get initial shape mode
     initial_shape_mode = 0  # Square
-    if map_plot.plot_shape_mode == PlotShapeMode.CUSTOM:
-        initial_shape_mode = 1
-    elif map_plot.plot_shape_mode == PlotShapeMode.ASPECT_RATIO:
-        initial_shape_mode = 2
+    if plot1_is_1d and plot1_1d_plot is not None:
+        # For 1D plots, use defaults (shape mode doesn't really apply, but we'll use square)
+        plot_width = 400
+        plot_height = 400
+        plot_scale = 1.0
+        plot_min_size = 100
+        plot_max_size = 2000
+    elif map_plot is not None:
+        if map_plot.plot_shape_mode == PlotShapeMode.CUSTOM:
+            initial_shape_mode = 1
+        elif map_plot.plot_shape_mode == PlotShapeMode.ASPECT_RATIO:
+            initial_shape_mode = 2
+        plot_width = map_plot.plot_width
+        plot_height = map_plot.plot_height
+        plot_scale = map_plot.plot_scale
+        plot_min_size = map_plot.plot_min_size
+        plot_max_size = map_plot.plot_max_size
+    else:
+        # Fallback defaults
+        plot_width = 400
+        plot_height = 400
+        plot_scale = 1.0
+        plot_min_size = 100
+        plot_max_size = 2000
 
     plot1_shape_selector, plot1_custom_width_input, plot1_custom_height_input, \
     plot1_scale_input, plot1_min_size_input, plot1_max_size_input, \
@@ -4995,14 +5475,14 @@ try:
         active=initial_shape_mode,
         width=200,
         shape_callback=on_plot1_shape_change,
-        custom_width=map_plot.plot_width,
-        custom_height=map_plot.plot_height,
+        custom_width=plot_width,
+        custom_height=plot_height,
         custom_width_callback=on_plot1_custom_width_change,
         custom_height_callback=on_plot1_custom_height_change,
-        scale=map_plot.plot_scale,
+        scale=plot_scale,
         scale_callback=on_plot1_scale_change,
-        min_size=map_plot.plot_min_size,
-        max_size=map_plot.plot_max_size,
+        min_size=plot_min_size,
+        max_size=plot_max_size,
         min_size_callback=on_plot1_min_size_change,
         max_size_callback=on_plot1_max_size_change,
     )
@@ -5294,8 +5774,15 @@ try:
         else:
             # For 2D plots, get current slice data
             x_idx = get_x_index()
-            y_idx = get_y_index()
-            current_slice = volume[x_idx, y_idx, :, :]
+            if len(volume.shape) == 3:
+                # Volume is 3D (x,z,u) - only need x_idx
+                current_slice = volume[x_idx, :, :]
+            elif len(volume.shape) == 4:
+                # Normal 4D volume case (x,y,z,u) - need both x_idx and y_idx
+                y_idx = get_y_index()
+                current_slice = volume[x_idx, y_idx, :, :]
+            else:
+                raise ValueError(f"Unexpected volume shape: {volume.shape}, expected 3D or 4D")
             if plot2_needs_flip:
                 current_slice = np.transpose(current_slice)
             if current_slice is not None and current_slice.size > 0:
@@ -5671,8 +6158,10 @@ try:
     range3_section.children.append(row(range3_mode_toggle, plot3_color_scale_selector, spacing=0))
     # Note: Plot3 -> Plot2 computation buttons will be added to range3_section after they're created
     
-    # Sync color scale selector to plot state (Plot3 uses map_plot for state)
-    sync_plot_to_color_scale_selector(map_plot, plot3_color_scale_selector)
+    # Sync color scale selector to plot state (Plot3 uses map_plot for state, or plot1_1d_plot if Plot1 is 1D)
+    # Plot3 doesn't have color scale for 1D plots, so only sync for 2D plots
+    if not plot1_is_1d and map_plot is not None:
+        sync_plot_to_color_scale_selector(map_plot, plot3_color_scale_selector)
 
     # Save session callback
     def on_save_session():
@@ -6442,7 +6931,7 @@ try:
                             u2_idx = int(np.argmin(np.abs(plot2_x_coords - right_val)))
                         else:
                             u1_idx = int(left_val) if left_val is not None and not np.isnan(left_val) else 0
-                            u2_idx = int(right_val) if right_val is not None and not np.isnan(right_val) else volume.shape[3]-1
+                            u2_idx = int(right_val) if right_val is not None and not np.isnan(right_val) else u_size-1
 
                         # Convert y coordinates (Z dimension) to indices
                         if plot2_y_coords is not None and len(plot2_y_coords) > 0 and bottom_val is not None and top_val is not None:
@@ -6470,22 +6959,22 @@ try:
                         z_lo, z_hi = (int(z1), int(z2)) if z1 <= z2 else (int(z2), int(z1))
                         u_lo, u_hi = (int(u1), int(u2)) if u1 <= u2 else (int(u2), int(u1))
 
-                    z_lo = max(0, min(z_lo, volume.shape[2]-1))
-                    z_hi = max(0, min(z_hi, volume.shape[2]-1))
-                    u_lo = max(0, min(u_lo, volume.shape[3]-1))
-                    u_hi = max(0, min(u_hi, volume.shape[3]-1))
+                    z_lo = max(0, min(z_lo, z_size-1))
+                    z_hi = max(0, min(z_hi, z_size-1))
+                    u_lo = max(0, min(u_lo, u_size-1))
+                    u_hi = max(0, min(u_hi, u_size-1))
                     if z_hi <= z_lo:
-                        z_hi = min(z_lo + 1, volume.shape[2])
+                        z_hi = min(z_lo + 1, z_size)
                     if u_hi <= u_lo:
-                        u_hi = min(u_lo + 1, volume.shape[3])
+                        u_hi = min(u_lo + 1, u_size)
 
                     print(f"  ✅ Using Z range: {z_lo} to {z_hi}, U range: {u_lo} to {u_hi}")
 
                     # Debug: Check if we're using the full volume (which would be slow)
                     z_range_size = z_hi - z_lo
                     u_range_size = u_hi - u_lo
-                    z_total = volume.shape[2]
-                    u_total = volume.shape[3]
+                    z_total = z_size
+                    u_total = u_size
                     z_percent = (z_range_size / z_total * 100) if z_total > 0 else 0
                     u_percent = (u_range_size / u_total * 100) if u_total > 0 else 0
                     print(f"  📊 Selection size: Z={z_range_size}/{z_total} ({z_percent:.1f}%), U={u_range_size}/{u_total} ({u_percent:.1f}%)")
@@ -6498,15 +6987,26 @@ try:
                         print(f"  ✅ Using small selection ({z_percent:.1f}% Z, {u_percent:.1f}% U). Should be fast.")
 
                     # Extract only the selected region (this should be fast if bounds are correct)
-                    print(f"  🔄 Extracting volume slice: volume[:, :, {z_lo}:{z_hi}, {u_lo}:{u_hi}]")
                     t_slice = time.time()
-                    piece = volume[:, :, z_lo:z_hi, u_lo:u_hi]
+                    if len(volume.shape) == 3:
+                        # Volume is 3D (x,z,u) - extract slice at all x positions
+                        print(f"  🔄 Extracting volume slice: volume[:, {z_lo}:{z_hi}, {u_lo}:{u_hi}]")
+                        piece = volume[:, z_lo:z_hi, u_lo:u_hi]
+                        print(f"  ⏱️  Slicing took {time.time() - t_slice:.3f}s. Piece shape: {piece.shape}")
+                        print(f"  🔄 Summing over Z and U dimensions...")
+                        t_sum = time.time()
+                        img = np.sum(piece, axis=(1, 2))  # sum over Z and U (axes 1 and 2)
+                    elif len(volume.shape) == 4:
+                        # Normal 4D volume case (x,y,z,u)
+                        print(f"  🔄 Extracting volume slice: volume[:, :, {z_lo}:{z_hi}, {u_lo}:{u_hi}]")
+                        piece = volume[:, :, z_lo:z_hi, u_lo:u_hi]
+                        print(f"  ⏱️  Slicing took {time.time() - t_slice:.3f}s. Piece shape: {piece.shape}")
+                        print(f"  🔄 Summing over Z and U dimensions...")
+                        t_sum = time.time()
+                        img = np.sum(piece, axis=(2, 3))  # sum over Z and U (axes 2 and 3)
+                    else:
+                        raise ValueError(f"Unexpected volume shape: {volume.shape}, expected 3D or 4D")
                     t_slice_done = time.time()
-                    print(f"  ⏱️  Slicing took {t_slice_done - t_slice:.3f}s. Piece shape: {piece.shape}")
-
-                    print(f"  🔄 Summing over Z and U dimensions...")
-                    t_sum = time.time()
-                    img = np.sum(piece, axis=(2, 3))  # sum over Z and U
                     t_sum_done = time.time()
                     print(f"  ⏱️  Summing took {t_sum_done - t_sum:.3f}s. Result shape: {img.shape}")
 
@@ -6816,7 +7316,19 @@ try:
         if hasattr(event, 'x') and hasattr(event, 'y'):
             # Find closest indices in the flipped coordinate arrays (same as Plot1)
             x_idx = np.argmin(np.abs(plot3_x_coords - event.x))
-            y_idx = np.argmin(np.abs(plot3_y_coords - event.y))
+            # When Plot1 is 1D, plot3_y_coords is None, so use index-based coordinates
+            if plot3_y_coords is not None:
+                y_idx = np.argmin(np.abs(plot3_y_coords - event.y))
+            else:
+                # When Plot1 is 1D, y-axis is index-based (0 to shape[0]-1)
+                # Use plot1_1d_data if available, otherwise fallback
+                if plot1_is_1d and plot1_1d_data is not None:
+                    data_shape_0 = plot1_1d_data.shape[0]
+                elif plot1_data is not None:
+                    data_shape_0 = plot1_data.shape[0]
+                else:
+                    data_shape_0 = len(plot1_x_coords) if plot1_x_coords is not None else 1
+                y_idx = max(0, min(int(round(event.y)), data_shape_0 - 1))
 
             # Convert back to original coordinate space for sliders
             # Sliders use original x_coords and y_coords (not flipped)
@@ -6825,7 +7337,11 @@ try:
             
             try:
                 # Update both sliders (handlers will update plots but won't save state)
-                if map_plot.needs_flip:
+                # When Plot1 is 1D, y_coords is None, so only update x_slider
+                if y_coords is None:
+                    # Plot1 is 1D - only update x_slider
+                    x_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
+                elif map_plot.needs_flip:
                     # When flipped: plot3_x_coords is actually y_coords, plot3_y_coords is actually x_coords
                     x_slider.value = y_coords[y_idx] if y_idx < len(y_coords) else y_coords[-1]
                     y_slider.value = x_coords[x_idx] if x_idx < len(x_coords) else x_coords[-1]
@@ -7527,10 +8043,10 @@ try:
                     print(f"  ✅ Converted to original space: z1={click_z1}, z2={click_z2}, u1={click_u1}, u2={click_u2}")
 
                     # Clamp to valid range
-                    click_z1 = max(0, min(click_z1, volume.shape[2] - 1))
-                    click_z2 = max(0, min(click_z2, volume.shape[2] - 1))
-                    click_u1 = max(0, min(click_u1, volume.shape[3] - 1))
-                    click_u2 = max(0, min(click_u2, volume.shape[3] - 1))
+                    click_z1 = max(0, min(click_z1, z_size - 1))
+                    click_z2 = max(0, min(click_z2, z_size - 1))
+                    click_u1 = max(0, min(click_u1, u_size - 1))
+                    click_u2 = max(0, min(click_u2, u_size - 1))
 
                     print(f"  ✅ Clamped indices: z1={click_z1}, z2={click_z2}, u1={click_u1}, u2={click_u2}")
 
@@ -7636,19 +8152,35 @@ try:
 
     # Draw initial rectangles if needed
     if not is_3d_volume:
-        # Initialize rect2 to cover full range for 4D volumes
+        # Initialize rect2 to cover full range for 4D volumes OR 3D volumes when Plot1 is 1D
         rect2.set(
-            min_x=0, max_x=volume.shape[2]-1,
-            min_y=0, max_y=volume.shape[3]-1
+            min_x=0, max_x=z_size-1,
+            min_y=0, max_y=u_size-1
         )
         # draw_rect2()  # Disabled - using Bokeh's BoxAnnotation instead
 
     # Initialize rect3 to cover full range (use original coordinates, not flipped)
     # rect3 stores original coordinate values, not plot coordinates
-    rect3.set(
-        min_x=float(np.min(x_coords)), max_x=float(np.max(x_coords)),
-        min_y=float(np.min(y_coords)), max_y=float(np.max(y_coords))
-    )
+    # When Plot1 is 1D, y_coords is None, so use data shape for y range
+    if y_coords is not None:
+        rect3.set(
+            min_x=float(np.min(x_coords)), max_x=float(np.max(x_coords)),
+            min_y=float(np.min(y_coords)), max_y=float(np.max(y_coords))
+        )
+    else:
+        # When Plot1 is 1D, y-axis is index-based (0 to shape[0]-1)
+        # Use plot1_1d_data if available, otherwise fallback to plot1_data
+        if plot1_is_1d and plot1_1d_data is not None:
+            data_shape_0 = plot1_1d_data.shape[0]
+        elif plot1_data is not None:
+            data_shape_0 = plot1_data.shape[0]
+        else:
+            # Fallback: use x_coords length
+            data_shape_0 = len(x_coords) if x_coords is not None else 1
+        rect3.set(
+            min_x=float(np.min(x_coords)), max_x=float(np.max(x_coords)),
+            min_y=0.0, max_y=float(data_shape_0 - 1)
+        )
 
     # Create main dashboard layout using optimized layout
     # Extract controls from range sections for each plot

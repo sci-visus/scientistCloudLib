@@ -94,7 +94,7 @@ class DashboardBuilder:
             print(f"Successfully loaded data:")
             print(f"  Volume shape: {self.volume.shape}")
             print(f"  X coords shape: {self.x_coords.shape}")
-            print(f"  Y coords shape: {self.y_coords.shape}")
+            print(f"  Y coords shape: {self.y_coords.shape if self.y_coords is not None else 'None (Plot1 is 1D)'}")
             
             # Check if volume is 3D or 4D
             self.is_3d_volume = len(self.volume.shape) == 3
