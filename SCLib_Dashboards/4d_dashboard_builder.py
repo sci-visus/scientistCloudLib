@@ -132,8 +132,22 @@ class DashboardBuilder:
                 "postsample_picked_b": getattr(self.process_4dnexus, 'postsample_picked_b', None),
                 "probe_x_coords_picked_b": getattr(self.process_4dnexus, 'probe_x_coords_picked_b', None),
                 "probe_y_coords_picked_b": getattr(self.process_4dnexus, 'probe_y_coords_picked_b', None),
-                "plot1_mode": "single" if getattr(self.process_4dnexus, 'plot1_single_dataset_picked', None) else "ratio",
-                "plot1b_mode": "single" if getattr(self.process_4dnexus, 'plot1b_single_dataset_picked', None) else "ratio",
+                # Save plot1_mode as numeric: 0=Single (1D), 1=Single (2D), 2=Ratio (1D), 3=Ratio (2D)
+                # Determine mode from plot1_single_dataset_picked and plot1_is_1d
+                "plot1_mode": (
+                    0 if (getattr(self.process_4dnexus, 'plot1_single_dataset_picked', None) is not None and getattr(self.process_4dnexus, 'plot1_is_1d', False)) else
+                    1 if (getattr(self.process_4dnexus, 'plot1_single_dataset_picked', None) is not None and not getattr(self.process_4dnexus, 'plot1_is_1d', False)) else
+                    2 if (getattr(self.process_4dnexus, 'plot1_is_1d', False)) else
+                    3  # Default to Ratio (2D) if unclear
+                ),
+                # Save plot1b_mode as numeric: 0=Single (1D), 1=Single (2D), 2=Ratio (1D), 3=Ratio (2D)
+                # For Plot1B, check if it exists and determine mode (default to same logic as Plot1)
+                "plot1b_mode": (
+                    0 if (getattr(self.process_4dnexus, 'plot1b_single_dataset_picked', None) is not None and getattr(self.process_4dnexus, 'plot1_is_1d', False)) else
+                    1 if (getattr(self.process_4dnexus, 'plot1b_single_dataset_picked', None) is not None and not getattr(self.process_4dnexus, 'plot1_is_1d', False)) else
+                    2 if (getattr(self.process_4dnexus, 'plot1_is_1d', False)) else
+                    3  # Default to Ratio (2D) if unclear
+                ),
                 "plot1b_enabled": bool(getattr(self.process_4dnexus, 'plot1b_single_dataset_picked', None) or getattr(self.process_4dnexus, 'presample_picked_b', None)),
                 "plot2b_enabled": bool(getattr(self.process_4dnexus, 'volume_picked_b', None)),
                 "user_email": globals().get('user_email', None),
