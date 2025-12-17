@@ -788,11 +788,41 @@ try:
                 print(f"      data.shape[0]={plot1_data.shape[0]} != len(y_coords)={len(plot1_y_coords)}")
                 print(f"      This will cause misalignment between data and axes!")
 
+    # Symlog transformation function for handling negative values in log scale
+    def symlog_transform(y, linthresh=1e-10):
+        """
+        Symmetric log transformation: sign(y) * log(|y|) for |y| >= linthresh, linear otherwise.
+        
+        Args:
+            y: Input array (can contain negative, zero, or positive values)
+            linthresh: Linear threshold - values with |y| < linthresh are treated linearly
+        
+        Returns:
+            Transformed array
+        """
+        y = np.asarray(y, dtype=float)
+        result = np.zeros_like(y)
+        
+        # Handle values above threshold
+        mask_above = np.abs(y) >= linthresh
+        result[mask_above] = np.sign(y[mask_above]) * np.log(np.abs(y[mask_above]) / linthresh) + linthresh
+        
+        # Handle values below threshold (linear region)
+        mask_below = ~mask_above
+        result[mask_below] = y[mask_below]
+        
+        return result
+    
+    # Store original 1D data for log scale transformation
+    plot1_1d_data_original = None
+    if plot1_is_1d and plot1_1d_data is not None:
+        plot1_1d_data_original = plot1_1d_data.copy()
+    
     # Create data source and renderer for Plot1 - either 1D line or 2D image
     if plot1_is_1d and plot1_1d_plot is not None:
         # Create 1D line plot
         source1 = ColumnDataSource(data={"x": plot1_x_coords, "y": plot1_1d_data})
-        plot1.line("x", "y", source=source1, line_width=2, line_color="blue")
+        line_renderer1 = plot1.line("x", "y", source=source1, line_width=2, line_color="blue")
         print("✅ Plot1 line renderer created successfully")
         # No colorbar for 1D line plots
         colorbar1 = None
@@ -985,12 +1015,28 @@ try:
                 rect3_crosshair.v1line = None
 
             x_index = get_x_index()
-            y_index = get_y_index()
-
-            # Get coordinates using flipped coordinate arrays (same as Plot1)
+            
+            # Handle 1D plots (when Plot1 is 1D, Plot3 is also 1D)
+            if plot1_is_1d and plot3_x_coords is not None:
+                # For 1D plots, only draw a vertical line at the x position
+                if x_index < len(plot3_x_coords):
+                    x_coord = plot3_x_coords[x_index]
+                    # Draw vertical line
+                    rect3_crosshair.v1line = plot3.line(
+                        [x_coord, x_coord],
+                        [plot3.y_range.start, plot3.y_range.end],
+                        line_color='red',
+                        line_width=2,
+                        line_dash='dashed'
+                    )
+                return
+            
+            # For 2D plots, need both x and y coordinates
             if plot3_x_coords is None or plot3_y_coords is None:
                 print("⚠️ WARNING: plot3_x_coords or plot3_y_coords is None in draw_cross3()")
                 return
+            
+            y_index = get_y_index()
 
             # Temporarily store Plot1's crosshair renderers so we don't overwrite them
             # Save current Plot1 crosshair renderers
@@ -2000,6 +2046,8 @@ try:
     source3_1d = None
     color_mapper3 = None
     colorbar3 = None
+    # Use a mutable container to avoid nonlocal issues when code is executed via exec()
+    plot3_1d_data_original = [None]  # Store original Plot3 1D data for log scale transformation
     
     if plot1_is_1d and plot1_1d_plot is not None:
         # Plot3 should be a 1D line plot when Plot1 is 1D
@@ -4357,8 +4405,52 @@ try:
         callback=on_color_scale_change
     )
     
+    # Add log scale toggle for 1D plots
+    plot1_log_scale_toggle = None
+    if plot1_is_1d and plot1_1d_plot is not None:
+        from bokeh.models import Toggle
+        plot1_log_scale_toggle = Toggle(
+            label="Log Scale",
+            active=False,
+            button_type="default",
+            width=100
+        )
+        
+        def on_plot1_log_scale_change(attr, old, new):
+            """Handle log scale toggle for Plot1 1D plots."""
+            if plot1_1d_data_original is None or source1 is None:
+                return
+            
+            if new:  # Log scale enabled
+                # Apply symlog transformation
+                transformed_data = symlog_transform(plot1_1d_data_original)
+                source1.data = {"x": plot1_x_coords, "y": transformed_data}
+                plot1.yaxis.axis_label = "Intensity (symlog)"
+                print("✅ Plot1 log scale enabled (symlog)")
+            else:  # Log scale disabled
+                # Use original data
+                source1.data = {"x": plot1_x_coords, "y": plot1_1d_data_original}
+                plot1.yaxis.axis_label = "Intensity"
+                print("✅ Plot1 log scale disabled")
+            
+            # Update y-axis range to fit the data
+            y_data = source1.data["y"]
+            if len(y_data) > 0:
+                y_min = float(np.nanmin(y_data))
+                y_max = float(np.nanmax(y_data))
+                # Add some padding
+                y_range_padding = (y_max - y_min) * 0.05
+                plot1.y_range.start = y_min - y_range_padding
+                plot1.y_range.end = y_max + y_range_padding
+        
+        plot1_log_scale_toggle.on_change("active", on_plot1_log_scale_change)
+    
     # Add toggle and color scale selector in a row (no label for color scale)
-    range1_section.children.append(row(range1_mode_toggle, plot1_color_scale_selector, spacing=0))
+    # For 1D plots, add log scale toggle instead of color scale selector
+    if plot1_is_1d and plot1_1d_plot is not None and plot1_log_scale_toggle is not None:
+        range1_section.children.append(row(range1_mode_toggle, plot1_log_scale_toggle, spacing=0))
+    else:
+        range1_section.children.append(row(range1_mode_toggle, plot1_color_scale_selector, spacing=0))
     
     # Sync color scale selector to plot state
     # For 1D plots, color scale doesn't apply (no color mapper), so skip sync
@@ -6326,8 +6418,53 @@ try:
         callback=on_plot3_color_scale_change
     )
     
+    # Add log scale toggle for Plot3 1D plots
+    plot3_log_scale_toggle = None
+    
+    if plot1_is_1d and plot1_1d_plot is not None:
+        from bokeh.models import Toggle
+        plot3_log_scale_toggle = Toggle(
+            label="Log Scale",
+            active=False,
+            button_type="default",
+            width=100
+        )
+        
+        def on_plot3_log_scale_change(attr, old, new):
+            """Handle log scale toggle for Plot3 1D plots."""
+            if plot3_1d_data_original[0] is None or source3_1d is None:
+                return
+            
+            if new:  # Log scale enabled
+                # Apply symlog transformation
+                transformed_data = symlog_transform(plot3_1d_data_original[0])
+                source3_1d.data = {"x": source3_1d.data["x"], "y": transformed_data}
+                plot3.yaxis.axis_label = "Intensity (symlog)"
+                print("✅ Plot3 log scale enabled (symlog)")
+            else:  # Log scale disabled
+                # Use original data
+                source3_1d.data = {"x": source3_1d.data["x"], "y": plot3_1d_data_original[0]}
+                plot3.yaxis.axis_label = "Intensity"
+                print("✅ Plot3 log scale disabled")
+            
+            # Update y-axis range to fit the data
+            y_data = source3_1d.data["y"]
+            if len(y_data) > 0:
+                y_min = float(np.nanmin(y_data))
+                y_max = float(np.nanmax(y_data))
+                # Add some padding
+                y_range_padding = (y_max - y_min) * 0.05
+                plot3.y_range.start = y_min - y_range_padding
+                plot3.y_range.end = y_max + y_range_padding
+        
+        plot3_log_scale_toggle.on_change("active", on_plot3_log_scale_change)
+    
     # Add toggle and color scale selector in a row (no label for color scale)
-    range3_section.children.append(row(range3_mode_toggle, plot3_color_scale_selector, spacing=0))
+    # For 1D plots, add log scale toggle instead of color scale selector
+    if plot1_is_1d and plot1_1d_plot is not None and plot3_log_scale_toggle is not None:
+        range3_section.children.append(row(range3_mode_toggle, plot3_log_scale_toggle, spacing=0))
+    else:
+        range3_section.children.append(row(range3_mode_toggle, plot3_color_scale_selector, spacing=0))
     # Note: Plot3 -> Plot2 computation buttons will be added to range3_section after they're created
     
     # Sync color scale selector to plot state (Plot3 uses map_plot for state, or plot1_1d_plot if Plot1 is 1D)
@@ -7228,6 +7365,13 @@ try:
                         plot3_x_data = plot3_x_coords if plot3_x_coords is not None else np.arange(img.size)
                         plot3_y_data = img.flatten()
                     
+                    # Store original data for log scale transformation
+                    plot3_1d_data_original[0] = plot3_y_data.copy() if hasattr(plot3_y_data, 'copy') else np.array(plot3_y_data)
+                    
+                    # Apply log transformation if enabled
+                    if plot3_log_scale_toggle is not None and plot3_log_scale_toggle.active:
+                        plot3_y_data = symlog_transform(plot3_y_data)
+                    
                     def update_plot3_source_1d():
                         source3_1d.data = {
                             "x": plot3_x_data,
@@ -7470,6 +7614,13 @@ try:
                         # If somehow 2D, flatten it
                         plot3_x_data_2b = plot3_x_coords if plot3_x_coords is not None else np.arange(img.size)
                         plot3_y_data_2b = img.flatten()
+                    
+                    # Store original data for log scale transformation
+                    plot3_1d_data_original[0] = plot3_y_data_2b.copy() if hasattr(plot3_y_data_2b, 'copy') else np.array(plot3_y_data_2b)
+                    
+                    # Apply log transformation if enabled
+                    if plot3_log_scale_toggle is not None and plot3_log_scale_toggle.active:
+                        plot3_y_data_2b = symlog_transform(plot3_y_data_2b)
                     
                     def update_plot3_source_2b_1d():
                         source3_1d.data = {
