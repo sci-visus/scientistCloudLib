@@ -1620,8 +1620,23 @@ try:
                 x_coords_1d = np.arange(len(slice_1d))
 
             source2.data = {"x": x_coords_1d, "y": slice_1d}
-            plot2.x_range.start = float(np.min(x_coords_1d))
-            plot2.x_range.end = float(np.max(x_coords_1d))
+            
+            # Preserve zoom state: only update x_range if coordinates have changed
+            coords_min = float(np.min(x_coords_1d))
+            coords_max = float(np.max(x_coords_1d))
+            if (_plot2_zoom_state["x_range"]["coords_min"] is None or 
+                _plot2_zoom_state["x_range"]["coords_max"] is None or
+                abs(_plot2_zoom_state["x_range"]["coords_min"] - coords_min) > 1e-6 or
+                abs(_plot2_zoom_state["x_range"]["coords_max"] - coords_max) > 1e-6):
+                # Coordinates changed - update range
+                plot2.x_range.start = coords_min
+                plot2.x_range.end = coords_max
+                _plot2_zoom_state["x_range"]["coords_min"] = coords_min
+                _plot2_zoom_state["x_range"]["coords_max"] = coords_max
+                _plot2_zoom_state["x_range"]["min"] = coords_min
+                _plot2_zoom_state["x_range"]["max"] = coords_max
+                _plot2_zoom_state["is_manual_zoom"] = False
+            # else: preserve current zoom state (user has zoomed)
 
             # Update ticks from probe coordinates if available
             if hasattr(self.process_4dnexus, 'probe_x_coords_picked') and self.process_4dnexus.probe_x_coords_picked:
@@ -1631,22 +1646,30 @@ try:
             # Check if range inputs exist and are enabled (User Specified mode) or disabled (Dynamic mode)
             try:
                 if range2_min_input is not None and not range2_min_input.disabled:
-                    # User Specified mode - use input values
+                    # User Specified mode - preserve zoom state, only use input values if they're set
                     try:
-                        min_val = float(range2_min_input.value) if range2_min_input.value else float(np.min(slice_1d))
-                        max_val = float(range2_max_input.value) if range2_max_input.value else float(np.max(slice_1d))
-                        plot2.y_range.start = min_val
-                        plot2.y_range.end = max_val
+                        if range2_min_input.value and range2_max_input.value:
+                            min_val = float(range2_min_input.value)
+                            max_val = float(range2_max_input.value)
+                            plot2.y_range.start = min_val
+                            plot2.y_range.end = max_val
+                            _plot2_zoom_state["y_range"]["min"] = min_val
+                            _plot2_zoom_state["y_range"]["max"] = max_val
+                        # else: preserve current zoom state
                     except:
-                        # Fallback to data range if input is invalid
-                        plot2.y_range.start = float(np.min(slice_1d))
-                        plot2.y_range.end = float(np.max(slice_1d))
+                        # Fallback: preserve current zoom if possible, otherwise use data range
+                        if _plot2_zoom_state["y_range"]["min"] is None:
+                            plot2.y_range.start = float(np.min(slice_1d))
+                            plot2.y_range.end = float(np.max(slice_1d))
+                        # else: preserve current zoom state
                 else:
                     # Dynamic mode - recompute from current slice
                     probe_min = float(np.percentile(slice_1d[~np.isnan(slice_1d)], 1))
                     probe_max = float(np.percentile(slice_1d[~np.isnan(slice_1d)], 99))
                     plot2.y_range.start = probe_min
                     plot2.y_range.end = probe_max
+                    _plot2_zoom_state["y_range"]["min"] = probe_min
+                    _plot2_zoom_state["y_range"]["max"] = probe_max
                     # Update range inputs so user can see the computed values
                     # Use add_next_tick_callback to ensure updates happen in next Bokeh tick
                     from bokeh.io import curdoc
@@ -1660,6 +1683,8 @@ try:
                 probe_max = float(np.percentile(slice_1d[~np.isnan(slice_1d)], 99))
                 plot2.y_range.start = probe_min
                 plot2.y_range.end = probe_max
+                _plot2_zoom_state["y_range"]["min"] = probe_min
+                _plot2_zoom_state["y_range"]["max"] = probe_max
         else:
             # For 4D: update 2D image plot
             slice_2d = volume[x_idx, y_idx, :, :]  # This is (z, u)
@@ -1705,10 +1730,41 @@ try:
             }
 
             # Update plot ranges to match coordinate arrays
-            plot2.x_range.start = float(np.min(x_coords))
-            plot2.x_range.end = float(np.max(x_coords))
-            plot2.y_range.start = float(np.min(y_coords))
-            plot2.y_range.end = float(np.max(y_coords))
+            # Preserve zoom state: only update if coordinates have changed
+            coords_x_min = float(np.min(x_coords))
+            coords_x_max = float(np.max(x_coords))
+            coords_y_min = float(np.min(y_coords))
+            coords_y_max = float(np.max(y_coords))
+            
+            # Check if x coordinates have changed
+            if (_plot2_zoom_state["x_range"]["coords_min"] is None or 
+                _plot2_zoom_state["x_range"]["coords_max"] is None or
+                abs(_plot2_zoom_state["x_range"]["coords_min"] - coords_x_min) > 1e-6 or
+                abs(_plot2_zoom_state["x_range"]["coords_max"] - coords_x_max) > 1e-6):
+                # Coordinates changed - update range
+                plot2.x_range.start = coords_x_min
+                plot2.x_range.end = coords_x_max
+                _plot2_zoom_state["x_range"]["coords_min"] = coords_x_min
+                _plot2_zoom_state["x_range"]["coords_max"] = coords_x_max
+                _plot2_zoom_state["x_range"]["min"] = coords_x_min
+                _plot2_zoom_state["x_range"]["max"] = coords_x_max
+                _plot2_zoom_state["is_manual_zoom"] = False
+            # else: preserve current x zoom state
+            
+            # Check if y coordinates have changed
+            if (_plot2_zoom_state["y_range"]["coords_min"] is None or 
+                _plot2_zoom_state["y_range"]["coords_max"] is None or
+                abs(_plot2_zoom_state["y_range"]["coords_min"] - coords_y_min) > 1e-6 or
+                abs(_plot2_zoom_state["y_range"]["coords_max"] - coords_y_max) > 1e-6):
+                # Coordinates changed - update range
+                plot2.y_range.start = coords_y_min
+                plot2.y_range.end = coords_y_max
+                _plot2_zoom_state["y_range"]["coords_min"] = coords_y_min
+                _plot2_zoom_state["y_range"]["coords_max"] = coords_y_max
+                _plot2_zoom_state["y_range"]["min"] = coords_y_min
+                _plot2_zoom_state["y_range"]["max"] = coords_y_max
+                _plot2_zoom_state["is_manual_zoom"] = False
+            # else: preserve current y zoom state
             # Update color mapper range based on mode
             # Check if range inputs exist and are enabled (User Specified mode) or disabled (Dynamic mode)
             try:
@@ -1827,10 +1883,41 @@ try:
                         }
 
                         # Update plot ranges to match coordinate arrays
-                        plot2b.x_range.start = float(np.min(x_coords_b))
-                        plot2b.x_range.end = float(np.max(x_coords_b))
-                        plot2b.y_range.start = float(np.min(y_coords_b))
-                        plot2b.y_range.end = float(np.max(y_coords_b))
+                        # Preserve zoom state: only update if coordinates have changed
+                        coords_x_min_b = float(np.min(x_coords_b))
+                        coords_x_max_b = float(np.max(x_coords_b))
+                        coords_y_min_b = float(np.min(y_coords_b))
+                        coords_y_max_b = float(np.max(y_coords_b))
+                        
+                        # Check if x coordinates have changed
+                        if (_plot2b_zoom_state["x_range"]["coords_min"] is None or 
+                            _plot2b_zoom_state["x_range"]["coords_max"] is None or
+                            abs(_plot2b_zoom_state["x_range"]["coords_min"] - coords_x_min_b) > 1e-6 or
+                            abs(_plot2b_zoom_state["x_range"]["coords_max"] - coords_x_max_b) > 1e-6):
+                            # Coordinates changed - update range
+                            plot2b.x_range.start = coords_x_min_b
+                            plot2b.x_range.end = coords_x_max_b
+                            _plot2b_zoom_state["x_range"]["coords_min"] = coords_x_min_b
+                            _plot2b_zoom_state["x_range"]["coords_max"] = coords_x_max_b
+                            _plot2b_zoom_state["x_range"]["min"] = coords_x_min_b
+                            _plot2b_zoom_state["x_range"]["max"] = coords_x_max_b
+                            _plot2b_zoom_state["is_manual_zoom"] = False
+                        # else: preserve current x zoom state
+                        
+                        # Check if y coordinates have changed
+                        if (_plot2b_zoom_state["y_range"]["coords_min"] is None or 
+                            _plot2b_zoom_state["y_range"]["coords_max"] is None or
+                            abs(_plot2b_zoom_state["y_range"]["coords_min"] - coords_y_min_b) > 1e-6 or
+                            abs(_plot2b_zoom_state["y_range"]["coords_max"] - coords_y_max_b) > 1e-6):
+                            # Coordinates changed - update range
+                            plot2b.y_range.start = coords_y_min_b
+                            plot2b.y_range.end = coords_y_max_b
+                            _plot2b_zoom_state["y_range"]["coords_min"] = coords_y_min_b
+                            _plot2b_zoom_state["y_range"]["coords_max"] = coords_y_max_b
+                            _plot2b_zoom_state["y_range"]["min"] = coords_y_min_b
+                            _plot2b_zoom_state["y_range"]["max"] = coords_y_max_b
+                            _plot2b_zoom_state["is_manual_zoom"] = False
+                        # else: preserve current y zoom state
 
                         # Plot2B uses Bokeh's default auto-ticker (same as Plot2)
                         # No manual tick updates needed - Bokeh will automatically adjust ticks when data changes
@@ -1900,8 +1987,23 @@ try:
                             x_coords_1d_b = np.arange(len(slice_1d_b))
 
                         source2b.data = {"x": x_coords_1d_b, "y": slice_1d_b}
-                        plot2b.x_range.start = float(np.min(x_coords_1d_b))
-                        plot2b.x_range.end = float(np.max(x_coords_1d_b))
+                        
+                        # Preserve zoom state: only update x_range if coordinates have changed
+                        coords_min_b = float(np.min(x_coords_1d_b))
+                        coords_max_b = float(np.max(x_coords_1d_b))
+                        if (_plot2b_zoom_state["x_range"]["coords_min"] is None or 
+                            _plot2b_zoom_state["x_range"]["coords_max"] is None or
+                            abs(_plot2b_zoom_state["x_range"]["coords_min"] - coords_min_b) > 1e-6 or
+                            abs(_plot2b_zoom_state["x_range"]["coords_max"] - coords_max_b) > 1e-6):
+                            # Coordinates changed - update range
+                            plot2b.x_range.start = coords_min_b
+                            plot2b.x_range.end = coords_max_b
+                            _plot2b_zoom_state["x_range"]["coords_min"] = coords_min_b
+                            _plot2b_zoom_state["x_range"]["coords_max"] = coords_max_b
+                            _plot2b_zoom_state["x_range"]["min"] = coords_min_b
+                            _plot2b_zoom_state["x_range"]["max"] = coords_max_b
+                            _plot2b_zoom_state["is_manual_zoom"] = False
+                        # else: preserve current zoom state (user has zoomed)
 
                         # Update ticks from probe coordinates if available
                         if hasattr(self.process_4dnexus, 'probe_x_coords_picked_b') and self.process_4dnexus.probe_x_coords_picked_b:
@@ -1915,6 +2017,8 @@ try:
                                 probe2b_max = float(np.percentile(slice_1d_b[~np.isnan(slice_1d_b)], 99))
                                 plot2b.y_range.start = probe2b_min
                                 plot2b.y_range.end = probe2b_max
+                                _plot2b_zoom_state["y_range"]["min"] = probe2b_min
+                                _plot2b_zoom_state["y_range"]["max"] = probe2b_max
                                 # Update range inputs so user can see the computed values
                                 # Use add_next_tick_callback to ensure updates happen in next Bokeh tick
                                 from bokeh.io import curdoc
@@ -1923,21 +2027,30 @@ try:
                                 )
                                 curdoc().add_next_tick_callback(update_func)
                             elif range2b_min_input is not None:
-                                # User Specified mode - use input values
+                                # User Specified mode - preserve zoom state, only use input values if they're set
                                 try:
-                                    min_val = float(range2b_min_input.value) if range2b_min_input.value else float(np.min(slice_1d_b))
-                                    max_val = float(range2b_max_input.value) if range2b_max_input.value else float(np.max(slice_1d_b))
-                                    plot2b.y_range.start = min_val
-                                    plot2b.y_range.end = max_val
+                                    if range2b_min_input.value and range2b_max_input.value:
+                                        min_val = float(range2b_min_input.value)
+                                        max_val = float(range2b_max_input.value)
+                                        plot2b.y_range.start = min_val
+                                        plot2b.y_range.end = max_val
+                                        _plot2b_zoom_state["y_range"]["min"] = min_val
+                                        _plot2b_zoom_state["y_range"]["max"] = max_val
+                                    # else: preserve current zoom state
                                 except:
-                                    plot2b.y_range.start = float(np.min(slice_1d_b))
-                                    plot2b.y_range.end = float(np.max(slice_1d_b))
+                                    # Fallback: preserve current zoom if possible, otherwise use data range
+                                    if _plot2b_zoom_state["y_range"]["min"] is None:
+                                        plot2b.y_range.start = float(np.min(slice_1d_b))
+                                        plot2b.y_range.end = float(np.max(slice_1d_b))
+                                    # else: preserve current zoom state
                         except NameError:
                             # Range inputs not defined yet - use Dynamic mode as default
                             probe2b_min = float(np.percentile(slice_1d_b[~np.isnan(slice_1d_b)], 1))
                             probe2b_max = float(np.percentile(slice_1d_b[~np.isnan(slice_1d_b)], 99))
                             plot2b.y_range.start = probe2b_min
                             plot2b.y_range.end = probe2b_max
+                            _plot2b_zoom_state["y_range"]["min"] = probe2b_min
+                            _plot2b_zoom_state["y_range"]["max"] = probe2b_max
                 except Exception as e:
                         print(f"Error updating Plot2B: {e}")
 
@@ -1956,10 +2069,49 @@ try:
             # Plot1's dynamic range is computed once at initialization or when mode changes
             # Update Plot2B if it exists
             show_slice_b()  # This already handles Plot2B Dynamic/User Specified range mode
-            # Save state for undo/redo (debounced to avoid excessive saves during dragging)
-            # Skip if we're restoring state (undo/redo)
+            
+            # Track slider drag state - only save initial and final positions to undo/redo
+            # Skip if we're restoring state (undo/redo) or during programmatic changes (plot clicks)
             if not _skip_slider_state_save["value"]:
-                debounced_save_state("X slider changed", update_undo_redo=True)
+                from bokeh.io import curdoc
+                
+                # If this is the first change (not currently dragging), save initial value
+                if not _slider_drag_state["x"]["is_dragging"]:
+                    _slider_drag_state["x"]["is_dragging"] = True
+                    _slider_drag_state["x"]["initial_value"] = old
+                    print(f"🔍 DEBUG: X slider drag started from {old}")
+                
+                # Cancel any pending save for this slider
+                if _slider_drag_state["x"]["timer"] is not None:
+                    try:
+                        curdoc().remove_timeout_callback(_slider_drag_state["x"]["timer"])
+                    except:
+                        pass
+                
+                # Set up a timer to save state when dragging ends (after 1 second of no changes)
+                def save_slider_final_state():
+                    if _slider_drag_state["x"]["is_dragging"]:
+                        initial_val = _slider_drag_state["x"]["initial_value"]
+                        final_val = x_slider.value
+                        _slider_drag_state["x"]["is_dragging"] = False
+                        _slider_drag_state["x"]["initial_value"] = None
+                        print(f"🔍 DEBUG: X slider drag ended from {initial_val} to {final_val}")
+                        debounced_save_state(f"X slider changed ({initial_val:.3f} → {final_val:.3f})", update_undo_redo=True)
+                
+                _slider_drag_state["x"]["timer"] = curdoc().add_timeout_callback(save_slider_final_state, 1000)  # 1 second delay
+            else:
+                # Reset drag state when skipping saves (e.g., during plot clicks or undo/redo)
+                from bokeh.io import curdoc
+                if _slider_drag_state["x"]["is_dragging"]:
+                    # Cancel any pending timer
+                    if _slider_drag_state["x"]["timer"] is not None:
+                        try:
+                            curdoc().remove_timeout_callback(_slider_drag_state["x"]["timer"])
+                        except:
+                            pass
+                    # Reset drag state
+                    _slider_drag_state["x"]["is_dragging"] = False
+                    _slider_drag_state["x"]["initial_value"] = None
         except Exception as e:
             print(f"⚠️ ERROR in on_x_slider_change(): {e}")
             import traceback
@@ -1979,10 +2131,49 @@ try:
             # Plot1's dynamic range is computed once at initialization or when mode changes
             # Update Plot2B if it exists
             show_slice_b()  # This already handles Plot2B Dynamic/User Specified range mode
-            # Save state for undo/redo (debounced to avoid excessive saves during dragging)
-            # Skip if we're restoring state (undo/redo)
+            
+            # Track slider drag state - only save initial and final positions to undo/redo
+            # Skip if we're restoring state (undo/redo) or during programmatic changes (plot clicks)
             if not _skip_slider_state_save["value"]:
-                debounced_save_state("Y slider changed", update_undo_redo=True)
+                from bokeh.io import curdoc
+                
+                # If this is the first change (not currently dragging), save initial value
+                if not _slider_drag_state["y"]["is_dragging"]:
+                    _slider_drag_state["y"]["is_dragging"] = True
+                    _slider_drag_state["y"]["initial_value"] = old
+                    print(f"🔍 DEBUG: Y slider drag started from {old}")
+                
+                # Cancel any pending save for this slider
+                if _slider_drag_state["y"]["timer"] is not None:
+                    try:
+                        curdoc().remove_timeout_callback(_slider_drag_state["y"]["timer"])
+                    except:
+                        pass
+                
+                # Set up a timer to save state when dragging ends (after 1 second of no changes)
+                def save_slider_final_state():
+                    if _slider_drag_state["y"]["is_dragging"]:
+                        initial_val = _slider_drag_state["y"]["initial_value"]
+                        final_val = y_slider.value
+                        _slider_drag_state["y"]["is_dragging"] = False
+                        _slider_drag_state["y"]["initial_value"] = None
+                        print(f"🔍 DEBUG: Y slider drag ended from {initial_val} to {final_val}")
+                        debounced_save_state(f"Y slider changed ({initial_val:.3f} → {final_val:.3f})", update_undo_redo=True)
+                
+                _slider_drag_state["y"]["timer"] = curdoc().add_timeout_callback(save_slider_final_state, 1000)  # 1 second delay
+            else:
+                # Reset drag state when skipping saves (e.g., during plot clicks or undo/redo)
+                from bokeh.io import curdoc
+                if _slider_drag_state["y"]["is_dragging"]:
+                    # Cancel any pending timer
+                    if _slider_drag_state["y"]["timer"] is not None:
+                        try:
+                            curdoc().remove_timeout_callback(_slider_drag_state["y"]["timer"])
+                        except:
+                            pass
+                    # Reset drag state
+                    _slider_drag_state["y"]["is_dragging"] = False
+                    _slider_drag_state["y"]["initial_value"] = None
         except Exception as e:
             print(f"⚠️ ERROR in on_y_slider_change(): {e}")
             import traceback
@@ -2703,6 +2894,24 @@ try:
     # Use a mutable container so nested functions can modify the values
     _state_save_state = {"timer": None, "pending": False}
     _skip_slider_state_save = {"value": False}  # Flag to skip state saves during undo/redo (mutable container)
+    
+    # Track slider drag state - only save initial and final positions to undo/redo
+    _slider_drag_state = {
+        "x": {"is_dragging": False, "initial_value": None, "timer": None},
+        "y": {"is_dragging": False, "initial_value": None, "timer": None}
+    }
+    
+    # Track zoom state for Plot2 and Plot2B to preserve user zoom when updating slices
+    _plot2_zoom_state = {
+        "x_range": {"min": None, "max": None, "coords_min": None, "coords_max": None},
+        "y_range": {"min": None, "max": None, "coords_min": None, "coords_max": None},
+        "is_manual_zoom": False
+    }
+    _plot2b_zoom_state = {
+        "x_range": {"min": None, "max": None, "coords_min": None, "coords_max": None},
+        "y_range": {"min": None, "max": None, "coords_min": None, "coords_max": None},
+        "is_manual_zoom": False
+    }
 
     def debounced_save_state(description: str, update_undo_redo: bool = True, delay: float = 0.5):
         """
