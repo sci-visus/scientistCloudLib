@@ -8800,6 +8800,7 @@ try:
     )
     
     # Set white background for the dashboard using CSS and button styles to match ScientistCloud
+    # Load main.css for consistent styling
     background_css = Div(
         text="""
         <style>
@@ -8847,16 +8848,17 @@ try:
                 max-width: 100% !important;
             }
             
-            /* Style the internal buttons to match ScientistCloud colors from main.css */
-            /* Bokeh buttons use .bk-btn class and button_type is stored as a data attribute */
-            /* We need to use JavaScript to apply styles based on button_type attribute */
+            /* Map Bokeh buttons to main.css button styles */
+            /* Bokeh buttons use .bk-btn class, main.css uses .btn class */
+            /* Use CSS variables from main.css for consistent theming */
             
-            /* Primary button - matches main.css primary color (light theme: #4E477F, dark theme: #6f66a9) */
+            /* Primary button - use main.css .btn-primary styles */
             .bk-btn-primary,
             .bk-btn[data-button-type="primary"],
-            button.bk-btn[data-button-type="primary"] {
-                background-color: #4E477F !important;
-                border-color: #4E477F !important;
+            button.bk-btn[data-button-type="primary"],
+            button.bk-btn.bk-btn-primary {
+                background-color: var(--primary-color, #4E477F) !important;
+                border-color: var(--primary-color, #4E477F) !important;
                 color: white !important;
                 font-weight: bold !important;
             }
@@ -8869,85 +8871,85 @@ try:
                 color: white !important;
             }
             
-            /* Info button - matches main.css info color (light theme: #1a4d73, dark theme: #B5AEDF) */
+            /* Info button - use main.css .btn-info styles */
             .bk-btn-info,
             .bk-btn[data-button-type="info"],
             button.bk-btn[data-button-type="info"] {
-                background-color: #1a4d73 !important;
-                border-color: #1a4d73 !important;
+                background-color: var(--info-color, #1a4d73) !important;
+                border-color: var(--info-color, #1a4d73) !important;
                 color: white !important;
             }
             
             .bk-btn-info:hover,
             .bk-btn[data-button-type="info"]:hover,
             button.bk-btn[data-button-type="info"]:hover {
-                background-color: #B5AEDF !important;
-                border-color: #B5AEDF !important;
+                background-color: var(--info-color, #B5AEDF) !important;
+                border-color: var(--info-color, #B5AEDF) !important;
                 color: white !important;
                 opacity: 0.9;
             }
             
-            /* Danger button - matches main.css danger color (#6BB6E9) */
+            /* Danger button - use main.css .btn-danger styles */
             .bk-btn-danger,
             .bk-btn[data-button-type="danger"],
             button.bk-btn[data-button-type="danger"] {
-                background-color: #6BB6E9 !important;
-                border-color: #6BB6E9 !important;
+                background-color: var(--danger-color, #6BB6E9) !important;
+                border-color: var(--danger-color, #6BB6E9) !important;
                 color: white !important;
             }
             
             .bk-btn-danger:hover,
             .bk-btn[data-button-type="danger"]:hover,
             button.bk-btn[data-button-type="danger"]:hover {
-                background-color: #6BB6E9 !important;
-                border-color: #6BB6E9 !important;
+                background-color: var(--danger-color, #6BB6E9) !important;
+                border-color: var(--danger-color, #6BB6E9) !important;
                 color: white !important;
                 opacity: 0.9;
             }
             
-            /* Success button - matches main.css success color (#76a38e) */
+            /* Success button - use main.css .btn-success styles */
             .bk-btn-success,
             .bk-btn[data-button-type="success"],
             button.bk-btn[data-button-type="success"] {
-                background-color: #76a38e !important;
-                border-color: #76a38e !important;
+                background-color: var(--success-color, #76a38e) !important;
+                border-color: var(--success-color, #76a38e) !important;
                 color: white !important;
             }
             
             .bk-btn-success:hover,
             .bk-btn[data-button-type="success"]:hover,
             button.bk-btn[data-button-type="success"]:hover {
-                background-color: #76a38e !important;
-                border-color: #76a38e !important;
+                background-color: var(--success-color, #76a38e) !important;
+                border-color: var(--success-color, #76a38e) !important;
                 color: white !important;
                 opacity: 0.9;
             }
             
-            /* Warning button - matches main.css warning color (#E3A54F) */
+            /* Warning button - use main.css .btn-warning styles */
             .bk-btn-warning,
             .bk-btn[data-button-type="warning"],
             button.bk-btn[data-button-type="warning"] {
-                background-color: #E3A54F !important;
-                border-color: #E3A54F !important;
+                background-color: var(--warning-color, #E3A54F) !important;
+                border-color: var(--warning-color, #E3A54F) !important;
                 color: white !important;
             }
             
             .bk-btn-warning:hover,
             .bk-btn[data-button-type="warning"]:hover,
             button.bk-btn[data-button-type="warning"]:hover {
-                background-color: #E3A54F !important;
-                border-color: #E3A54F !important;
+                background-color: var(--warning-color, #E3A54F) !important;
+                border-color: var(--warning-color, #E3A54F) !important;
                 color: white !important;
                 opacity: 0.9;
             }
             
-            /* Default button - matches main.css outline styles */
+            /* Default button - use main.css .btn-outline-primary styles */
             .bk-btn-default,
             .bk-btn[data-button-type="default"],
             button.bk-btn[data-button-type="default"],
             .bk-btn:not([data-button-type]):not(.bk-btn-primary):not(.bk-btn-success):not(.bk-btn-warning):not(.bk-btn-danger):not(.bk-btn-info) {
-                color: #4E477F !important;
-                border-color: #4E477F !important;
+                color: var(--primary-color, #4E477F) !important;
+                border-color: var(--primary-color, #4E477F) !important;
                 background-color: transparent !important;
             }
             
@@ -8955,71 +8957,123 @@ try:
             .bk-btn[data-button-type="default"]:hover,
             button.bk-btn[data-button-type="default"]:hover,
             .bk-btn:not([data-button-type]):not(.bk-btn-primary):not(.bk-btn-success):not(.bk-btn-warning):not(.bk-btn-danger):not(.bk-btn-info):hover {
-                background-color: #4E477F !important;
-                border-color: #4E477F !important;
+                background-color: var(--primary-color, #4E477F) !important;
+                border-color: var(--primary-color, #4E477F) !important;
                 color: white !important;
+            }
+            
+            /* Also apply main.css button styles to Bokeh buttons */
+            .bk-btn {
+                border-radius: 0.375rem !important;
+                transition: all 0.2s !important;
             }
             
             /* Use JavaScript to apply button styles based on Bokeh's internal button_type */
             /* Bokeh stores button_type in the model, accessible via Bokeh's document */
         </style>
         <script>
+            // Load main.css into document head
+            function loadMainCSS() {
+                if (!document.querySelector('link[href*="main.css"]')) {
+                    const link = document.createElement('link');
+                    link.rel = 'stylesheet';
+                    link.type = 'text/css';
+                    link.href = 'https://scientistcloud.com/portal/assets/css/main.css';
+                    document.head.appendChild(link);
+                }
+            }
+            
+            // Load CSS immediately
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', loadMainCSS);
+            } else {
+                loadMainCSS();
+            }
+            
             // Apply button styles based on Bokeh button_type from model
             function applyButtonStyles() {
-                // Access Bokeh's document to get all button models
+                // First, try to access Bokeh models directly
                 if (typeof Bokeh !== 'undefined' && Bokeh.documents && Bokeh.documents.length > 0) {
-                    const doc = Bokeh.documents[0];
-                    const buttonModels = doc.get_model_by_name ? 
-                        Object.values(doc._all_models).filter(m => m.type === 'Button') :
-                        [];
-                    
-                    buttonModels.forEach(function(model) {
-                        const view = doc.get_model_by_id ? doc.get_model_by_id(model.id) : null;
-                        if (view && view.el) {
-                            const button = view.el;
-                            const buttonType = model.button_type || 'default';
-                            
-                            // Apply styles based on button type
-                            if (buttonType === 'primary') {
-                                button.style.setProperty('background-color', '#4E477F', 'important');
-                                button.style.setProperty('border-color', '#4E477F', 'important');
-                                button.style.setProperty('color', 'white', 'important');
-                                button.style.setProperty('font-weight', 'bold', 'important');
-                            } else if (buttonType === 'success') {
-                                button.style.setProperty('background-color', '#76a38e', 'important');
-                                button.style.setProperty('border-color', '#76a38e', 'important');
-                                button.style.setProperty('color', 'white', 'important');
-                            } else if (buttonType === 'warning') {
-                                button.style.setProperty('background-color', '#E3A54F', 'important');
-                                button.style.setProperty('border-color', '#E3A54F', 'important');
-                                button.style.setProperty('color', 'white', 'important');
-                            } else if (buttonType === 'danger') {
-                                button.style.setProperty('background-color', '#6BB6E9', 'important');
-                                button.style.setProperty('border-color', '#6BB6E9', 'important');
-                                button.style.setProperty('color', 'white', 'important');
-                            } else if (buttonType === 'info') {
-                                button.style.setProperty('background-color', '#1a4d73', 'important');
-                                button.style.setProperty('border-color', '#1a4d73', 'important');
-                                button.style.setProperty('color', 'white', 'important');
-                            } else {
-                                button.style.setProperty('color', '#4E477F', 'important');
-                                button.style.setProperty('border-color', '#4E477F', 'important');
-                                button.style.setProperty('background-color', 'transparent', 'important');
+                    try {
+                        const doc = Bokeh.documents[0];
+                        // Get all models from the document
+                        const allModels = doc._all_models || {};
+                        
+                        // Find all Button models
+                        Object.values(allModels).forEach(function(model) {
+                            if (model.type === 'Button' && model.button_type) {
+                                const buttonType = model.button_type;
+                                // Find the button element in the DOM
+                                const buttonEl = document.querySelector(`[data-model-id="${model.id}"]`);
+                                if (buttonEl) {
+                                    // Apply styles based on button type
+                                    if (buttonType === 'primary') {
+                                        buttonEl.style.setProperty('background-color', '#4E477F', 'important');
+                                        buttonEl.style.setProperty('border-color', '#4E477F', 'important');
+                                        buttonEl.style.setProperty('color', 'white', 'important');
+                                        buttonEl.style.setProperty('font-weight', 'bold', 'important');
+                                    } else if (buttonType === 'success') {
+                                        buttonEl.style.setProperty('background-color', '#76a38e', 'important');
+                                        buttonEl.style.setProperty('border-color', '#76a38e', 'important');
+                                        buttonEl.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'warning') {
+                                        buttonEl.style.setProperty('background-color', '#E3A54F', 'important');
+                                        buttonEl.style.setProperty('border-color', '#E3A54F', 'important');
+                                        buttonEl.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'danger') {
+                                        buttonEl.style.setProperty('background-color', '#6BB6E9', 'important');
+                                        buttonEl.style.setProperty('border-color', '#6BB6E9', 'important');
+                                        buttonEl.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'info') {
+                                        buttonEl.style.setProperty('background-color', '#1a4d73', 'important');
+                                        buttonEl.style.setProperty('border-color', '#1a4d73', 'important');
+                                        buttonEl.style.setProperty('color', 'white', 'important');
+                                    } else {
+                                        buttonEl.style.setProperty('color', '#4E477F', 'important');
+                                        buttonEl.style.setProperty('border-color', '#4E477F', 'important');
+                                        buttonEl.style.setProperty('background-color', 'transparent', 'important');
+                                    }
+                                }
                             }
-                        }
-                    });
+                        });
+                    } catch(e) {
+                        console.log('Error accessing Bokeh models:', e);
+                    }
                 }
                 
-                // Fallback: style buttons by finding them in DOM
-                const buttons = document.querySelectorAll('.bk-btn, button.bk-btn');
+                // Fallback: style all buttons by finding them in DOM and checking their classes
+                const buttons = document.querySelectorAll('.bk-btn, button.bk-btn, button[class*="bk-btn"]');
                 buttons.forEach(function(button) {
-                    // Try to get button_type from data attribute or Bokeh model
+                    // Check if button has CSS class indicating type
+                    if (button.classList.contains('bk-btn-primary')) {
+                        button.style.setProperty('background-color', '#4E477F', 'important');
+                        button.style.setProperty('border-color', '#4E477F', 'important');
+                        button.style.setProperty('color', 'white', 'important');
+                    } else if (button.classList.contains('bk-btn-success')) {
+                        button.style.setProperty('background-color', '#76a38e', 'important');
+                        button.style.setProperty('border-color', '#76a38e', 'important');
+                        button.style.setProperty('color', 'white', 'important');
+                    } else if (button.classList.contains('bk-btn-warning')) {
+                        button.style.setProperty('background-color', '#E3A54F', 'important');
+                        button.style.setProperty('border-color', '#E3A54F', 'important');
+                        button.style.setProperty('color', 'white', 'important');
+                    } else if (button.classList.contains('bk-btn-danger')) {
+                        button.style.setProperty('background-color', '#6BB6E9', 'important');
+                        button.style.setProperty('border-color', '#6BB6E9', 'important');
+                        button.style.setProperty('color', 'white', 'important');
+                    } else if (button.classList.contains('bk-btn-info')) {
+                        button.style.setProperty('background-color', '#1a4d73', 'important');
+                        button.style.setProperty('border-color', '#1a4d73', 'important');
+                        button.style.setProperty('color', 'white', 'important');
+                    }
+                    
+                    // Also try to get button_type from data attribute or Bokeh model
                     const modelId = button.getAttribute('data-model-id');
                     if (modelId && typeof Bokeh !== 'undefined') {
                         try {
                             const doc = Bokeh.documents && Bokeh.documents[0];
-                            if (doc) {
-                                const model = doc.get_model_by_id ? doc.get_model_by_id(modelId) : null;
+                            if (doc && doc._all_models && doc._all_models[modelId]) {
+                                const model = doc._all_models[modelId];
                                 if (model && model.button_type) {
                                     const buttonType = model.button_type;
                                     if (buttonType === 'primary') {
@@ -9038,6 +9092,10 @@ try:
                                         button.style.setProperty('background-color', '#6BB6E9', 'important');
                                         button.style.setProperty('border-color', '#6BB6E9', 'important');
                                         button.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'info') {
+                                        button.style.setProperty('background-color', '#1a4d73', 'important');
+                                        button.style.setProperty('border-color', '#1a4d73', 'important');
+                                        button.style.setProperty('color', 'white', 'important');
                                     }
                                 }
                             }
@@ -9048,17 +9106,20 @@ try:
                 });
             }
             
-            // Apply styles when DOM is ready and after Bokeh renders
-            if (document.readyState === 'loading') {
-                document.addEventListener('DOMContentLoaded', function() {
-                    setTimeout(applyButtonStyles, 100);
-                    setTimeout(applyButtonStyles, 500);
-                    setTimeout(applyButtonStyles, 1000);
-                });
-            } else {
+            // Apply button styles when DOM is ready and after Bokeh renders
+            function scheduleButtonStyles() {
+                setTimeout(applyButtonStyles, 50);
                 setTimeout(applyButtonStyles, 100);
+                setTimeout(applyButtonStyles, 200);
                 setTimeout(applyButtonStyles, 500);
                 setTimeout(applyButtonStyles, 1000);
+                setTimeout(applyButtonStyles, 2000);
+            }
+            
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', scheduleButtonStyles);
+            } else {
+                scheduleButtonStyles();
             }
             
             // Also observe for new buttons added dynamically
@@ -9066,8 +9127,14 @@ try:
                 const observer = new MutationObserver(function(mutations) {
                     setTimeout(applyButtonStyles, 50);
                 });
-                observer.observe(document.body, { childList: true, subtree: true });
+                observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'data-model-id'] });
             }
+            
+            // Also apply styles on window load
+            window.addEventListener('load', function() {
+                setTimeout(applyButtonStyles, 100);
+                setTimeout(applyButtonStyles, 500);
+            });
             
             // Force header banner to span full width - aggressive approach
             function makeHeaderFullWidth() {
@@ -9223,10 +9290,13 @@ try:
                             plot.load_state(plot_state, restore_data=False)
                         elif plot_id == "plot1":
                             # Restore map_plot state (plot may not be in session yet)
-                            map_plot.load_state(plot_state, restore_data=False)
-                            # Re-add to session if not already there
-                            if "plot1" not in session.plots:
-                                session.add_plot("plot1", map_plot)
+                            if map_plot is not None:
+                                map_plot.load_state(plot_state, restore_data=False)
+                                # Re-add to session if not already there
+                                if "plot1" not in session.plots:
+                                    session.add_plot("plot1", map_plot)
+                            else:
+                                print(f"⚠️ Warning: map_plot is None, cannot restore plot1 state")
                         elif plot_id == "plot2":
                             # Restore probe plot state based on plot type
                             if plot_type == "PROBE_1DPlot" or (is_3d_volume and hasattr(plot2_history, 'plot')):
