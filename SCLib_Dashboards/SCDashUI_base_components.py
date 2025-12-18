@@ -122,6 +122,10 @@ def create_button(
     # Set minimal margin to reduce spacing
     widget.margin = (1, 0, 1, 0)  # (top, right, bottom, left) - minimal vertical spacing
     
+    # Add CSS class based on button_type for styling
+    if button_type and button_type != "default":
+        widget.css_classes = [f"bk-btn-{button_type}"]
+    
     if callback:
         widget.on_click(callback)
     

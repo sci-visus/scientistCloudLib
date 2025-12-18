@@ -8761,8 +8761,47 @@ try:
         controls_width=140,
     )
     
-    # Set white background for the dashboard using CSS
+    # Create header banner for the dashboard - spans full width of page
     from bokeh.models import Div
+    sc_blue = "#4E477F"  # ScientistCloud primary color (light theme)
+    header_banner = Div(
+        text=f"""
+        <div class="dashboard-header-banner" style="
+            background-color: {sc_blue}; 
+            padding: 10px 20px; 
+            display: flex; 
+            align-items: center; 
+            border-bottom: 3px solid #75c0de;
+            margin-bottom: 15px;
+            border-radius: 0;
+        ">
+            <img src="https://scientistcloud.com/portal/assets/images/scientistCloudLogo_noText.png" 
+                 style="height: 40px; margin-right: 15px;">
+            <span style="
+                color: white; 
+                font-family: sans-serif; 
+                font-size: 1.5em; 
+                font-weight: bold;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+            ">ScientistCloud | 4D Dashboard</span>
+        </div>
+        """,
+        sizing_mode="stretch_width",
+        width_policy="max",
+        styles={
+            "width": "100vw",
+            "max-width": "100vw",
+            "margin": "0",
+            "padding": "0",
+            "margin-left": "calc(-50vw + 50%)",
+            "margin-right": "calc(-50vw + 50%)",
+            "position": "relative",
+            "left": "50%",
+            "right": "50%"
+        }
+    )
+    
+    # Set white background for the dashboard using CSS and button styles to match ScientistCloud
     background_css = Div(
         text="""
         <style>
@@ -8772,6 +8811,340 @@ try:
             .bk-root .bk {
                 background-color: white !important;
             }
+            
+            /* Make header banner span full width of viewport - break out of all containers */
+            /* Target all parent containers to allow full width */
+            .bk-root {
+                overflow-x: visible !important;
+            }
+            
+            /* Force the Bokeh Div containing header to break out using absolute positioning */
+            .bk-Div:has(.dashboard-header-banner) {
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100vw !important;
+                max-width: 100vw !important;
+                min-width: 100vw !important;
+                margin: 0 !important;
+                padding: 0 !important;
+                z-index: 1000 !important;
+                box-sizing: border-box !important;
+            }
+            
+            /* Make the inner header div also span full width */
+            .dashboard-header-banner {
+                width: 100% !important;
+                max-width: 100% !important;
+                min-width: 100% !important;
+                margin-left: 0 !important;
+                margin-right: 0 !important;
+                box-sizing: border-box !important;
+            }
+            
+            /* Ensure body and html allow full width */
+            html, body {
+                overflow-x: visible !important;
+                width: 100% !important;
+                max-width: 100% !important;
+            }
+            
+            /* Style the internal buttons to match ScientistCloud colors from main.css */
+            /* Bokeh buttons use .bk-btn class and button_type is stored as a data attribute */
+            /* We need to use JavaScript to apply styles based on button_type attribute */
+            
+            /* Primary button - matches main.css primary color (light theme: #4E477F, dark theme: #6f66a9) */
+            .bk-btn-primary,
+            .bk-btn[data-button-type="primary"],
+            button.bk-btn[data-button-type="primary"] {
+                background-color: #4E477F !important;
+                border-color: #4E477F !important;
+                color: white !important;
+                font-weight: bold !important;
+            }
+            
+            .bk-btn-primary:hover,
+            .bk-btn[data-button-type="primary"]:hover,
+            button.bk-btn[data-button-type="primary"]:hover {
+                background-color: #6f66a9 !important;
+                border-color: #6f66a9 !important;
+                color: white !important;
+            }
+            
+            /* Info button - matches main.css info color (light theme: #1a4d73, dark theme: #B5AEDF) */
+            .bk-btn-info,
+            .bk-btn[data-button-type="info"],
+            button.bk-btn[data-button-type="info"] {
+                background-color: #1a4d73 !important;
+                border-color: #1a4d73 !important;
+                color: white !important;
+            }
+            
+            .bk-btn-info:hover,
+            .bk-btn[data-button-type="info"]:hover,
+            button.bk-btn[data-button-type="info"]:hover {
+                background-color: #B5AEDF !important;
+                border-color: #B5AEDF !important;
+                color: white !important;
+                opacity: 0.9;
+            }
+            
+            /* Danger button - matches main.css danger color (#6BB6E9) */
+            .bk-btn-danger,
+            .bk-btn[data-button-type="danger"],
+            button.bk-btn[data-button-type="danger"] {
+                background-color: #6BB6E9 !important;
+                border-color: #6BB6E9 !important;
+                color: white !important;
+            }
+            
+            .bk-btn-danger:hover,
+            .bk-btn[data-button-type="danger"]:hover,
+            button.bk-btn[data-button-type="danger"]:hover {
+                background-color: #6BB6E9 !important;
+                border-color: #6BB6E9 !important;
+                color: white !important;
+                opacity: 0.9;
+            }
+            
+            /* Success button - matches main.css success color (#76a38e) */
+            .bk-btn-success,
+            .bk-btn[data-button-type="success"],
+            button.bk-btn[data-button-type="success"] {
+                background-color: #76a38e !important;
+                border-color: #76a38e !important;
+                color: white !important;
+            }
+            
+            .bk-btn-success:hover,
+            .bk-btn[data-button-type="success"]:hover,
+            button.bk-btn[data-button-type="success"]:hover {
+                background-color: #76a38e !important;
+                border-color: #76a38e !important;
+                color: white !important;
+                opacity: 0.9;
+            }
+            
+            /* Warning button - matches main.css warning color (#E3A54F) */
+            .bk-btn-warning,
+            .bk-btn[data-button-type="warning"],
+            button.bk-btn[data-button-type="warning"] {
+                background-color: #E3A54F !important;
+                border-color: #E3A54F !important;
+                color: white !important;
+            }
+            
+            .bk-btn-warning:hover,
+            .bk-btn[data-button-type="warning"]:hover,
+            button.bk-btn[data-button-type="warning"]:hover {
+                background-color: #E3A54F !important;
+                border-color: #E3A54F !important;
+                color: white !important;
+                opacity: 0.9;
+            }
+            
+            /* Default button - matches main.css outline styles */
+            .bk-btn-default,
+            .bk-btn[data-button-type="default"],
+            button.bk-btn[data-button-type="default"],
+            .bk-btn:not([data-button-type]):not(.bk-btn-primary):not(.bk-btn-success):not(.bk-btn-warning):not(.bk-btn-danger):not(.bk-btn-info) {
+                color: #4E477F !important;
+                border-color: #4E477F !important;
+                background-color: transparent !important;
+            }
+            
+            .bk-btn-default:hover,
+            .bk-btn[data-button-type="default"]:hover,
+            button.bk-btn[data-button-type="default"]:hover,
+            .bk-btn:not([data-button-type]):not(.bk-btn-primary):not(.bk-btn-success):not(.bk-btn-warning):not(.bk-btn-danger):not(.bk-btn-info):hover {
+                background-color: #4E477F !important;
+                border-color: #4E477F !important;
+                color: white !important;
+            }
+            
+            /* Use JavaScript to apply button styles based on Bokeh's internal button_type */
+            /* Bokeh stores button_type in the model, accessible via Bokeh's document */
+        </style>
+        <script>
+            // Apply button styles based on Bokeh button_type from model
+            function applyButtonStyles() {
+                // Access Bokeh's document to get all button models
+                if (typeof Bokeh !== 'undefined' && Bokeh.documents && Bokeh.documents.length > 0) {
+                    const doc = Bokeh.documents[0];
+                    const buttonModels = doc.get_model_by_name ? 
+                        Object.values(doc._all_models).filter(m => m.type === 'Button') :
+                        [];
+                    
+                    buttonModels.forEach(function(model) {
+                        const view = doc.get_model_by_id ? doc.get_model_by_id(model.id) : null;
+                        if (view && view.el) {
+                            const button = view.el;
+                            const buttonType = model.button_type || 'default';
+                            
+                            // Apply styles based on button type
+                            if (buttonType === 'primary') {
+                                button.style.setProperty('background-color', '#4E477F', 'important');
+                                button.style.setProperty('border-color', '#4E477F', 'important');
+                                button.style.setProperty('color', 'white', 'important');
+                                button.style.setProperty('font-weight', 'bold', 'important');
+                            } else if (buttonType === 'success') {
+                                button.style.setProperty('background-color', '#76a38e', 'important');
+                                button.style.setProperty('border-color', '#76a38e', 'important');
+                                button.style.setProperty('color', 'white', 'important');
+                            } else if (buttonType === 'warning') {
+                                button.style.setProperty('background-color', '#E3A54F', 'important');
+                                button.style.setProperty('border-color', '#E3A54F', 'important');
+                                button.style.setProperty('color', 'white', 'important');
+                            } else if (buttonType === 'danger') {
+                                button.style.setProperty('background-color', '#6BB6E9', 'important');
+                                button.style.setProperty('border-color', '#6BB6E9', 'important');
+                                button.style.setProperty('color', 'white', 'important');
+                            } else if (buttonType === 'info') {
+                                button.style.setProperty('background-color', '#1a4d73', 'important');
+                                button.style.setProperty('border-color', '#1a4d73', 'important');
+                                button.style.setProperty('color', 'white', 'important');
+                            } else {
+                                button.style.setProperty('color', '#4E477F', 'important');
+                                button.style.setProperty('border-color', '#4E477F', 'important');
+                                button.style.setProperty('background-color', 'transparent', 'important');
+                            }
+                        }
+                    });
+                }
+                
+                // Fallback: style buttons by finding them in DOM
+                const buttons = document.querySelectorAll('.bk-btn, button.bk-btn');
+                buttons.forEach(function(button) {
+                    // Try to get button_type from data attribute or Bokeh model
+                    const modelId = button.getAttribute('data-model-id');
+                    if (modelId && typeof Bokeh !== 'undefined') {
+                        try {
+                            const doc = Bokeh.documents && Bokeh.documents[0];
+                            if (doc) {
+                                const model = doc.get_model_by_id ? doc.get_model_by_id(modelId) : null;
+                                if (model && model.button_type) {
+                                    const buttonType = model.button_type;
+                                    if (buttonType === 'primary') {
+                                        button.style.setProperty('background-color', '#4E477F', 'important');
+                                        button.style.setProperty('border-color', '#4E477F', 'important');
+                                        button.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'success') {
+                                        button.style.setProperty('background-color', '#76a38e', 'important');
+                                        button.style.setProperty('border-color', '#76a38e', 'important');
+                                        button.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'warning') {
+                                        button.style.setProperty('background-color', '#E3A54F', 'important');
+                                        button.style.setProperty('border-color', '#E3A54F', 'important');
+                                        button.style.setProperty('color', 'white', 'important');
+                                    } else if (buttonType === 'danger') {
+                                        button.style.setProperty('background-color', '#6BB6E9', 'important');
+                                        button.style.setProperty('border-color', '#6BB6E9', 'important');
+                                        button.style.setProperty('color', 'white', 'important');
+                                    }
+                                }
+                            }
+                        } catch(e) {
+                            // Ignore errors
+                        }
+                    }
+                });
+            }
+            
+            // Apply styles when DOM is ready and after Bokeh renders
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                    setTimeout(applyButtonStyles, 100);
+                    setTimeout(applyButtonStyles, 500);
+                    setTimeout(applyButtonStyles, 1000);
+                });
+            } else {
+                setTimeout(applyButtonStyles, 100);
+                setTimeout(applyButtonStyles, 500);
+                setTimeout(applyButtonStyles, 1000);
+            }
+            
+            // Also observe for new buttons added dynamically
+            if (typeof MutationObserver !== 'undefined') {
+                const observer = new MutationObserver(function(mutations) {
+                    setTimeout(applyButtonStyles, 50);
+                });
+                observer.observe(document.body, { childList: true, subtree: true });
+            }
+            
+            // Force header banner to span full width - aggressive approach
+            function makeHeaderFullWidth() {
+                const headerBanners = document.querySelectorAll('.dashboard-header-banner');
+                headerBanners.forEach(function(header) {
+                    // Find the parent Bokeh Div
+                    let parentDiv = header.closest('.bk-Div');
+                    if (parentDiv) {
+                        // Break out of all containers using viewport width
+                        parentDiv.style.setProperty('position', 'absolute', 'important');
+                        parentDiv.style.setProperty('top', '0', 'important');
+                        parentDiv.style.setProperty('left', '0', 'important');
+                        parentDiv.style.setProperty('width', '100vw', 'important');
+                        parentDiv.style.setProperty('max-width', '100vw', 'important');
+                        parentDiv.style.setProperty('min-width', '100vw', 'important');
+                        parentDiv.style.setProperty('margin', '0', 'important');
+                        parentDiv.style.setProperty('padding', '0', 'important');
+                        parentDiv.style.setProperty('z-index', '1000', 'important');
+                        parentDiv.style.setProperty('box-sizing', 'border-box', 'important');
+                        
+                        // Find all parent containers and remove width constraints
+                        let current = parentDiv.parentElement;
+                        while (current && current !== document.body) {
+                            if (current.style) {
+                                current.style.setProperty('overflow-x', 'visible', 'important');
+                                current.style.setProperty('max-width', 'none', 'important');
+                                if (current.classList.contains('bk-root') || current.classList.contains('bk-column')) {
+                                    current.style.setProperty('position', 'relative', 'important');
+                                }
+                            }
+                            current = current.parentElement;
+                        }
+                    }
+                    // Make the inner div span full width
+                    header.style.setProperty('width', '100%', 'important');
+                    header.style.setProperty('max-width', '100%', 'important');
+                    header.style.setProperty('min-width', '100%', 'important');
+                    header.style.setProperty('margin-left', '0', 'important');
+                    header.style.setProperty('margin-right', '0', 'important');
+                });
+                
+                // Add padding to the main dashboard content to account for header
+                const dashboardContent = document.querySelector('.bk-root > .bk-column');
+                if (dashboardContent && dashboardContent.children.length > 1) {
+                    // The second child should be the main dashboard (after header)
+                    const mainContent = dashboardContent.children[1];
+                    if (mainContent) {
+                        const headerHeight = 70; // Approximate header height
+                        mainContent.style.setProperty('margin-top', headerHeight + 'px', 'important');
+                    }
+                }
+            }
+            
+            // Apply header width on load and after Bokeh renders
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', function() {
+                    setTimeout(makeHeaderFullWidth, 100);
+                    setTimeout(makeHeaderFullWidth, 500);
+                    setTimeout(makeHeaderFullWidth, 1000);
+                });
+            } else {
+                setTimeout(makeHeaderFullWidth, 100);
+                setTimeout(makeHeaderFullWidth, 500);
+                setTimeout(makeHeaderFullWidth, 1000);
+            }
+            
+            // Observe for header changes
+            if (typeof MutationObserver !== 'undefined') {
+                const headerObserver = new MutationObserver(function(mutations) {
+                    setTimeout(makeHeaderFullWidth, 50);
+                });
+                headerObserver.observe(document.body, { childList: true, subtree: true });
+            }
+        </script>
+        <style>
         </style>
         """,
         width=0,
@@ -8779,9 +9152,9 @@ try:
         margin=(0, 0, 0, 0)
     )
     
-    # Wrap dashboard with background CSS
+    # Wrap dashboard with header banner and background CSS
     from bokeh.layouts import column as bokeh_column
-    dashboard = bokeh_column(background_css, dashboard, sizing_mode="stretch_both")
+    dashboard = bokeh_column(background_css, header_banner, dashboard, sizing_mode="stretch_both")
 
     # Start background memmap cache creation after dashboard is created
     # This allows the dashboard to display immediately while memmap is computed in background
