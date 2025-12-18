@@ -8770,9 +8770,7 @@ try:
             background-color: {sc_blue}; 
             padding: 10px 20px; 
             display: flex; 
-            align-items: center; 
-            border-bottom: 3px solid #75c0de;
-            margin-bottom: 15px;
+            align-items: center;  
             border-radius: 0;
         ">
             <img src="https://scientistcloud.com/portal/assets/images/scientistCloudLogo_noText.png" 
@@ -8796,8 +8794,8 @@ try:
             "margin-left": "calc(-50vw + 50%)",
             "margin-right": "calc(-50vw + 50%)",
             "position": "relative",
-            "left": "50%",
-            "right": "50%"
+            "background-color": "#4E477F",
+            "border-bottom": "3px solid #75c0de"
         }
     )
     
