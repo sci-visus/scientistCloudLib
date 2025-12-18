@@ -3430,6 +3430,12 @@ try:
         button_type="success",
         width=100  # Changed from 200 to 100 to match other widgets (as small as possible)
     )
+    # Hard-code button color to match main.css
+    compute_plot3_button.styles = {
+        "background-color": "#76a38e",
+        "border-color": "#76a38e",
+        "color": "white"
+    }
 
     compute_plot3_from_plot2b_button = None
     if plot2b is not None:
@@ -3438,6 +3444,12 @@ try:
             button_type="success",
             width=100  # Changed from 200 to 100 to match other widgets (as small as possible)
         )
+        # Hard-code button color to match main.css
+        compute_plot3_from_plot2b_button.styles = {
+            "background-color": "#76a38e",
+            "border-color": "#76a38e",
+            "color": "white"
+        }
 
     # Create undo/redo buttons first (needed for callbacks)
     undo_button = create_button(
@@ -3890,6 +3902,12 @@ try:
         button_type="success",
         width=120
     )
+    # Hard-code button color to match main.css
+    save_session_button.styles = {
+        "background-color": "#76a38e",
+        "border-color": "#76a38e",
+        "color": "white"
+    }
 
     # Function to refresh session list for loading
     def refresh_session_list():
@@ -7006,6 +7024,12 @@ try:
         button_type="warning",
         width=150
     )
+    # Hard-code button color to match main.css
+    clear_cache_button.styles = {
+        "background-color": "#E3A54F",
+        "border-color": "#E3A54F",
+        "color": "white"
+    }
 
     def on_clear_cache():
         """Clear all caches and force reload of data."""
@@ -7715,6 +7739,12 @@ try:
         button_type="success",
         width=200
     )
+    # Hard-code button color to match main.css
+    compute_plot2a_from_plot3_button.styles = {
+        "background-color": "#76a38e",
+        "border-color": "#76a38e",
+        "color": "white"
+    }
 
     compute_plot2b_from_plot3_button = None
     if plot2b is not None:
@@ -7723,6 +7753,12 @@ try:
             button_type="success",
             width=200
         )
+        # Hard-code button color to match main.css
+        compute_plot2b_from_plot3_button.styles = {
+            "background-color": "#76a38e",
+            "border-color": "#76a38e",
+            "color": "white"
+        }
 
     # Connect button click handlers
     compute_plot2a_from_plot3_button.on_click(lambda: compute_plot2_from_plot3())
