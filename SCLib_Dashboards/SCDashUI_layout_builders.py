@@ -741,3 +741,61 @@ def create_optimized_dashboard_layout(
     
     return column(toggle_container, main_container, sizing_mode="stretch_width")
 
+
+def create_header_banner(dataset_name: str = "", dashboard_type: str = "Dashboard") -> Div:
+    """
+    Create a header banner for ScientistCloud dashboards.
+    
+    Args:
+        dataset_name: Optional dataset name to display after the dashboard type
+        dashboard_type: Type of dashboard (e.g., "4D Dashboard", "3D Plotly", "OpenVisusSlice")
+        
+    Returns:
+        Div widget containing the header banner
+    """
+    from bokeh.models import Div
+    
+    # ScientistCloud primary color
+    sc_blue = "#4E477F"
+    
+    # Build the title text
+    if dataset_name:
+        title_text = f"ScientistCloud | {dashboard_type}: {dataset_name}"
+    else:
+        title_text = f"ScientistCloud | {dashboard_type}"
+    
+    header_banner = Div(
+        text=f"""
+        <div class="dashboard-header-banner" style="
+            background-color: {sc_blue}; 
+            padding: 10px 20px; 
+            display: flex; 
+            align-items: center;  
+            border-radius: 0;
+        ">
+            <img src="https://scientistcloud.com/portal/assets/images/scientistCloudLogo_noText.png" 
+                 style="height: 40px; margin-right: 15px;">
+            <span style="
+                color: white; 
+                font-family: sans-serif; 
+                font-size: 1.5em; 
+                font-weight: bold;
+                text-shadow: 1px 1px 2px rgba(0,0,0,0.1);
+            ">{title_text}</span>
+        </div>
+        """,
+        sizing_mode="stretch_width",
+        styles={
+            "width": "100vw",
+            "max-width": "100vw",
+            "margin": "0",
+            "padding": "0",
+            "position": "relative",
+            "background-color": sc_blue,
+            "border-bottom": "3px solid #75c0de",
+            "margin-bottom": "20px",
+        }
+    )
+    
+    return header_banner
+
