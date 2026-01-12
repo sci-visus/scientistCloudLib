@@ -626,8 +626,23 @@ async def get_dataset(
         if not dataset:
             raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
         
-        # Check access if user_email provided
-        if user_email and not _check_dataset_access(dataset, user_email):
+        # Check if dataset is public FIRST (before requiring authentication)
+        is_public = dataset.get('is_public', False)
+        if is_public:
+            # Public dataset - allow access without authentication
+            return {
+                "success": True,
+                "identifier": identifier,
+                "resolved_uuid": dataset_uuid,
+                "dataset": dataset
+            }
+        
+        # Dataset is not public - require authentication
+        if not user_email:
+            raise HTTPException(status_code=401, detail="Authentication required for private datasets")
+        
+        # Check access for authenticated user
+        if not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
         
         return {
