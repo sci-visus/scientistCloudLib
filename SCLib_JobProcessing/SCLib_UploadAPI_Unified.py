@@ -91,6 +91,7 @@ class UploadRequest(BaseModel):
     sensor: SensorType = Field(..., description="Sensor type")
     convert: bool = Field(True, description="Whether to convert the data")
     is_public: bool = Field(False, description="Whether dataset is public")
+    is_public_downloadable: bool = Field(False, description="Whether dataset is publicly downloadable (requires is_public=True)")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
 
@@ -131,6 +132,7 @@ class ChunkUploadRequest(BaseModel):
     sensor: SensorType = Field(..., description="Sensor type")
     convert: bool = Field(True, description="Whether to convert the data")
     is_public: bool = Field(False, description="Whether dataset is public")
+    is_public_downloadable: bool = Field(False, description="Whether dataset is publicly downloadable (requires is_public=True)")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
 
@@ -306,6 +308,7 @@ async def initiate_upload(
                 sensor=request.sensor,
                 convert=request.convert,
                 is_public=request.is_public,
+                is_public_downloadable=request.is_public_downloadable,
                 folder=request.folder,
                 team_uuid=request.team_uuid,
                 source_config_override=source_config  # Pass full config including OAuth flags
@@ -374,6 +377,7 @@ async def upload_file(
     sensor: SensorType = Form(..., description="Sensor type"),
     convert: bool = Form(True, description="Whether to convert the data"),
     is_public: bool = Form(False, description="Whether dataset is public"),
+    is_public_downloadable: bool = Form(False, description="Whether dataset is publicly downloadable (requires is_public=True)"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name (UI organization metadata only, NOT for file system structure)"),
     relative_path: Optional[str] = Form(None, max_length=500, description="Optional relative path for preserving directory structure in directory uploads (separate from folder metadata)"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
@@ -404,13 +408,13 @@ async def upload_file(
             # Use chunked upload for large files
             return await _handle_chunked_upload(
                 content, file.filename, file_size, user_email, dataset_name,
-                sensor, convert, is_public, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, is_public_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         else:
             # Use standard upload for smaller files
             return await _handle_standard_upload(
                 content, file.filename, user_email, dataset_name,
-                sensor, convert, is_public, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, is_public_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         
     except Exception as e:
@@ -427,6 +431,7 @@ async def upload_file_by_path(
     sensor: SensorType = Form(..., description="Sensor type"),
     convert: bool = Form(True, description="Whether to convert the data"),
     is_public: bool = Form(False, description="Whether dataset is public"),
+    is_public_downloadable: bool = Form(False, description="Whether dataset is publicly downloadable (requires is_public=True)"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name (UI organization metadata only, NOT for file system structure)"),
     relative_path: Optional[str] = Form(None, max_length=500, description="Optional relative path for preserving directory structure in directory uploads (separate from folder metadata)"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
@@ -496,6 +501,7 @@ async def upload_file_by_path(
             original_source_path=file_path,  # Store original path for retry purposes
             convert=convert,
             is_public=is_public,
+            is_public_downloadable=is_public_downloadable,
             folder=folder,  # Metadata only - for UI organization in the portal
             team_uuid=team_uuid
         )
@@ -532,7 +538,7 @@ async def upload_file_by_path(
 
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
-    sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
+    sensor: SensorType, convert: bool, is_public: bool, is_public_downloadable: bool, folder: Optional[str],
     relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
@@ -591,6 +597,7 @@ async def _handle_standard_upload(
         original_source_path=filename,  # Store original filename for retry purposes
         convert=convert,
         is_public=is_public,
+        is_public_downloadable=is_public_downloadable,
         folder=folder,  # Metadata only - for UI organization in the portal
         team_uuid=team_uuid,
         tags=tags
@@ -622,7 +629,7 @@ async def _handle_standard_upload(
 
 async def _handle_chunked_upload(
     content: bytes, filename: str, file_size: int, user_email: str, dataset_name: str,
-    sensor: SensorType, convert: bool, is_public: bool, folder: Optional[str],
+    sensor: SensorType, convert: bool, is_public: bool, is_public_downloadable: bool, folder: Optional[str],
     relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle chunked upload for large files."""
@@ -662,6 +669,7 @@ async def _handle_chunked_upload(
         'sensor': sensor,
         'convert': convert,
         'is_public': is_public,
+        'is_public_downloadable': is_public_downloadable,
         'folder': folder,  # Metadata only - for UI organization
         'relative_path': relative_path,  # For preserving directory structure
         'team_uuid': team_uuid,
@@ -696,6 +704,7 @@ async def _handle_chunked_upload(
         original_source_path=None,
         convert=convert,
         is_public=is_public,
+        is_public_downloadable=is_public_downloadable,
         folder=folder,  # Metadata only - for UI organization
         team_uuid=team_uuid,
         tags=tags
@@ -782,6 +791,7 @@ async def _process_chunks(upload_id: str, content: bytes, processor: Any):
             original_source_path=None,  # No original path for chunked uploads
             convert=session['convert'],
             is_public=session['is_public'],
+            is_public_downloadable=session.get('is_public_downloadable', False),
             folder=session.get('folder'),  # Metadata only - for UI organization in the portal
             team_uuid=session['team_uuid'],
             tags=session.get('tags')
