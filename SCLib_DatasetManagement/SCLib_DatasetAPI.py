@@ -309,6 +309,8 @@ async def list_datasets(
     id: Optional[int] = None,
     user_email: Optional[str] = None,
     team_uuid: Optional[str] = None,
+    team: Optional[str] = None,  # Filter by team name (matches team_uuid)
+    folder: Optional[str] = None,  # Filter by folder name (matches folder_uuid in metadata)
     public_only: Optional[bool] = None,
     processor: Any = Depends(get_processor)
 ):
@@ -328,6 +330,16 @@ async def list_datasets(
                 query['user'] = user_email
             if team_uuid:
                 query['team_uuid'] = team_uuid
+            elif team:
+                # Filter by team name - team name is stored as team_uuid
+                query['team_uuid'] = team
+            if folder:
+                # Filter by folder name - folder name is stored as folder_uuid in metadata
+                # Check both metadata.folder_uuid and direct folder_uuid field
+                query['$or'] = [
+                    {'metadata.folder_uuid': folder},
+                    {'folder_uuid': folder}
+                ]
             if public_only:
                 # Filter for public datasets
                 query['is_public'] = True
