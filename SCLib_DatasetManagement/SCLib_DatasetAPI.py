@@ -185,8 +185,17 @@ def _get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dict[str, Any]]:
             dataset['_id'] = str(dataset['_id'])
         return dataset
 
-def _check_dataset_access(dataset: Dict[str, Any], user_email: str) -> bool:
-    """Check if user has access to dataset."""
+def _check_dataset_access(dataset: Dict[str, Any], user_email: str, require_download: bool = False) -> bool:
+    """Check if user has access to dataset.
+    
+    Args:
+        dataset: Dataset document
+        user_email: User email to check
+        require_download: If True, also check if download is allowed (for public datasets)
+    
+    Returns:
+        True if user has access, False otherwise
+    """
     if dataset.get('user') == user_email or dataset.get('user_email') == user_email:
         return True
     
@@ -205,6 +214,9 @@ def _check_dataset_access(dataset: Dict[str, Any], user_email: str) -> bool:
     
     # Check if public
     if dataset.get('is_public', False):
+        # If download is required, also check is_public_downloadable
+        if require_download:
+            return dataset.get('is_public_downloadable', False)
         return True
     
     return False
@@ -297,6 +309,7 @@ async def list_datasets(
     id: Optional[int] = None,
     user_email: Optional[str] = None,
     team_uuid: Optional[str] = None,
+    public_only: Optional[bool] = None,
     processor: Any = Depends(get_processor)
 ):
     """List datasets with optional filtering."""
@@ -315,6 +328,9 @@ async def list_datasets(
                 query['user'] = user_email
             if team_uuid:
                 query['team_uuid'] = team_uuid
+            if public_only:
+                # Filter for public datasets
+                query['is_public'] = True
             
             datasets = list(collection.find(query))
             
@@ -1296,6 +1312,106 @@ async def serve_file(
     except Exception as e:
         logger.error(f"Failed to serve file: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# Import zip service after other imports are resolved
+try:
+    from SCLib_DatasetManagement.SCLib_ZipService import get_zip_service
+except ImportError:
+    try:
+        from .SCLib_ZipService import get_zip_service
+    except ImportError:
+        # Fallback: try direct import
+        import sys
+        from pathlib import Path
+        zip_service_path = Path(__file__).parent / 'SCLib_ZipService.py'
+        if zip_service_path.exists():
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("SCLib_ZipService", zip_service_path)
+            zip_service_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(zip_service_module)
+            get_zip_service = zip_service_module.get_zip_service
+        else:
+            raise ImportError("Could not import SCLib_ZipService")
+
+@app.get("/api/v1/datasets/{identifier}/download-zip")
+async def download_dataset_zip(
+    identifier: str,
+    directory: str,  # 'upload' or 'converted'
+    user_email: Optional[EmailStr] = None,
+    force_recreate: bool = False,
+    processor: Any = Depends(get_processor)
+):
+    """Download a dataset directory as a zip file.
+    
+    Args:
+        identifier: Dataset identifier (UUID, name, slug, or ID)
+        directory: 'upload' or 'converted'
+        user_email: User email for access control
+        force_recreate: If True, recreate zip even if cached
+        
+    Returns:
+        Zip file download
+    """
+    try:
+        # Resolve identifier to UUID
+        dataset_uuid = _resolve_dataset_identifier(identifier)
+        
+        # Get dataset
+        dataset = _get_dataset_by_uuid(dataset_uuid)
+        
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+        
+        # Validate directory
+        if directory not in ['upload', 'converted']:
+            raise HTTPException(status_code=400, detail="Directory must be 'upload' or 'converted'")
+        
+        # Check access - allow public users if dataset is public and downloadable
+        if user_email:
+            if not _check_dataset_access(dataset, user_email):
+                # Check if public and downloadable
+                if not dataset.get('is_public', False):
+                    raise HTTPException(status_code=403, detail="Access denied")
+                if not dataset.get('is_public_downloadable', False):
+                    raise HTTPException(status_code=403, detail="Dataset is public but not downloadable")
+        else:
+            # No user email - check if public and downloadable
+            if not dataset.get('is_public', False) or not dataset.get('is_public_downloadable', False):
+                raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Get zip service
+        zip_service = get_zip_service()
+        
+        # Create or get cached zip
+        zip_path = zip_service.create_or_get_zip(dataset_uuid, directory, force_recreate=force_recreate)
+        
+        if not os.path.exists(zip_path):
+            raise HTTPException(status_code=500, detail="Failed to create zip file")
+        
+        # Generate filename
+        dataset_name = dataset.get('name', dataset_uuid)
+        safe_name = re.sub(r'[^\w\s-]', '', dataset_name).strip()
+        safe_name = re.sub(r'[-\s]+', '-', safe_name)
+        zip_filename = f"{safe_name}_{directory}.zip"
+        
+        return FileResponse(
+            path=zip_path,
+            media_type='application/zip',
+            filename=zip_filename,
+            headers={
+                'Content-Disposition': f'attachment; filename="{zip_filename}"'
+            }
+        )
+        
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=f"Dataset directory not found: {str(e)}")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create zip file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create zip file: {str(e)}")
 
 @app.delete("/api/v1/datasets/{identifier}/files/{file_id}")
 async def remove_file_from_dataset(
