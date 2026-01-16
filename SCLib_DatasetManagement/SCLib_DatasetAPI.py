@@ -271,6 +271,8 @@ async def root():
         "endpoints": {
             "list_datasets": "GET /api/v1/datasets",
             "get_user_datasets": "GET /api/v1/datasets/by-user?user_email={email}",
+            "get_public_datasets": "GET /api/v1/datasets/public",
+            "get_public_dataset": "GET /api/v1/datasets/public/{identifier}",
             "create_dataset": "POST /api/v1/datasets",
             "get_dataset": "GET /api/v1/datasets/{identifier}",
             "update_dataset": "PUT /api/v1/datasets/{identifier}",
@@ -508,6 +510,196 @@ async def get_user_datasets_organized(
         
     except Exception as e:
         logger.error(f"Failed to get user datasets organized: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/datasets/public")
+async def get_public_datasets(
+    processor: Any = Depends(get_processor)
+):
+    """Get all public datasets (no authentication required)."""
+    try:
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            # Query for public datasets - handle both boolean and string values
+            query = {
+                '$or': [
+                    {'is_public': True},
+                    {'is_public': 'true'},
+                    {'is_public': 'True'},
+                    {'is_public': 1},
+                    {'is_public': '1'}
+                ]
+            }
+            
+            # Find public datasets, sorted by creation time (newest first)
+            datasets = list(collection.find(query).sort('time', -1))
+            
+            # Format datasets similar to get_user_datasets_organized
+            def format_dataset(doc):
+                doc_dict = dict(doc) if not isinstance(doc, dict) else doc
+                if '_id' in doc_dict:
+                    doc_dict['_id'] = str(doc_dict['_id'])
+                
+                # Format similar to old portal
+                link = doc_dict.get('google_drive_link', '')
+                uuid = doc_dict.get('uuid', '')
+                contains_http = 'http' in link
+                contains_google = 'google.com' in link
+                server = 'true' if (contains_http and not contains_google) else 'false'
+                
+                dataset_url = ''
+                if server == 'true':
+                    dataset_url = link
+                else:
+                    config = get_config()
+                    deploy_server = config.server.deploy_server
+                    dataset_url = f"{deploy_server}/mod_visus?dataset={uuid}&&server=false"
+                
+                return {
+                    'uuid': uuid,
+                    'id': doc_dict.get('id'),
+                    'name': doc_dict.get('name', 'Unnamed Dataset'),
+                    'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
+                    'folder': doc_dict.get('folder_uuid', ''),
+                    'folder_uuid': doc_dict.get('folder_uuid', ''),
+                    'time': doc_dict.get('time') or doc_dict.get('date_imported'),
+                    'created_at': doc_dict.get('time') or doc_dict.get('date_imported'),
+                    'team': doc_dict.get('team_uuid', ''),
+                    'team_uuid': doc_dict.get('team_uuid', ''),
+                    'tags': doc_dict.get('tags', []),
+                    'sensor': doc_dict.get('sensor', 'Unknown'),
+                    'status': doc_dict.get('status', 'unknown'),
+                    'compression_status': doc_dict.get('compression_status', 'unknown'),
+                    'url': dataset_url,
+                    'google_drive_link': link,
+                    'server': server,
+                    'is_public': doc_dict.get('is_public', False),
+                    'is_downloadable': doc_dict.get('is_downloadable', 'only owner'),
+                    'preferred_dashboard': doc_dict.get('preferred_dashboard', 'openvisus'),
+                    'dimensions': doc_dict.get('dimensions', ''),
+                    'description': doc_dict.get('description', ''),
+                    'bucket': doc_dict.get('bucket'),
+                    'prefix': doc_dict.get('prefix'),
+                    'accesskey': doc_dict.get('accesskey'),
+                    'secretkey': doc_dict.get('secretkey')
+                }
+            
+            formatted_datasets = [format_dataset(ds) for ds in datasets]
+            
+            # Extract folders from datasets
+            folders = []
+            folder_counts = {}
+            for dataset in formatted_datasets:
+                folder_uuid = dataset.get('folder_uuid') or 'root'
+                folder_counts[folder_uuid] = folder_counts.get(folder_uuid, 0) + 1
+            
+            for folder_uuid, count in folder_counts.items():
+                folders.append({
+                    'uuid': folder_uuid,
+                    'name': 'Root' if folder_uuid == 'root' else folder_uuid,
+                    'count': count
+                })
+            
+            # Calculate stats
+            total_size = sum(ds.get('data_size', 0) or 0 for ds in formatted_datasets)
+            status_counts = {}
+            for dataset in formatted_datasets:
+                status = dataset.get('status', 'unknown')
+                status_counts[status] = status_counts.get(status, 0) + 1
+            
+            return {
+                'success': True,
+                'datasets': formatted_datasets,
+                'folders': folders,
+                'stats': {
+                    'total_datasets': len(formatted_datasets),
+                    'total_size': total_size,
+                    'status_counts': status_counts
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"Failed to get public datasets: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/v1/datasets/public/{identifier}")
+async def get_public_dataset(
+    identifier: str,
+    processor: Any = Depends(get_processor)
+):
+    """Get public dataset details by identifier (no authentication required)."""
+    try:
+        # Resolve identifier to UUID
+        dataset_uuid = _resolve_dataset_identifier(identifier)
+        
+        # Get dataset
+        dataset = _get_dataset_by_uuid(dataset_uuid)
+        
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+        
+        # Verify dataset is public
+        is_public = dataset.get('is_public', False)
+        if isinstance(is_public, str):
+            is_public = is_public.lower() in ['true', '1']
+        
+        if not is_public and is_public != 1:
+            raise HTTPException(status_code=403, detail="Dataset is not public")
+        
+        # Format dataset (remove sensitive information)
+        doc_dict = dict(dataset) if not isinstance(dataset, dict) else dataset
+        if '_id' in doc_dict:
+            doc_dict['_id'] = str(doc_dict['_id'])
+        
+        # Format similar to get_user_datasets_organized
+        link = doc_dict.get('google_drive_link', '')
+        uuid = doc_dict.get('uuid', '')
+        contains_http = 'http' in link
+        contains_google = 'google.com' in link
+        server = 'true' if (contains_http and not contains_google) else 'false'
+        
+        dataset_url = ''
+        if server == 'true':
+            dataset_url = link
+        else:
+            config = get_config()
+            deploy_server = config.server.deploy_server
+            dataset_url = f"{deploy_server}/mod_visus?dataset={uuid}&&server=false"
+        
+        formatted_dataset = {
+            'uuid': uuid,
+            'id': doc_dict.get('id'),
+            'name': doc_dict.get('name', 'Unnamed Dataset'),
+            'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
+            'folder': doc_dict.get('folder_uuid', ''),
+            'folder_uuid': doc_dict.get('folder_uuid', ''),
+            'time': doc_dict.get('time') or doc_dict.get('date_imported'),
+            'created_at': doc_dict.get('time') or doc_dict.get('date_imported'),
+            'team': doc_dict.get('team_uuid', ''),
+            'team_uuid': doc_dict.get('team_uuid', ''),
+            'tags': doc_dict.get('tags', []),
+            'sensor': doc_dict.get('sensor', 'Unknown'),
+            'status': doc_dict.get('status', 'unknown'),
+            'compression_status': doc_dict.get('compression_status', 'unknown'),
+            'url': dataset_url,
+            'google_drive_link': link,
+            'server': server,
+            'is_public': doc_dict.get('is_public', False),
+            'is_downloadable': doc_dict.get('is_downloadable', 'only owner'),
+            'preferred_dashboard': doc_dict.get('preferred_dashboard', 'openvisus'),
+            'dimensions': doc_dict.get('dimensions', ''),
+            'description': doc_dict.get('description', ''),
+            # Note: user information is intentionally excluded for public access
+        }
+        
+        return {
+            'success': True,
+            'dataset': formatted_dataset
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get public dataset: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/datasets")
