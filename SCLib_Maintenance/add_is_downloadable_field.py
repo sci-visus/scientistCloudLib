@@ -58,13 +58,13 @@ def get_mongo_client():
         client = MongoClient(mongo_url, serverSelectionTimeoutMS=5000)
         # Test connection
         client.admin.command('ping')
-        logger.info("✅ Successfully connected to MongoDB")
+        logger.info("Successfully connected to MongoDB")
         return client
     except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-        logger.error(f"❌ Failed to connect to MongoDB: {e}")
+        logger.error("Failed to connect to MongoDB: {}".format(e))
         sys.exit(1)
     except Exception as e:
-        logger.error(f"❌ Unexpected error connecting to MongoDB: {e}")
+        logger.error("Unexpected error connecting to MongoDB: {}".format(e))
         sys.exit(1)
 
 
@@ -101,14 +101,14 @@ def update_datasets(client, db_name: str, uuid_filter: Optional[str] = None, dry
     # Add UUID filter if provided
     if uuid_filter:
         query['uuid'] = uuid_filter
-        logger.info(f"Filtering by UUID: {uuid_filter}")
+        logger.info("Filtering by UUID: {}".format(uuid_filter))
     
     # Count datasets that need updating
     count = collection.count_documents(query)
-    logger.info(f"Found {count} dataset(s) that need the is_downloadable field")
+    logger.info("Found {} dataset(s) that need the is_downloadable field".format(count))
     
     if count == 0:
-        logger.info("✅ All datasets already have the is_downloadable field")
+        logger.info("All datasets already have the is_downloadable field")
         return {
             'total': 0,
             'updated': 0,
@@ -117,12 +117,15 @@ def update_datasets(client, db_name: str, uuid_filter: Optional[str] = None, dry
         }
     
     if dry_run:
-        logger.info("🔍 DRY RUN MODE - No changes will be made")
+        logger.info("DRY RUN MODE - No changes will be made")
         # Show sample of what would be updated
         sample = list(collection.find(query).limit(5))
-        logger.info(f"Sample datasets that would be updated:")
+        logger.info("Sample datasets that would be updated:")
         for dataset in sample:
-            logger.info(f"  - UUID: {dataset.get('uuid', 'N/A')}, Name: {dataset.get('name', 'N/A')}")
+            logger.info("  - UUID: {}, Name: {}".format(
+                dataset.get('uuid', 'N/A'), 
+                dataset.get('name', 'N/A')
+            ))
         
         return {
             'total': count,
@@ -142,7 +145,7 @@ def update_datasets(client, db_name: str, uuid_filter: Optional[str] = None, dry
         }
     )
     
-    logger.info(f"✅ Updated {update_result.modified_count} dataset(s)")
+    logger.info("Updated {} dataset(s)".format(update_result.modified_count))
     
     return {
         'total': count,
@@ -183,10 +186,10 @@ def main():
     logger.info("=" * 60)
     logger.info("Migration: Add is_downloadable Field to Datasets")
     logger.info("=" * 60)
-    logger.info(f"Default value: {DEFAULT_IS_DOWNLOADABLE}")
-    logger.info(f"Dry run: {args.dry_run}")
+    logger.info("Default value: {}".format(DEFAULT_IS_DOWNLOADABLE))
+    logger.info("Dry run: {}".format(args.dry_run))
     if args.uuid:
-        logger.info(f"UUID filter: {args.uuid}")
+        logger.info("UUID filter: {}".format(args.uuid))
     logger.info("")
     
     # Get MongoDB connection
@@ -207,20 +210,20 @@ def main():
         logger.info("=" * 60)
         logger.info("Summary")
         logger.info("=" * 60)
-        logger.info(f"Total datasets found: {result['total']}")
+        logger.info("Total datasets found: {}".format(result['total']))
         if not args.dry_run:
-            logger.info(f"Updated: {result['updated']}")
-            logger.info(f"Skipped: {result['skipped']}")
-            logger.info(f"Errors: {result['errors']}")
+            logger.info("Updated: {}".format(result['updated']))
+            logger.info("Skipped: {}".format(result['skipped']))
+            logger.info("Errors: {}".format(result['errors']))
         logger.info("")
         
         if args.dry_run:
-            logger.info("🔍 This was a dry run. Run without --dry-run to apply changes.")
+            logger.info("This was a dry run. Run without --dry-run to apply changes.")
         else:
-            logger.info("✅ Migration completed successfully!")
+            logger.info("Migration completed successfully!")
         
     except Exception as e:
-        logger.error(f"❌ Migration failed: {e}", exc_info=True)
+        logger.error("Migration failed: {}".format(e), exc_info=True)
         sys.exit(1)
     finally:
         client.close()
