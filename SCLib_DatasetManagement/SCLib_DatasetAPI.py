@@ -600,7 +600,41 @@ async def get_public_datasets(
                 })
             
             # Calculate stats
-            total_size = sum(ds.get('data_size', 0) or 0 for ds in formatted_datasets)
+            # Helper function to convert data_size to numeric value (in GB)
+            def get_numeric_size(dataset):
+                data_size = dataset.get('data_size', 0) or 0
+                if isinstance(data_size, (int, float)):
+                    return float(data_size)
+                elif isinstance(data_size, str):
+                    # Try to parse string format like "758.16 KB" or "1.5 GB"
+                    try:
+                        # Remove any whitespace and convert to uppercase
+                        size_str = data_size.strip().upper()
+                        # Extract number and unit
+                        match = re.match(r'^([\d.]+)\s*([KMGT]?B?)$', size_str)
+                        if match:
+                            number = float(match.group(1))
+                            unit = match.group(2) or 'B'
+                            # Convert to GB
+                            if unit in ['KB', 'K']:
+                                return number / (1024 * 1024)  # KB to GB
+                            elif unit in ['MB', 'M']:
+                                return number / 1024  # MB to GB
+                            elif unit in ['GB', 'G']:
+                                return number  # Already in GB
+                            elif unit in ['TB', 'T']:
+                                return number * 1024  # TB to GB
+                            else:
+                                return number / (1024 * 1024 * 1024)  # Bytes to GB
+                        else:
+                            # Try to parse as pure number
+                            return float(data_size)
+                    except (ValueError, AttributeError):
+                        return 0.0
+                else:
+                    return 0.0
+            
+            total_size = sum(get_numeric_size(ds) for ds in formatted_datasets)
             status_counts = {}
             for dataset in formatted_datasets:
                 status = dataset.get('status', 'unknown')
