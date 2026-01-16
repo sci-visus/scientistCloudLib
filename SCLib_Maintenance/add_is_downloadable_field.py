@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Migration Script: Add is_downloadable Field to Existing Datasets
 Adds the is_downloadable field to all datasets in the visstoredatas collection
