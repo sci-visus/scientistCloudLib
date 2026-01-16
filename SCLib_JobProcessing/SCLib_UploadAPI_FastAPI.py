@@ -79,6 +79,7 @@ class UploadRequest(BaseModel):
     sensor: SensorType = Field(..., description="Sensor type")
     convert: bool = Field(True, description="Whether to convert the data")
     is_public: bool = Field(False, description="Whether dataset is public")
+    is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
 

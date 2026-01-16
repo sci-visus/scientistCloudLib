@@ -1163,6 +1163,7 @@ scope = drive
                     "sensor": job_config.sensor.value,
                     "convert": job_config.convert,
                     "is_public": job_config.is_public,
+                    "is_downloadable": job_config.is_downloadable,
                     "folder_uuid": job_config.folder,
                     "team_uuid": job_config.team_uuid,
                     "source_type": job_config.source_type.value,

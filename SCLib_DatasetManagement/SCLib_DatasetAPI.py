@@ -107,6 +107,7 @@ class DatasetCreateRequest(BaseModel):
     folder_uuid: Optional[str] = Field(None, description="Folder UUID")
     team_uuid: Optional[str] = Field(None, description="Team UUID")
     is_public: bool = Field(False, description="Whether dataset is public")
+    is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     data_conversion_needed: bool = Field(True, description="Whether data conversion is needed")
     preferred_dashboard: Optional[str] = Field(None, description="Preferred dashboard type")
     dimensions: Optional[str] = Field(None, description="Dataset dimensions")
@@ -122,6 +123,7 @@ class DatasetUpdateRequest(BaseModel):
     dimensions: Optional[str] = None
     preferred_dashboard: Optional[str] = None
     is_public: Optional[bool] = None
+    is_downloadable: Optional[str] = None
     data_conversion_needed: Optional[bool] = None
 
 class SettingsUpdateRequest(BaseModel):
@@ -135,6 +137,7 @@ class SettingsUpdateRequest(BaseModel):
     dimensions: Optional[str] = None
     preferred_dashboard: Optional[str] = None
     is_public: Optional[bool] = None
+    is_downloadable: Optional[str] = None
     data_conversion_needed: Optional[bool] = None
 
 class FileAddRequest(BaseModel):
@@ -181,8 +184,12 @@ def _get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dict[str, Any]]:
     """Get dataset by UUID."""
     with mongo_collection_by_type_context('visstoredatas') as collection:
         dataset = collection.find_one({"uuid": dataset_uuid})
-        if dataset and '_id' in dataset:
-            dataset['_id'] = str(dataset['_id'])
+        if dataset:
+            if '_id' in dataset:
+                dataset['_id'] = str(dataset['_id'])
+            # Set default is_downloadable if not present (backward compatibility)
+            if 'is_downloadable' not in dataset or dataset.get('is_downloadable') is None:
+                dataset['is_downloadable'] = 'only owner'
         return dataset
 
 def _check_dataset_access(dataset: Dict[str, Any], user_email: str) -> bool:
@@ -541,6 +548,7 @@ async def create_dataset(
             "folder_uuid": request.folder_uuid,
             "team_uuid": request.team_uuid,
             "is_public": request.is_public,
+            "is_downloadable": request.is_downloadable,
             "data_conversion_needed": request.data_conversion_needed,
             "preferred_dashboard": request.preferred_dashboard or "openvisus",
             "dimensions": request.dimensions,
@@ -667,6 +675,8 @@ async def update_dataset(
             update_data["preferred_dashboard"] = request.preferred_dashboard
         if request.is_public is not None:
             update_data["is_public"] = request.is_public
+        if request.is_downloadable is not None:
+            update_data["is_downloadable"] = request.is_downloadable
         if request.data_conversion_needed is not None:
             update_data["data_conversion_needed"] = request.data_conversion_needed
         
@@ -1465,6 +1475,8 @@ async def update_dataset_settings(
             update_data["preferred_dashboard"] = request.preferred_dashboard
         if request.is_public is not None:
             update_data["is_public"] = request.is_public
+        if request.is_downloadable is not None:
+            update_data["is_downloadable"] = request.is_downloadable
         if request.data_conversion_needed is not None:
             update_data["data_conversion_needed"] = request.data_conversion_needed
         
@@ -1576,7 +1588,7 @@ async def update_specific_setting(
         # Allowed settings
         allowed_settings = {
             'name', 'description', 'tags', 'folder_uuid', 'team_uuid',
-            'sensor', 'dimensions', 'preferred_dashboard', 'is_public', 'data_conversion_needed',
+            'sensor', 'dimensions', 'preferred_dashboard', 'is_public', 'is_downloadable', 'data_conversion_needed',
             'status'  # Allow status updates for retry operations
         }
         

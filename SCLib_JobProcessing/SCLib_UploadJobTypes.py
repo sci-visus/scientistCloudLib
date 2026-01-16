@@ -75,6 +75,7 @@ class UploadJobConfig:
     sensor: SensorType = SensorType.OTHER  # Sensor type
     convert: bool = True  # Whether to convert the data
     is_public: bool = False  # Whether dataset is public
+    is_downloadable: str = "only owner"  # Download permission: "only owner", "only team", "public"
     
     # Optional parameters
     folder: Optional[str] = None  # Optional folder
@@ -268,6 +269,7 @@ def create_upload_job_config(
     original_source_path: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
+    is_downloadable: str = "only owner",
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
     **kwargs
@@ -284,6 +286,7 @@ def create_upload_job_config(
         sensor=sensor,
         convert=convert,
         is_public=is_public,
+        is_downloadable=is_downloadable,
         folder=folder,
         team_uuid=team_uuid,
         **kwargs
@@ -300,6 +303,7 @@ def create_local_upload_job(
     original_source_path: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
+    is_downloadable: str = "only owner",
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
     **kwargs
@@ -324,6 +328,7 @@ def create_local_upload_job(
         original_source_path=original_source_path,
         convert=convert,
         is_public=is_public,
+        is_downloadable=is_downloadable,
         folder=folder,
         team_uuid=team_uuid,
         **kwargs
@@ -339,6 +344,7 @@ def create_google_drive_upload_job(
     service_account_file: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
+    is_downloadable: str = "only owner",
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
     source_config_override: Optional[Dict[str, Any]] = None,
@@ -370,6 +376,7 @@ def create_google_drive_upload_job(
         original_source_path=None,
         convert=convert,
         is_public=is_public,
+        is_downloadable=is_downloadable,
         folder=folder,
         team_uuid=team_uuid,
         source_config=source_config,
@@ -388,6 +395,7 @@ def create_s3_upload_job(
     secret_access_key: str,
     convert: bool = True,
     is_public: bool = False,
+    is_downloadable: str = "only owner",
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
     **kwargs
@@ -404,6 +412,7 @@ def create_s3_upload_job(
         original_source_path=None,
         convert=convert,
         is_public=is_public,
+        is_downloadable=is_downloadable,
         folder=folder,
         team_uuid=team_uuid,
         source_config={
@@ -424,6 +433,7 @@ def create_url_upload_job(
     sensor: SensorType,
     convert: bool = True,
     is_public: bool = False,
+    is_downloadable: str = "only owner",
     folder: Optional[str] = None,
     team_uuid: Optional[str] = None,
     **kwargs
@@ -440,6 +450,7 @@ def create_url_upload_job(
         original_source_path=None,
         convert=convert,
         is_public=is_public,
+        is_downloadable=is_downloadable,
         folder=folder,
         team_uuid=team_uuid,
         source_config={"url": url},

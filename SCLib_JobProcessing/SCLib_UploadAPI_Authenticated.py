@@ -167,6 +167,7 @@ class AuthenticatedUploadRequest(BaseModel):
     sensor: SensorType = Field(..., description="Sensor type")
     convert: bool = Field(True, description="Whether to convert the data")
     is_public: bool = Field(False, description="Whether dataset is public")
+    is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
 
@@ -311,6 +312,7 @@ async def initiate_upload(
                 sensor=request.sensor,
                 convert=request.convert,
                 is_public=request.is_public,
+                is_downloadable=request.is_downloadable,
                 folder=request.folder,
                 team_uuid=request.team_uuid
             )
@@ -326,6 +328,7 @@ async def initiate_upload(
                 sensor=request.sensor,
                 convert=request.convert,
                 is_public=request.is_public,
+                is_downloadable=request.is_downloadable,
                 folder=request.folder,
                 team_uuid=request.team_uuid
             )
@@ -338,6 +341,7 @@ async def initiate_upload(
                 sensor=request.sensor,
                 convert=request.convert,
                 is_public=request.is_public,
+                is_downloadable=request.is_downloadable,
                 folder=request.folder,
                 team_uuid=request.team_uuid
             )
@@ -377,6 +381,7 @@ async def upload_file(
     sensor: SensorType = Form(..., description="Sensor type"),
     convert: bool = Form(True, description="Whether to convert the data"),
     is_public: bool = Form(False, description="Whether dataset is public"),
+    is_downloadable: str = Form("only owner", description="Download permission: 'only owner', 'only team', or 'public'"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name"),
     team_uuid: Optional[str] = Form(None, description="Optional team UUID"),
     tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
@@ -446,6 +451,7 @@ async def upload_file(
             original_source_path=file.filename,
             convert=convert,
             is_public=is_public,
+            is_downloadable=is_downloadable,
             folder=folder,
             team_uuid=team_uuid,
             tags=tags
