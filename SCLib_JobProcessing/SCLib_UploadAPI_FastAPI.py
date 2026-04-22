@@ -89,7 +89,7 @@ class UploadRequest(BaseModel):
         if source_type == UploadSourceType.GOOGLE_DRIVE:
             required_fields = ['file_id', 'service_account_file']
         elif source_type == UploadSourceType.S3:
-            required_fields = ['bucket_name', 'object_key', 'access_key_id', 'secret_access_key']
+            required_fields = ['bucket_name']
         elif source_type == UploadSourceType.URL:
             required_fields = ['url']
         else:
@@ -184,9 +184,9 @@ async def initiate_upload(
         elif request.source_type == UploadSourceType.S3:
             job_config = create_s3_upload_job(
                 bucket_name=request.source_config['bucket_name'],
-                object_key=request.source_config['object_key'],
-                access_key_id=request.source_config['access_key_id'],
-                secret_access_key=request.source_config['secret_access_key'],
+                object_key=request.source_config.get('object_key', ''),
+                access_key_id=request.source_config.get('access_key_id'),
+                secret_access_key=request.source_config.get('secret_access_key'),
                 dataset_uuid=str(uuid.uuid4()),
                 user_email=request.user_email,
                 dataset_name=request.dataset_name,
@@ -194,7 +194,10 @@ async def initiate_upload(
                 convert=request.convert,
                 is_public=request.is_public,
                 folder=request.folder,
-                team_uuid=request.team_uuid
+                team_uuid=request.team_uuid,
+                endpoint_url=request.source_config.get('endpoint_url'),
+                region_name=request.source_config.get('region_name', 'us-east-1'),
+                path_style=bool(request.source_config.get('path_style', False)),
             )
         elif request.source_type == UploadSourceType.URL:
             job_config = create_url_upload_job(
@@ -521,7 +524,7 @@ async def get_supported_sources():
         sensor_types=[sensor.value for sensor in SensorType],
         required_parameters={
             "google_drive": ["file_id", "service_account_file"],
-            "s3": ["bucket_name", "object_key", "access_key_id", "secret_access_key"],
+            "s3": ["bucket_name"],
             "url": ["url"],
             "local": ["file"]
         },

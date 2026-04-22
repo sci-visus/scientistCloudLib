@@ -15,6 +15,7 @@ import logging
 from datetime import datetime
 from pathlib import Path
 import re
+from urllib.parse import urlparse
 
 try:
     from ..SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
@@ -151,6 +152,18 @@ class DatasetResponse(BaseModel):
     message: Optional[str] = None
     dataset: Optional[Dict[str, Any]] = None
     identifiers: Optional[Dict[str, Any]] = None
+
+class S3PresignRequest(BaseModel):
+    """Request model for generating a temporary S3 URL for dashboards."""
+    dataset_identifier: Optional[str] = Field(None, description="Dataset identifier (uuid/slug/id/name)")
+    user_email: Optional[EmailStr] = Field(None, description="User email for private dataset access checks")
+    s3_uri: Optional[str] = Field(None, description="Direct s3:// URI (if not using dataset identifier)")
+    endpoint_url: Optional[str] = Field(None, description="S3-compatible endpoint URL")
+    region_name: str = Field("us-east-1", description="AWS region")
+    path_style: bool = Field(False, description="Use path-style endpoint addressing")
+    access_key_id: Optional[str] = Field(None, description="Temporary/runtime S3 access key")
+    secret_access_key: Optional[str] = Field(None, description="Temporary/runtime S3 secret key")
+    expires_in: int = Field(3600, ge=60, le=604800, description="Signed URL lifetime in seconds")
 
 # Dependency to get upload processor (for identifier resolution)
 def get_processor():
@@ -461,9 +474,9 @@ async def get_user_datasets_organized(
             # Format similar to old portal
             link = doc_dict.get('google_drive_link', '')
             uuid = doc_dict.get('uuid', '')
-            contains_http = 'http' in link
+            has_scheme = '://' in link
             contains_google = 'google.com' in link
-            server = 'true' if (contains_http and not contains_google) else 'false'
+            server = 'true' if (has_scheme and not contains_google) else 'false'
             
             dataset_url = ''
             if server == 'true':
@@ -542,9 +555,9 @@ async def get_public_datasets(
                 # Format similar to old portal
                 link = doc_dict.get('google_drive_link', '')
                 uuid = doc_dict.get('uuid', '')
-                contains_http = 'http' in link
+                has_scheme = '://' in link
                 contains_google = 'google.com' in link
-                server = 'true' if (contains_http and not contains_google) else 'false'
+                server = 'true' if (has_scheme and not contains_google) else 'false'
                 
                 dataset_url = ''
                 if server == 'true':
@@ -687,9 +700,9 @@ async def get_public_dataset(
         # Format similar to get_user_datasets_organized
         link = doc_dict.get('google_drive_link', '')
         uuid = doc_dict.get('uuid', '')
-        contains_http = 'http' in link
+        has_scheme = '://' in link
         contains_google = 'google.com' in link
-        server = 'true' if (contains_http and not contains_google) else 'false'
+        server = 'true' if (has_scheme and not contains_google) else 'false'
         
         dataset_url = ''
         if server == 'true':
@@ -734,6 +747,89 @@ async def get_public_dataset(
         raise
     except Exception as e:
         logger.error(f"Failed to get public dataset: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/datasets/s3/presign")
+async def presign_s3_dataset_url(
+    request: S3PresignRequest,
+    processor: Any = Depends(get_processor)
+):
+    """
+    Generate a short-lived HTTPS URL for an s3:// dataset link.
+    This endpoint is intended for dashboard runtime auth flows.
+    """
+    try:
+        s3_uri = (request.s3_uri or "").strip()
+        dataset = None
+
+        if request.dataset_identifier:
+            dataset_uuid = _resolve_dataset_identifier(request.dataset_identifier)
+            dataset = _get_dataset_by_uuid(dataset_uuid)
+            if not dataset:
+                raise HTTPException(status_code=404, detail=f"Dataset not found: {request.dataset_identifier}")
+
+            if request.user_email and not _check_dataset_access(dataset, request.user_email):
+                raise HTTPException(status_code=403, detail="Access denied to this dataset")
+
+            if not s3_uri:
+                s3_uri = (dataset.get('google_drive_link') or dataset.get('source_path') or '').strip()
+
+        if not s3_uri.startswith("s3://"):
+            raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
+
+        parsed = urlparse(s3_uri)
+        bucket = parsed.netloc.strip()
+        key = (parsed.path or '').lstrip('/')
+        if key == '' or key.endswith('/'):
+            # OpenVisus datasets are usually indexed by visus.idx under the prefix.
+            key = (key + 'visus.idx') if key else 'visus.idx'
+
+        if not bucket:
+            raise HTTPException(status_code=400, detail="Invalid S3 URI: missing bucket name")
+
+        if not request.access_key_id or not request.secret_access_key:
+            raise HTTPException(
+                status_code=400,
+                detail="Private S3 signing requires access_key_id and secret_access_key"
+            )
+
+        try:
+            import boto3
+            from botocore.client import Config as BotoConfig
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"boto3 not available for signing: {e}")
+
+        client_kwargs: Dict[str, Any] = {
+            "service_name": "s3",
+            "region_name": request.region_name or "us-east-1",
+            "aws_access_key_id": request.access_key_id,
+            "aws_secret_access_key": request.secret_access_key,
+            "config": BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path" if request.path_style else "virtual"}
+            )
+        }
+        if request.endpoint_url:
+            client_kwargs["endpoint_url"] = request.endpoint_url
+
+        s3 = boto3.client(**client_kwargs)
+        signed_url = s3.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": bucket, "Key": key},
+            ExpiresIn=request.expires_in
+        )
+
+        return {
+            "success": True,
+            "s3_uri": s3_uri,
+            "resolved_key": key,
+            "url": signed_url,
+            "expires_in": request.expires_in
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate S3 presigned URL: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/datasets")

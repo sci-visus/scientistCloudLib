@@ -391,8 +391,8 @@ def create_s3_upload_job(
     user_email: str,
     dataset_name: str,
     sensor: SensorType,
-    access_key_id: str,
-    secret_access_key: str,
+    access_key_id: Optional[str] = None,
+    secret_access_key: Optional[str] = None,
     convert: bool = True,
     is_public: bool = False,
     is_downloadable: str = "only owner",
@@ -400,10 +400,20 @@ def create_s3_upload_job(
     team_uuid: Optional[str] = None,
     **kwargs
 ) -> UploadJobConfig:
-    """Create an S3 upload job."""
+    """Create an S3 remote-link registration job."""
+    normalized_key = (object_key or "").lstrip("/")
+    source_uri = f"s3://{bucket_name}/{normalized_key}" if normalized_key else f"s3://{bucket_name}"
+    source_config = {
+        "bucket_name": bucket_name,
+        "object_key": normalized_key,
+    }
+    if access_key_id:
+        source_config["access_key_id"] = access_key_id
+    if secret_access_key:
+        source_config["secret_access_key"] = secret_access_key
     return create_upload_job_config(
         source_type=UploadSourceType.S3,
-        source_path=f"s3://{bucket_name}/{object_key}",
+        source_path=source_uri,
         destination_path=f"{os.getenv('JOB_IN_DATA_DIR', '/mnt/visus_datasets/upload')}/{dataset_uuid}",
         dataset_uuid=dataset_uuid,
         user_email=user_email,
@@ -415,12 +425,7 @@ def create_s3_upload_job(
         is_downloadable=is_downloadable,
         folder=folder,
         team_uuid=team_uuid,
-        source_config={
-            "bucket_name": bucket_name,
-            "object_key": object_key,
-            "access_key_id": access_key_id,
-            "secret_access_key": secret_access_key
-        },
+        source_config=source_config,
         **kwargs
     )
 

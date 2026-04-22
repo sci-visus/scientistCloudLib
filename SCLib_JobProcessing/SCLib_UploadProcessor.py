@@ -373,13 +373,47 @@ class SCLib_UploadProcessor:
                     team_uuid=dataset.get('team_uuid')
                 )
             elif source_type == UploadSourceType.S3:
-                # S3 would need access keys from somewhere - for now, skip
-                logger.warning(f"S3 upload retry not yet supported for dataset {dataset_uuid}")
-                return
+                source_path = dataset.get('source_path', '')
+                bucket_name = ''
+                object_key = ''
+                if isinstance(source_path, str) and source_path.startswith('s3://'):
+                    without_scheme = source_path[len('s3://'):]
+                    parts = without_scheme.split('/', 1)
+                    bucket_name = parts[0]
+                    object_key = parts[1] if len(parts) > 1 else ''
+                if not bucket_name:
+                    raise ValueError(f"Invalid S3 source_path for dataset {dataset_uuid}: {source_path}")
+                job_config = create_s3_upload_job(
+                    bucket_name=bucket_name,
+                    object_key=object_key,
+                    dataset_uuid=dataset_uuid,
+                    user_email=dataset.get('user') or dataset.get('user_id', ''),
+                    dataset_name=dataset.get('name', ''),
+                    sensor=sensor,
+                    access_key_id=None,
+                    secret_access_key=None,
+                    convert=dataset.get('convert', False),
+                    is_public=dataset.get('is_public', False),
+                    is_downloadable=dataset.get('is_downloadable', 'only owner'),
+                    folder=dataset.get('folder_uuid'),
+                    team_uuid=dataset.get('team_uuid')
+                )
             elif source_type == UploadSourceType.URL:
-                # URL uploads - would need URL from dataset
-                logger.warning(f"URL upload retry not yet supported for dataset {dataset_uuid}")
-                return
+                source_path = dataset.get('source_path', '')
+                if not source_path:
+                    raise ValueError(f"Missing URL source_path for dataset {dataset_uuid}")
+                job_config = create_url_upload_job(
+                    url=source_path,
+                    dataset_uuid=dataset_uuid,
+                    user_email=dataset.get('user') or dataset.get('user_id', ''),
+                    dataset_name=dataset.get('name', ''),
+                    sensor=sensor,
+                    convert=dataset.get('convert', False),
+                    is_public=dataset.get('is_public', False),
+                    is_downloadable=dataset.get('is_downloadable', 'only owner'),
+                    folder=dataset.get('folder_uuid'),
+                    team_uuid=dataset.get('team_uuid')
+                )
             else:
                 logger.warning(f"Unsupported source type for status-based upload: {source_type}")
                 return
@@ -561,22 +595,16 @@ class SCLib_UploadProcessor:
         self._download_from_google_drive_oauth(job_id, service, file_id, job_config.destination_path, user_email)
     
     def _process_s3_upload(self, job_id: str, job_config: UploadJobConfig):
-        """Process S3 upload using AWS CLI or rclone."""
+        """Register S3 as remote link (no server-side data copy)."""
         bucket_name = job_config.source_config.get("bucket_name")
-        object_key = job_config.source_config.get("object_key")
-        access_key_id = job_config.source_config.get("access_key_id")
-        secret_access_key = job_config.source_config.get("secret_access_key")
-        
-        if not all([bucket_name, object_key, access_key_id, secret_access_key]):
-            raise ValueError("S3 upload requires bucket_name, object_key, access_key_id, and secret_access_key")
-        
-        # Try AWS CLI first, fallback to rclone
-        if self._is_tool_available("aws"):
-            self._download_from_s3_aws_cli(job_id, bucket_name, object_key, job_config.destination_path)
-        elif self._is_tool_available("rclone"):
-            self._download_from_s3_rclone(job_id, bucket_name, object_key, job_config.destination_path)
-        else:
-            raise RuntimeError("AWS CLI or rclone is required for S3 uploads")
+        object_key = job_config.source_config.get("object_key") or ""
+        if not bucket_name:
+            raise ValueError("S3 registration requires bucket_name")
+
+        # Keep status flow consistent with URL-based remote datasets.
+        remote_uri = f"s3://{bucket_name}/{str(object_key).lstrip('/')}" if object_key else f"s3://{bucket_name}"
+        logger.info(f"Registering remote S3 dataset URI {remote_uri} for dataset {job_config.dataset_uuid}")
+        self._update_job_status(job_id, UploadStatus.UPLOADING)
     
     def _process_url_upload(self, job_id: str, job_config: UploadJobConfig):
         """Process URL-based upload by storing URL in database instead of downloading."""
@@ -893,18 +921,44 @@ class SCLib_UploadProcessor:
             logger.error(f"Error in Google Drive OAuth download: {e}")
             raise
     
-    def _download_from_s3_aws_cli(self, job_id: str, bucket_name: str, object_key: str, dest_path: str):
+    def _download_from_s3_aws_cli(
+        self,
+        job_id: str,
+        bucket_name: str,
+        object_key: str,
+        dest_path: str,
+        access_key_id: str,
+        secret_access_key: str,
+        endpoint_url: str = None,
+        region_name: str = "us-east-1",
+        path_style: bool = False,
+    ):
         """Download from S3 using AWS CLI."""
+        key = (object_key or "").lstrip("/")
+        source = f"s3://{bucket_name}/{key}" if key else f"s3://{bucket_name}"
         cmd = [
             "aws", "s3", "cp",
-            f"s3://{bucket_name}/{object_key}", dest_path,
+            source, dest_path,
             "--cli-read-timeout", "0",
             "--cli-connect-timeout", "60"
         ]
+
+        # Treat empty key or trailing slash as prefix/folder download.
+        if key == "" or key.endswith("/"):
+            cmd.append("--recursive")
+        if endpoint_url:
+            cmd.extend(["--endpoint-url", str(endpoint_url)])
+
+        env = os.environ.copy()
+        env["AWS_ACCESS_KEY_ID"] = access_key_id
+        env["AWS_SECRET_ACCESS_KEY"] = secret_access_key
+        env["AWS_DEFAULT_REGION"] = region_name or "us-east-1"
+        if path_style:
+            env["AWS_USE_PATH_STYLE_ENDPOINT"] = "true"
         
         # Get job config for progress tracking
         job_config = self.job_manager.get_job_config(job_id)
-        self._run_command_with_progress(job_id, cmd, job_config)
+        self._run_command_with_progress(job_id, cmd, job_config, env=env)
     
     def _download_with_wget(self, job_id: str, url: str, dest_path: str):
         """Download using wget."""
@@ -940,7 +994,7 @@ class SCLib_UploadProcessor:
         job_config = self.job_manager.get_job_config(job_id)
         self._run_command_with_progress(job_id, cmd, job_config)
     
-    def _run_command_with_progress(self, job_id: str, cmd: List[str], job_config: UploadJobConfig):
+    def _run_command_with_progress(self, job_id: str, cmd: List[str], job_config: UploadJobConfig, env: Dict[str, str] = None):
         """Run a command with progress tracking."""
         self._update_job_status(job_id, UploadStatus.UPLOADING)
         
@@ -952,7 +1006,8 @@ class SCLib_UploadProcessor:
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             universal_newlines=True,
-            bufsize=1
+            bufsize=1,
+            env=env
         )
         
         self.active_jobs[job_id] = process
@@ -1133,7 +1188,7 @@ scope = drive
                 dataset_slug = self._generate_dataset_slug(job_config.dataset_name, job_config.user_email)
                 dataset_id = self._generate_dataset_id()
                 
-                # Extract google_drive_link for Google Drive uploads
+                # Store remote link in legacy google_drive_link field for dashboard compatibility.
                 google_drive_link = None
                 if job_config.source_type == UploadSourceType.GOOGLE_DRIVE:
                     # Check if folder_link is in source_config (preferred)
@@ -1152,6 +1207,8 @@ scope = drive
                             # Assume it's a folder (most common case), but could be a file
                             # Use folder link format - if it's actually a file, user can still access it
                             google_drive_link = f"https://drive.google.com/drive/folders/{file_id}"
+                elif job_config.source_type in [UploadSourceType.S3, UploadSourceType.URL]:
+                    google_drive_link = job_config.source_path
                 
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
@@ -1327,7 +1384,8 @@ scope = drive
                 
                 if status == "completed":
                     # Check if conversion is needed
-                    if job_config and job_config.convert:
+                    is_remote_link = bool(job_config and job_config.source_type in [UploadSourceType.S3, UploadSourceType.URL])
+                    if job_config and job_config.convert and not is_remote_link:
                         # Set status to "conversion queued" instead of "done"
                         update_data["status"] = "conversion queued"
                         update_data["data_conversion_needed"] = True
@@ -1339,7 +1397,10 @@ scope = drive
                         # No conversion needed, mark as done
                         update_data["status"] = "done"  # Match existing schema
                         update_data["completed_at"] = datetime.utcnow()
-                        logger.info(f"Upload completed, no conversion needed for dataset: {dataset_uuid}")
+                        if is_remote_link:
+                            logger.info(f"Remote-link dataset registered (no conversion): {dataset_uuid}")
+                        else:
+                            logger.info(f"Upload completed, no conversion needed for dataset: {dataset_uuid}")
                 elif status == "failed":
                     update_data["error_message"] = error_message
                 

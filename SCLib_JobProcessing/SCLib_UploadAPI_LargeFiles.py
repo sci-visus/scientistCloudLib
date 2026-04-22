@@ -437,9 +437,9 @@ async def initiate_cloud_large_upload(
         elif request.source_type == UploadSourceType.S3:
             job_config = create_s3_upload_job(
                 bucket_name=request.source_config['bucket_name'],
-                object_key=request.source_config['object_key'],
-                access_key_id=request.source_config['access_key_id'],
-                secret_access_key=request.source_config['secret_access_key'],
+                object_key=request.source_config.get('object_key', ''),
+                access_key_id=request.source_config.get('access_key_id'),
+                secret_access_key=request.source_config.get('secret_access_key'),
                 dataset_uuid=str(uuid.uuid4()),
                 user_id=request.user_email,
                 dataset_name=request.dataset_name,
@@ -447,7 +447,10 @@ async def initiate_cloud_large_upload(
                 convert=request.convert,
                 is_public=request.is_public,
                 folder=request.folder,
-                team_uuid=request.team_uuid
+                team_uuid=request.team_uuid,
+                endpoint_url=request.source_config.get('endpoint_url'),
+                region_name=request.source_config.get('region_name', 'us-east-1'),
+                path_style=bool(request.source_config.get('path_style', False)),
             )
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported source type for large files: {request.source_type}")
