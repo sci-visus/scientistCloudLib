@@ -401,6 +401,10 @@ def create_s3_upload_job(
     **kwargs
 ) -> UploadJobConfig:
     """Create an S3 remote-link registration job."""
+    endpoint_url = kwargs.pop("endpoint_url", None)
+    region_name = kwargs.pop("region_name", None)
+    path_style = kwargs.pop("path_style", None)
+
     normalized_key = (object_key or "").lstrip("/")
     source_uri = f"s3://{bucket_name}/{normalized_key}" if normalized_key else f"s3://{bucket_name}"
     source_config = {
@@ -411,6 +415,12 @@ def create_s3_upload_job(
         source_config["access_key_id"] = access_key_id
     if secret_access_key:
         source_config["secret_access_key"] = secret_access_key
+    if endpoint_url:
+        source_config["endpoint_url"] = endpoint_url
+    if region_name:
+        source_config["region_name"] = region_name
+    if path_style is not None:
+        source_config["path_style"] = bool(path_style)
     return create_upload_job_config(
         source_type=UploadSourceType.S3,
         source_path=source_uri,
