@@ -167,7 +167,7 @@ class DatasetResponse(BaseModel):
 class S3PresignRequest(BaseModel):
     """Request model for generating a temporary S3 URL for dashboards."""
     dataset_identifier: Optional[str] = Field(None, description="Dataset identifier (uuid/slug/id/name)")
-    user_email: Optional[EmailStr] = Field(None, description="User email for private dataset access checks")
+    user_email: Optional[str] = Field(None, description="User email for private dataset access checks")
     s3_uri: Optional[str] = Field(None, description="Direct s3:// URI (if not using dataset identifier)")
     endpoint_url: Optional[str] = Field(None, description="S3-compatible endpoint URL")
     region_name: str = Field("us-east-1", description="AWS region")
@@ -187,6 +187,14 @@ def _boolish(value: Any) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {'1', 'true', 'yes', 'y'}
     return False
+
+def _safe_email(value: Any) -> str:
+    if not value:
+        return ""
+    candidate = str(value).strip().lower()
+    if not candidate or "@" not in candidate:
+        return ""
+    return candidate
 
 
 def _normalize_owner_email(dataset: Optional[Dict[str, Any]]) -> str:
@@ -941,7 +949,7 @@ async def presign_s3_dataset_url(
         dataset = None
         dataset_uuid = ""
         cache_key = ""
-        user_email = (request.user_email or "").strip().lower()
+        user_email = _safe_email(request.user_email)
         cache_ttl_seconds = int(os.getenv("S3_CREDENTIAL_CACHE_TTL_SECONDS", "604800"))
 
         if request.dataset_identifier:
@@ -953,7 +961,8 @@ async def presign_s3_dataset_url(
                 if not dataset:
                     raise HTTPException(status_code=404, detail=f"Dataset not found: {request.dataset_identifier}")
 
-                if request.user_email and not _check_dataset_access(dataset, request.user_email):
+                request_email = _safe_email(request.user_email)
+                if request_email and not _check_dataset_access(dataset, request_email):
                     raise HTTPException(status_code=403, detail="Access denied to this dataset")
 
                 if not s3_uri:
