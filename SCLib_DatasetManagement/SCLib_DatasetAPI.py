@@ -12,10 +12,13 @@ from typing import Optional, Dict, Any, List
 import uuid
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import re
 from urllib.parse import urlparse
+import base64
+import json
+import hashlib
 
 try:
     from ..SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
@@ -78,6 +81,14 @@ except ImportError:
 
 # Get logger
 logger = logging.getLogger(__name__)
+
+try:
+    from ..SCLib_JobProcessing.SCLib_MongoConnection import mongo_database_context
+except ImportError:
+    try:
+        from SCLib_MongoConnection import mongo_database_context
+    except ImportError:
+        from SCLib_JobProcessing.SCLib_MongoConnection import mongo_database_context
 
 # Create FastAPI app
 app = FastAPI(
@@ -164,6 +175,173 @@ class S3PresignRequest(BaseModel):
     access_key_id: Optional[str] = Field(None, description="Temporary/runtime S3 access key")
     secret_access_key: Optional[str] = Field(None, description="Temporary/runtime S3 secret key")
     expires_in: int = Field(3600, ge=60, le=604800, description="Signed URL lifetime in seconds")
+    cache_credentials: bool = Field(True, description="Store credentials server-side for short-lived reuse")
+    use_cached_credentials: bool = Field(True, description="Allow server-side credential cache lookup")
+
+
+def _boolish(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value == 1
+    if isinstance(value, str):
+        return value.strip().lower() in {'1', 'true', 'yes', 'y'}
+    return False
+
+
+def _normalize_owner_email(dataset: Optional[Dict[str, Any]]) -> str:
+    if not dataset:
+        return ""
+    return str(dataset.get("user") or dataset.get("user_email") or "").strip().lower()
+
+
+def _s3_cache_collection():
+    return "s3_runtime_credentials"
+
+
+def _cache_secret() -> str:
+    return (
+        os.getenv("S3_CREDENTIAL_CACHE_SECRET")
+        or os.getenv("SECRET_KEY")
+        or os.getenv("JWT_SECRET")
+        or ""
+    ).strip()
+
+
+def _encrypt_cache_payload(payload: Dict[str, Any]) -> str:
+    secret = _cache_secret()
+    if not secret:
+        raise HTTPException(status_code=500, detail="S3 credential cache secret is not configured")
+
+    try:
+        from Crypto.Cipher import AES
+        from Crypto.Random import get_random_bytes
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Crypto backend unavailable: {e}")
+
+    key = hashlib.sha256(secret.encode("utf-8")).digest()
+    plaintext = json.dumps(payload).encode("utf-8")
+    nonce = get_random_bytes(12)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    blob = nonce + tag + ciphertext
+    return base64.b64encode(blob).decode("utf-8")
+
+
+def _decrypt_cache_payload(encrypted_blob: str) -> Dict[str, Any]:
+    secret = _cache_secret()
+    if not secret:
+        raise HTTPException(status_code=500, detail="S3 credential cache secret is not configured")
+
+    try:
+        from Crypto.Cipher import AES
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Crypto backend unavailable: {e}")
+
+    blob = base64.b64decode(encrypted_blob)
+    if len(blob) < 28:
+        raise HTTPException(status_code=500, detail="Corrupt cached credentials payload")
+    nonce = blob[:12]
+    tag = blob[12:28]
+    ciphertext = blob[28:]
+    key = hashlib.sha256(secret.encode("utf-8")).digest()
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+    return json.loads(plaintext.decode("utf-8"))
+
+
+def _cleanup_expired_s3_cache() -> None:
+    now = datetime.utcnow()
+    with mongo_database_context(get_database_name()) as db:
+        db[_s3_cache_collection()].delete_many({"expires_at": {"$lte": now}})
+
+
+def _cache_lookup_key(dataset_uuid: str, s3_uri: str) -> str:
+    return (dataset_uuid or s3_uri or "").strip()
+
+
+def _save_cached_s3_credentials(
+    *,
+    key_id: str,
+    user_email: str,
+    owner_email: str,
+    access_key_id: str,
+    secret_access_key: str,
+    endpoint_url: str,
+    region_name: str,
+    path_style: bool,
+    ttl_seconds: int
+) -> None:
+    if not key_id or not user_email or not access_key_id or not secret_access_key:
+        return
+    if ttl_seconds <= 0:
+        return
+
+    now = datetime.utcnow()
+    expires_at = now + timedelta(seconds=ttl_seconds)
+    payload = {
+        "access_key_id": access_key_id,
+        "secret_access_key": secret_access_key,
+        "endpoint_url": endpoint_url or "",
+        "region_name": region_name or "us-east-1",
+        "path_style": bool(path_style),
+    }
+    encrypted = _encrypt_cache_payload(payload)
+
+    with mongo_database_context(get_database_name()) as db:
+        coll = db[_s3_cache_collection()]
+        coll.create_index([("key_id", 1), ("user_email", 1)], unique=True)
+        coll.create_index("expires_at")
+        coll.update_one(
+            {"key_id": key_id, "user_email": user_email.lower()},
+            {"$set": {
+                "key_id": key_id,
+                "owner_email": owner_email.lower(),
+                "user_email": user_email.lower(),
+                "encrypted_payload": encrypted,
+                "expires_at": expires_at,
+                "last_used_at": now,
+                "updated_at": now,
+            }},
+            upsert=True
+        )
+
+
+def _get_cached_s3_credentials(*, key_id: str, user_email: str) -> Optional[Dict[str, Any]]:
+    if not key_id or not user_email:
+        return None
+    _cleanup_expired_s3_cache()
+    now = datetime.utcnow()
+    with mongo_database_context(get_database_name()) as db:
+        doc = db[_s3_cache_collection()].find_one({
+            "key_id": key_id,
+            "user_email": user_email.lower(),
+            "expires_at": {"$gt": now}
+        })
+        if not doc:
+            return None
+        payload = _decrypt_cache_payload(doc.get("encrypted_payload", ""))
+        db[_s3_cache_collection()].update_one(
+            {"_id": doc["_id"]},
+            {"$set": {"last_used_at": now}}
+        )
+        return payload
+
+
+def _public_s3_url(bucket: str, key: str, endpoint_url: Optional[str], region_name: str, path_style: bool) -> str:
+    object_path = f"/{bucket}/{key}" if path_style else f"/{key}"
+    if endpoint_url:
+        base = endpoint_url.rstrip("/")
+        if not path_style:
+            parsed = urlparse(base)
+            if parsed.scheme and parsed.netloc:
+                base = f"{parsed.scheme}://{bucket}.{parsed.netloc}"
+        return f"{base}{object_path}"
+    # AWS-style fallback
+    safe_region = region_name or "us-east-1"
+    if path_style:
+        return f"https://s3.{safe_region}.amazonaws.com/{bucket}/{key}"
+    return f"https://{bucket}.s3.{safe_region}.amazonaws.com/{key}"
 
 # Dependency to get upload processor (for identifier resolution)
 def get_processor():
@@ -761,18 +939,25 @@ async def presign_s3_dataset_url(
     try:
         s3_uri = (request.s3_uri or "").strip()
         dataset = None
+        dataset_uuid = ""
+        cache_key = ""
+        user_email = (request.user_email or "").strip().lower()
+        cache_ttl_seconds = int(os.getenv("S3_CREDENTIAL_CACHE_TTL_SECONDS", "604800"))
 
         if request.dataset_identifier:
-            dataset_uuid = _resolve_dataset_identifier(request.dataset_identifier)
-            dataset = _get_dataset_by_uuid(dataset_uuid)
-            if not dataset:
-                raise HTTPException(status_code=404, detail=f"Dataset not found: {request.dataset_identifier}")
+            if request.dataset_identifier.startswith("s3://"):
+                s3_uri = s3_uri or request.dataset_identifier
+            else:
+                dataset_uuid = _resolve_dataset_identifier(request.dataset_identifier)
+                dataset = _get_dataset_by_uuid(dataset_uuid)
+                if not dataset:
+                    raise HTTPException(status_code=404, detail=f"Dataset not found: {request.dataset_identifier}")
 
-            if request.user_email and not _check_dataset_access(dataset, request.user_email):
-                raise HTTPException(status_code=403, detail="Access denied to this dataset")
+                if request.user_email and not _check_dataset_access(dataset, request.user_email):
+                    raise HTTPException(status_code=403, detail="Access denied to this dataset")
 
-            if not s3_uri:
-                s3_uri = (dataset.get('google_drive_link') or dataset.get('source_path') or '').strip()
+                if not s3_uri:
+                    s3_uri = (dataset.get('google_drive_link') or dataset.get('source_path') or '').strip()
 
         if not s3_uri.startswith("s3://"):
             raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
@@ -787,10 +972,48 @@ async def presign_s3_dataset_url(
         if not bucket:
             raise HTTPException(status_code=400, detail="Invalid S3 URI: missing bucket name")
 
-        if not request.access_key_id or not request.secret_access_key:
+        is_dataset_public = _boolish(dataset.get("is_public")) if dataset else False
+        owner_email = _normalize_owner_email(dataset)
+        cache_key = _cache_lookup_key(dataset_uuid, s3_uri)
+
+        endpoint_url = (request.endpoint_url or "").strip()
+        region_name = (request.region_name or "us-east-1").strip() or "us-east-1"
+        path_style = bool(request.path_style)
+
+        access_key_id = (request.access_key_id or "").strip()
+        secret_access_key = request.secret_access_key or ""
+
+        if request.use_cached_credentials and not access_key_id and not secret_access_key and user_email and cache_key:
+            cached = _get_cached_s3_credentials(key_id=cache_key, user_email=user_email)
+            if cached:
+                access_key_id = (cached.get("access_key_id") or "").strip()
+                secret_access_key = cached.get("secret_access_key") or ""
+                endpoint_url = endpoint_url or (cached.get("endpoint_url") or "").strip()
+                region_name = (cached.get("region_name") or region_name).strip() or "us-east-1"
+                path_style = bool(cached.get("path_style", path_style))
+
+        if not access_key_id or not secret_access_key:
+            # Public datasets can load without credentials if object is publicly readable.
+            if is_dataset_public:
+                public_url = _public_s3_url(
+                    bucket=bucket,
+                    key=key,
+                    endpoint_url=endpoint_url or os.getenv("S3_PUBLIC_ENDPOINT_URL", "").strip(),
+                    region_name=region_name,
+                    path_style=path_style
+                )
+                return {
+                    "success": True,
+                    "s3_uri": s3_uri,
+                    "resolved_key": key,
+                    "url": public_url,
+                    "expires_in": 0,
+                    "is_public_url": True
+                }
+
             raise HTTPException(
                 status_code=400,
-                detail="Private S3 signing requires access_key_id and secret_access_key"
+                detail="Private S3 signing requires credentials or a valid cached credential entry"
             )
 
         try:
@@ -801,16 +1024,16 @@ async def presign_s3_dataset_url(
 
         client_kwargs: Dict[str, Any] = {
             "service_name": "s3",
-            "region_name": request.region_name or "us-east-1",
-            "aws_access_key_id": request.access_key_id,
-            "aws_secret_access_key": request.secret_access_key,
+            "region_name": region_name,
+            "aws_access_key_id": access_key_id,
+            "aws_secret_access_key": secret_access_key,
             "config": BotoConfig(
                 signature_version="s3v4",
-                s3={"addressing_style": "path" if request.path_style else "virtual"}
+                s3={"addressing_style": "path" if path_style else "virtual"}
             )
         }
-        if request.endpoint_url:
-            client_kwargs["endpoint_url"] = request.endpoint_url
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
 
         s3 = boto3.client(**client_kwargs)
         signed_url = s3.generate_presigned_url(
@@ -819,12 +1042,29 @@ async def presign_s3_dataset_url(
             ExpiresIn=request.expires_in
         )
 
+        if request.cache_credentials and user_email and cache_key:
+            # Cache only for the dataset owner session to avoid cross-user credential leakage.
+            if owner_email and owner_email == user_email:
+                _save_cached_s3_credentials(
+                    key_id=cache_key,
+                    user_email=user_email,
+                    owner_email=owner_email,
+                    access_key_id=access_key_id,
+                    secret_access_key=secret_access_key,
+                    endpoint_url=endpoint_url,
+                    region_name=region_name,
+                    path_style=path_style,
+                    ttl_seconds=cache_ttl_seconds
+                )
+
         return {
             "success": True,
             "s3_uri": s3_uri,
             "resolved_key": key,
             "url": signed_url,
-            "expires_in": request.expires_in
+            "expires_in": request.expires_in,
+            "is_public_url": False,
+            "cached_credentials_used": request.use_cached_credentials and not request.access_key_id and not request.secret_access_key
         }
     except HTTPException:
         raise
