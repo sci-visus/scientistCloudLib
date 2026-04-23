@@ -369,6 +369,38 @@ def _normalize_s3_dataset_key(raw_key: str) -> str:
         return f"{key}/visus.idx"
     return key
 
+def _s3_key_candidates(raw_key: str) -> List[str]:
+    key = (raw_key or "").lstrip("/")
+    candidates: List[str] = []
+
+    def _add(value: str) -> None:
+        if value and value not in candidates:
+            candidates.append(value)
+
+    if key == "":
+        _add("visus.idx")
+        return candidates
+
+    if key.endswith("/"):
+        _add(f"{key}visus.idx")
+        _add(key.rstrip("/"))
+        return candidates
+
+    # Exact key first.
+    _add(key)
+    leaf = key.split("/")[-1]
+    # If it looks like a folder path, also try visus.idx under it.
+    if "." not in leaf:
+        _add(f"{key}/visus.idx")
+    return candidates
+
+def _is_folder_like_s3_key(raw_key: str) -> bool:
+    key = (raw_key or "").lstrip("/")
+    if key == "" or key.endswith("/"):
+        return True
+    leaf = key.split("/")[-1]
+    return "." not in leaf
+
 # Dependency to get upload processor (for identifier resolution)
 def get_processor():
     """Get upload processor instance."""
@@ -991,6 +1023,7 @@ async def presign_s3_dataset_url(
 
         parsed = urlparse(s3_uri)
         bucket = parsed.netloc.strip()
+        requested_key = (parsed.path or '').lstrip('/')
         key = _normalize_s3_dataset_key(parsed.path or '')
 
         if not bucket:
@@ -1060,9 +1093,59 @@ async def presign_s3_dataset_url(
             client_kwargs["endpoint_url"] = endpoint_url
 
         s3 = boto3.client(**client_kwargs)
+
+        # Validate and resolve to an existing key when credentials are available.
+        # This prevents returning signed URLs to empty folder-marker objects.
+        resolved_key = None
+        for candidate in _s3_key_candidates(requested_key):
+            try:
+                s3.head_object(Bucket=bucket, Key=candidate)
+                resolved_key = candidate
+                break
+            except Exception:
+                continue
+
+        # If direct candidates fail and URI looks like a folder, try auto-discovery
+        # of an IDX object under that prefix.
+        if not resolved_key and _is_folder_like_s3_key(requested_key):
+            prefix = (requested_key or "").lstrip("/")
+            if prefix and not prefix.endswith("/"):
+                prefix = prefix + "/"
+            try:
+                listed = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
+                idx_keys = sorted(
+                    [
+                        (obj.get("Key") or "")
+                        for obj in listed.get("Contents", [])
+                        if isinstance(obj.get("Key"), str) and obj.get("Key", "").lower().endswith(".idx")
+                    ]
+                )
+                if len(idx_keys) == 1:
+                    resolved_key = idx_keys[0]
+                elif len(idx_keys) > 1:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            "Multiple .idx files found under the provided S3 prefix. "
+                            "Please provide an exact s3://.../.idx path."
+                        )
+                    )
+            except HTTPException:
+                raise
+            except Exception:
+                # Keep fallback behavior below.
+                pass
+
+        if not resolved_key:
+            candidate_summary = ", ".join(_s3_key_candidates(requested_key))
+            raise HTTPException(
+                status_code=404,
+                detail=f"S3 dataset object not found. Tried keys: {candidate_summary}"
+            )
+
         signed_url = s3.generate_presigned_url(
             ClientMethod="get_object",
-            Params={"Bucket": bucket, "Key": key},
+            Params={"Bucket": bucket, "Key": resolved_key},
             ExpiresIn=request.expires_in
         )
 
@@ -1084,7 +1167,7 @@ async def presign_s3_dataset_url(
         return {
             "success": True,
             "s3_uri": s3_uri,
-            "resolved_key": key,
+            "resolved_key": resolved_key,
             "url": signed_url,
             "expires_in": request.expires_in,
             "is_public_url": False,
