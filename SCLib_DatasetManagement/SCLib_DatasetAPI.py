@@ -351,6 +351,24 @@ def _public_s3_url(bucket: str, key: str, endpoint_url: Optional[str], region_na
         return f"https://s3.{safe_region}.amazonaws.com/{bucket}/{key}"
     return f"https://{bucket}.s3.{safe_region}.amazonaws.com/{key}"
 
+def _normalize_s3_dataset_key(raw_key: str) -> str:
+    """
+    Normalize S3 dataset keys for OpenVisus dashboards.
+    OpenVisus expects an IDX descriptor object, typically visus.idx.
+    """
+    key = (raw_key or "").lstrip("/")
+    if key == "":
+        return "visus.idx"
+    if key.endswith("/"):
+        return f"{key}visus.idx"
+    if key.lower().endswith(".idx"):
+        return key
+    # Handle folder-like prefixes that do not end with '/'.
+    # This avoids signing a 0-byte directory marker object.
+    if "." not in key.split("/")[-1]:
+        return f"{key}/visus.idx"
+    return key
+
 # Dependency to get upload processor (for identifier resolution)
 def get_processor():
     """Get upload processor instance."""
@@ -973,10 +991,7 @@ async def presign_s3_dataset_url(
 
         parsed = urlparse(s3_uri)
         bucket = parsed.netloc.strip()
-        key = (parsed.path or '').lstrip('/')
-        if key == '' or key.endswith('/'):
-            # OpenVisus datasets are usually indexed by visus.idx under the prefix.
-            key = (key + 'visus.idx') if key else 'visus.idx'
+        key = _normalize_s3_dataset_key(parsed.path or '')
 
         if not bucket:
             raise HTTPException(status_code=400, detail="Invalid S3 URI: missing bucket name")
