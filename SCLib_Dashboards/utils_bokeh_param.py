@@ -8,6 +8,10 @@ from dotenv import load_dotenv
 # Load environment variables
 load_dotenv()
 
+def is_remote_dataset_identifier(value):
+    candidate = str(value or "").strip().lower()
+    return candidate.startswith("http") or candidate.startswith("s3") or candidate.startswith("pelican")
+
 def parse_url_parameters(request=None, status_callback=None):
     """
     Parse URL parameters from Bokeh request - matches your 4d_dashboard.py implementation
@@ -58,9 +62,13 @@ def parse_url_parameters(request=None, status_callback=None):
         # Decode name (matches your implementation)
         params['name'] = unquote(params['name'])
         
-        # Set hardcoded values (matches your implementation)
-        params['base_dir'] = f'/mnt/visus_datasets/upload/{params["uuid"]}'
-        params['save_dir'] = f'/mnt/visus_datasets/converted/{params["uuid"]}'
+        # Remote identifiers (http/s3/pelican) should stay remote, not be wrapped in local mount paths.
+        if is_remote_dataset_identifier(params['uuid']):
+            params['base_dir'] = params['uuid']
+            params['save_dir'] = params['uuid']
+        else:
+            params['base_dir'] = f'/mnt/visus_datasets/upload/{params["uuid"]}'
+            params['save_dir'] = f'/mnt/visus_datasets/converted/{params["uuid"]}'
         
         # Determine if running with URL args - if we have URL args, we're in production mode
         params['has_args'] = True
@@ -101,8 +109,10 @@ def setup_directory_paths(params, has_args=False, status_callback=None):
         add_status(f"base_dir: {params['base_dir']}")
         add_status(f"save_dir: {params['save_dir']}")
     else:
-        # Production mode - use the parsed parameters
-        # base_dir and save_dir are already set in parse_url_parameters
+        # Production mode - ensure remote identifiers are normalized consistently.
+        if is_remote_dataset_identifier(params.get('uuid')):
+            params['base_dir'] = params['uuid']
+            params['save_dir'] = params['uuid']
         add_status(f"base_dir: {params['base_dir']}")
         add_status(f"save_dir: {params['save_dir']}")
     
