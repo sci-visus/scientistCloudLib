@@ -1208,7 +1208,12 @@ scope = drive
                             # Use folder link format - if it's actually a file, user can still access it
                             google_drive_link = f"https://drive.google.com/drive/folders/{file_id}"
                 elif job_config.source_type in [UploadSourceType.S3, UploadSourceType.URL]:
-                    google_drive_link = job_config.source_path
+                    # Preserve the exact link the user typed when available.
+                    # This avoids rewriting gateway-style URLs into s3:// links in dataset details.
+                    original_link = ""
+                    if isinstance(job_config.source_config, dict):
+                        original_link = str(job_config.source_config.get('original_link') or '').strip()
+                    google_drive_link = original_link or job_config.source_path
                 
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
