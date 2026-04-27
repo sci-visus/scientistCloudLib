@@ -62,13 +62,9 @@ def parse_url_parameters(request=None, status_callback=None):
         # Decode name (matches your implementation)
         params['name'] = unquote(params['name'])
         
-        # Remote identifiers (http/s3/pelican) should stay remote, not be wrapped in local mount paths.
-        if is_remote_dataset_identifier(params['uuid']):
-            params['base_dir'] = params['uuid']
-            params['save_dir'] = params['uuid']
-        else:
-            params['base_dir'] = f'/mnt/visus_datasets/upload/{params["uuid"]}'
-            params['save_dir'] = f'/mnt/visus_datasets/converted/{params["uuid"]}'
+        # Set hardcoded values (matches your implementation)
+        params['base_dir'] = f'/mnt/visus_datasets/upload/{params["uuid"]}'
+        params['save_dir'] = f'/mnt/visus_datasets/converted/{params["uuid"]}'
         
         # Determine if running with URL args - if we have URL args, we're in production mode
         params['has_args'] = True
