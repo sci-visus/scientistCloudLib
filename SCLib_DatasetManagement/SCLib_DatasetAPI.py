@@ -206,6 +206,29 @@ def _normalize_owner_email(dataset: Optional[Dict[str, Any]]) -> str:
     return str(dataset.get("user") or dataset.get("user_email") or "").strip().lower()
 
 
+def _resolve_folder_uuid(doc: Dict[str, Any]) -> str:
+    """Portal groups by folder_uuid; Mongo often stores folder under `folder` or metadata."""
+    if not isinstance(doc, dict):
+        return ""
+    for key in ("folder_uuid", "folder"):
+        val = doc.get(key)
+        if val is None or val == "":
+            continue
+        s = str(val).strip()
+        if s and s.lower() not in ("none", "null"):
+            return s
+    meta = doc.get("metadata")
+    if isinstance(meta, dict):
+        for key in ("folder_uuid", "folder"):
+            val = meta.get(key)
+            if val is None or val == "":
+                continue
+            s = str(val).strip()
+            if s and s.lower() not in ("none", "null"):
+                return s
+    return ""
+
+
 def _s3_cache_collection():
     return "s3_runtime_credentials"
 
@@ -762,12 +785,13 @@ async def get_user_datasets_organized(
                 deploy_server = config.server.deploy_server
                 dataset_url = f"{deploy_server}/mod_visus?dataset={uuid}&&server=false"
             
+            resolved_folder = _resolve_folder_uuid(doc_dict)
             return {
                 'uuid': uuid,
                 'name': doc_dict.get('name', 'Unnamed Dataset'),
                 'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
-                'folder': doc_dict.get('folder_uuid', ''),
-                'folder_uuid': doc_dict.get('folder_uuid', ''),
+                'folder': resolved_folder,
+                'folder_uuid': resolved_folder,
                 'time': doc_dict.get('time') or doc_dict.get('date_imported'),
                 'team': doc_dict.get('team_uuid', ''),
                 'team_uuid': doc_dict.get('team_uuid', ''),
@@ -843,13 +867,14 @@ async def get_public_datasets(
                     deploy_server = config.server.deploy_server
                     dataset_url = f"{deploy_server}/mod_visus?dataset={uuid}&&server=false"
                 
+                resolved_folder = _resolve_folder_uuid(doc_dict)
                 return {
                     'uuid': uuid,
                     'id': doc_dict.get('id'),
                     'name': doc_dict.get('name', 'Unnamed Dataset'),
                     'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
-                    'folder': doc_dict.get('folder_uuid', ''),
-                    'folder_uuid': doc_dict.get('folder_uuid', ''),
+                    'folder': resolved_folder,
+                    'folder_uuid': resolved_folder,
                     'time': doc_dict.get('time') or doc_dict.get('date_imported'),
                     'created_at': doc_dict.get('time') or doc_dict.get('date_imported'),
                     'team': doc_dict.get('team_uuid', ''),
@@ -988,13 +1013,14 @@ async def get_public_dataset(
             deploy_server = config.server.deploy_server
             dataset_url = f"{deploy_server}/mod_visus?dataset={uuid}&&server=false"
         
+        resolved_folder = _resolve_folder_uuid(doc_dict)
         formatted_dataset = {
             'uuid': uuid,
             'id': doc_dict.get('id'),
             'name': doc_dict.get('name', 'Unnamed Dataset'),
             'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
-            'folder': doc_dict.get('folder_uuid', ''),
-            'folder_uuid': doc_dict.get('folder_uuid', ''),
+            'folder': resolved_folder,
+            'folder_uuid': resolved_folder,
             'time': doc_dict.get('time') or doc_dict.get('date_imported'),
             'created_at': doc_dict.get('time') or doc_dict.get('date_imported'),
             'team': doc_dict.get('team_uuid', ''),
