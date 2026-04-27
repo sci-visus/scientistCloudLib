@@ -901,27 +901,48 @@ async def get_user_datasets(
     """
     try:
         # Prefer user_email, fallback to user_id for backward compatibility
-        user_identifier = user_email or user_id
+        user_identifier = (user_email or user_id or "").strip()
         if not user_identifier:
             raise HTTPException(status_code=400, detail="Either user_id or user_email must be provided")
-        
-        # Get user's own datasets - visstoredatas uses 'user' field (email like "amy@visus.net")
-        with mongo_collection_by_type_context('visstoredatas') as collection:
-            user_datasets = list(collection.find({'user': user_identifier}))
-            
-            # Get shared datasets - shared_with may contain email
-            shared_datasets = list(collection.find({
-                'shared_with': user_identifier
-            }))
-            
-            # Get team datasets (if user has team_id)
-            # user_profile uses 'email' field (email like "amy.a.gooch@gmail.com")
-            with mongo_collection_by_type_context('user_profile') as user_collection:
-                user_profile = user_collection.find_one({'email': user_identifier})
-                
-            team_datasets = []
-            if user_profile and user_profile.get('team_id'):
-                team_datasets = list(collection.find({'team_id': user_profile['team_id']}))
+
+        # Match Dataset API /portal behavior: casing + multiple owner columns + shared_with arrays
+        email_candidates = [user_identifier]
+        normalized = user_identifier.lower()
+        if "@" in normalized and normalized not in email_candidates:
+            email_candidates.append(normalized)
+
+        owner_or = [
+            {"user": {"$in": email_candidates}},
+            {"user_email": {"$in": email_candidates}},
+            {"user_id": {"$in": email_candidates}},
+            {"owner": {"$in": email_candidates}},
+            {"emails": {"$in": email_candidates}},
+        ]
+
+        with mongo_collection_by_type_context("visstoredatas") as collection:
+            user_datasets = list(collection.find({"$or": owner_or}))
+            shared_datasets = list(collection.find({"shared_with": {"$in": email_candidates}}))
+
+            profile_refs: List[str] = []
+            with mongo_collection_by_type_context("user_profile") as user_collection:
+                user_profile = user_collection.find_one({"email": {"$in": email_candidates}})
+                if user_profile:
+                    for key in ("team_id", "team_uuid"):
+                        val = user_profile.get(key)
+                        if val not in (None, "", []):
+                            profile_refs.append(str(val))
+            profile_refs = list(dict.fromkeys(profile_refs))
+
+            team_datasets: List[Dict[str, Any]] = []
+            if profile_refs:
+                team_datasets = list(
+                    collection.find(
+                        {"$or": [
+                            {"team_id": {"$in": profile_refs}},
+                            {"team_uuid": {"$in": profile_refs}},
+                        ]}
+                    )
+                )
             
             # Combine and deduplicate datasets
             all_datasets = user_datasets + shared_datasets + team_datasets

@@ -604,25 +604,43 @@ async def get_user_datasets_organized(
     Similar to old portal's getFullDatasets() function.
     """
     try:
-        db_name = get_database_name()
         normalized_email = _safe_email(user_email)
         email_candidates = [user_email]
         if normalized_email and normalized_email not in email_candidates:
             email_candidates.append(normalized_email)
+
+        # Legacy user_profile.team_id sometimes lists datasets whose team_uuid was never written to teams.
+        profile_team_refs: list[str] = []
+        try:
+            with mongo_collection_by_type_context('user_profile') as prof_coll:
+                prof = prof_coll.find_one({'email': {'$in': email_candidates}})
+                if prof:
+                    for key in ('team_id', 'team_uuid'):
+                        val = prof.get(key)
+                        if val not in (None, '', []):
+                            profile_team_refs.append(str(val))
+            profile_team_refs = list(dict.fromkeys(profile_team_refs))
+        except Exception as ex:
+            logger.debug(f"user_profile team lookup skipped: {ex}")
         
-        # Get my datasets
+        # Get my datasets — match all common owner fields / legacy shapes
+        owner_or = [
+            {'user': {'$in': email_candidates}},
+            {'user_email': {'$in': email_candidates}},
+            {'user_id': {'$in': email_candidates}},
+            {'owner': {'$in': email_candidates}},
+            {'emails': {'$in': email_candidates}},
+        ]
         with mongo_collection_by_type_context('visstoredatas') as collection:
-            my_datasets = list(collection.find({
-                '$or': [
-                    {'user': {'$in': email_candidates}},
-                    {'user_email': {'$in': email_candidates}}
-                ]
-            }).sort([('folder_uuid', 1), ('name', 1)]))
+            my_datasets = list(collection.find({'$or': owner_or}).sort([('folder_uuid', 1), ('name', 1)]))
         
         # Get shared datasets via shared_user collection
         with mongo_collection_by_type_context('shared_user') as shared_collection:
             shared_pipeline = [
-                {'$match': {'user': {'$in': email_candidates}}},
+                {'$match': {'$or': [
+                    {'user': {'$in': email_candidates}},
+                    {'user_email': {'$in': email_candidates}},
+                ]}},
                 {'$lookup': {
                     'from': 'visstoredatas',
                     'localField': 'uuid',
@@ -633,6 +651,15 @@ async def get_user_datasets_organized(
             ]
             shared_cursor = shared_collection.aggregate(shared_pipeline)
             shared_uuids = [doc['uuid'] for doc in shared_cursor if doc.get('uuid')]
+
+        # Inline shares on visstoredatas.shared_with (older portal paths skip shared_user rows)
+        shared_uuid_set = set(shared_uuids)
+        with mongo_collection_by_type_context('visstoredatas') as collection:
+            for doc in collection.find({'shared_with': {'$in': email_candidates}}, {'uuid': 1}):
+                uid = doc.get('uuid')
+                if uid:
+                    shared_uuid_set.add(uid)
+        shared_uuids = list(shared_uuid_set)
         
         shared_datasets = []
         if shared_uuids:
@@ -653,10 +680,13 @@ async def get_user_datasets_organized(
             # Also get team names (some datasets use team name in team_uuid field)
             team_names = [team.get('team_name') for team in teams if team.get('team_name')]
         
-        logger.debug(f"Found {len(teams)} team(s) for user {user_email}: UUIDs={team_uuids}, Names={team_names}")
+        logger.debug(
+            f"Found {len(teams)} team(s) for user {user_email}: "
+            f"UUIDs={team_uuids}, Names={team_names}, profile_team_refs={profile_team_refs}"
+        )
         
-        if team_uuids or team_names:
-            team_dataset_uuids = set()
+        if team_uuids or team_names or profile_team_refs:
+            team_dataset_uuids: set[str] = set()
             
             # Method 1: Get datasets from shared_team collection
             if team_uuids or team_names:
@@ -681,24 +711,24 @@ async def get_user_datasets_organized(
                         team_cursor = shared_team_collection.aggregate(team_pipeline)
                         for doc in team_cursor:
                             if doc.get('uuid'):
-                                team_dataset_uuids.add(doc['uuid'])
+                                team_dataset_uuids.add(str(doc['uuid']))
             
-            # Method 2: Get datasets that have team_uuid matching team UUIDs or team names
-            # (datasets uploaded with team_uuid are stored directly in visstoredatas)
-            with mongo_collection_by_type_context('visstoredatas') as collection:
-                team_query = {}
-                if team_uuids or team_names:
-                    team_query_conditions = []
-                    if team_uuids:
-                        team_query_conditions.append({'team_uuid': {'$in': team_uuids}})
-                    if team_names:
-                        team_query_conditions.append({'team_uuid': {'$in': team_names}})
-                    if team_query_conditions:
-                        team_query = {'$or': team_query_conditions}
-                        direct_team_datasets = list(collection.find(team_query))
-                        for dataset in direct_team_datasets:
-                            if dataset.get('uuid'):
-                                team_dataset_uuids.add(dataset['uuid'])
+            # Method 2: visstoredatas team_uuid / team_id (aligns with old /api/datasets user_profile.team_id logic)
+            team_query_conditions = []
+            if team_uuids:
+                team_query_conditions.append({'team_uuid': {'$in': team_uuids}})
+            if team_names:
+                team_query_conditions.append({'team_uuid': {'$in': team_names}})
+            if profile_team_refs:
+                team_query_conditions.append({'team_id': {'$in': profile_team_refs}})
+                team_query_conditions.append({'team_uuid': {'$in': profile_team_refs}})
+            if team_query_conditions:
+                with mongo_collection_by_type_context('visstoredatas') as collection:
+                    direct_team_datasets = list(collection.find({'$or': team_query_conditions}))
+                    for dataset in direct_team_datasets:
+                        uid = dataset.get('uuid')
+                        if uid:
+                            team_dataset_uuids.add(str(uid))
             
             # Get all unique team datasets
             if team_dataset_uuids:
@@ -706,7 +736,10 @@ async def get_user_datasets_organized(
                     team_datasets = list(collection.find({'uuid': {'$in': list(team_dataset_uuids)}}))
                     logger.debug(f"Found {len(team_datasets)} team dataset(s) for user {user_email}")
             else:
-                logger.debug(f"No team datasets found for user {user_email} (team_uuids={team_uuids}, team_names={team_names})")
+                logger.debug(
+                    f"No team datasets found for user {user_email} "
+                    f"(team_uuids={team_uuids}, team_names={team_names}, profile_team_refs={profile_team_refs})"
+                )
         
         # Format datasets
         def format_dataset(doc):
