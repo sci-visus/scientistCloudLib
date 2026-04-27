@@ -602,20 +602,24 @@ async def get_user_datasets_organized(
     """
     try:
         db_name = get_database_name()
+        normalized_email = _safe_email(user_email)
+        email_candidates = [user_email]
+        if normalized_email and normalized_email not in email_candidates:
+            email_candidates.append(normalized_email)
         
         # Get my datasets
         with mongo_collection_by_type_context('visstoredatas') as collection:
             my_datasets = list(collection.find({
                 '$or': [
-                    {'user': user_email},
-                    {'user_email': user_email}
+                    {'user': {'$in': email_candidates}},
+                    {'user_email': {'$in': email_candidates}}
                 ]
             }).sort([('folder_uuid', 1), ('name', 1)]))
         
         # Get shared datasets via shared_user collection
         with mongo_collection_by_type_context('shared_user') as shared_collection:
             shared_pipeline = [
-                {'$match': {'user': user_email}},
+                {'$match': {'user': {'$in': email_candidates}}},
                 {'$lookup': {
                     'from': 'visstoredatas',
                     'localField': 'uuid',
@@ -638,8 +642,8 @@ async def get_user_datasets_organized(
             # Query teams where user is in emails array OR is the owner
             teams = list(teams_collection.find({
                 '$or': [
-                    {'emails': user_email},
-                    {'owner': user_email}
+                    {'emails': {'$in': email_candidates}},
+                    {'owner': {'$in': email_candidates}}
                 ]
             }))
             team_uuids = [team.get('uuid') for team in teams if team.get('uuid')]

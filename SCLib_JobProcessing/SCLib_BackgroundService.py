@@ -42,14 +42,18 @@ class SCLib_BackgroundService:
         self.worker_id = f"sc_worker_{os.getpid()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.running = False
         
-        # Initialize upload processor for handling upload jobs
-        try:
-            from SCLib_UploadProcessor import get_upload_processor
-            self.upload_processor = get_upload_processor()
-            print("✅ Upload processor initialized")
-        except Exception as e:
-            print(f"⚠️ Warning: Could not initialize upload processor: {e}")
-            self.upload_processor = None
+        # Background service is conversion-focused. Upload processing should run in FastAPI
+        # to avoid duplicate workers racing on status-based uploads.
+        self.enable_upload_processor = str(os.getenv("SC_BG_ENABLE_UPLOAD_PROCESSOR", "false")).lower() in ("1", "true", "yes", "on")
+        self.upload_processor = None
+        if self.enable_upload_processor:
+            try:
+                from SCLib_UploadProcessor import get_upload_processor
+                self.upload_processor = get_upload_processor()
+                print("✅ Upload processor initialized")
+            except Exception as e:
+                print(f"⚠️ Warning: Could not initialize upload processor: {e}")
+                self.upload_processor = None
         
         # Job type handlers
         self.job_handlers = {
@@ -80,7 +84,7 @@ class SCLib_BackgroundService:
         self.running = True
         print(f"Starting SC_BackgroundService worker {self.worker_id}")
         
-        # Start upload processor if available
+        # Start upload processor only when explicitly enabled
         if self.upload_processor:
             try:
                 self.upload_processor.start()
