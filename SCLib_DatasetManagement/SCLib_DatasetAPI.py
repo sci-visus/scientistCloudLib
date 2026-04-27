@@ -134,6 +134,8 @@ class DatasetUpdateRequest(BaseModel):
     sensor: Optional[str] = None
     dimensions: Optional[str] = None
     preferred_dashboard: Optional[str] = None
+    # Remote data URL (HTTPS gateway, s3://, etc.) — stored as-is for dashboards / OpenVisus.
+    google_drive_link: Optional[str] = Field(None, max_length=4096)
     is_public: Optional[bool] = None
     is_downloadable: Optional[str] = None
     data_conversion_needed: Optional[bool] = None
@@ -148,6 +150,7 @@ class SettingsUpdateRequest(BaseModel):
     sensor: Optional[str] = None
     dimensions: Optional[str] = None
     preferred_dashboard: Optional[str] = None
+    google_drive_link: Optional[str] = Field(None, max_length=4096)
     is_public: Optional[bool] = None
     is_downloadable: Optional[str] = None
     data_conversion_needed: Optional[bool] = None
@@ -1346,6 +1349,9 @@ async def update_dataset(
             update_data["dimensions"] = request.dimensions
         if request.preferred_dashboard is not None:
             update_data["preferred_dashboard"] = request.preferred_dashboard
+        if request.google_drive_link is not None:
+            link = str(request.google_drive_link).strip()
+            update_data["google_drive_link"] = link
         if request.is_public is not None:
             update_data["is_public"] = request.is_public
         if request.is_downloadable is not None:
@@ -2146,6 +2152,9 @@ async def update_dataset_settings(
             update_data["dimensions"] = request.dimensions
         if request.preferred_dashboard is not None:
             update_data["preferred_dashboard"] = request.preferred_dashboard
+        if request.google_drive_link is not None:
+            link = str(request.google_drive_link).strip()
+            update_data["google_drive_link"] = link
         if request.is_public is not None:
             update_data["is_public"] = request.is_public
         if request.is_downloadable is not None:
