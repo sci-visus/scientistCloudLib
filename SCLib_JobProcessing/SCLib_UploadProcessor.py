@@ -1341,6 +1341,18 @@ scope = drive
         if not bucket:
             return job_config.source_path
 
+        # If caller gave a folder/prefix, point to default IDX file so OpenVisus
+        # does not receive an empty content response from a directory URL.
+        if not object_key:
+            source_path = str(job_config.source_path or "").strip()
+            if source_path.startswith("s3://"):
+                without_scheme = source_path[len("s3://"):]
+                parts = without_scheme.split("/", 1)
+                if len(parts) > 1:
+                    object_key = parts[1].lstrip("/")
+        if object_key.endswith("/") or object_key == "":
+            object_key = f"{object_key.rstrip('/')}/visus.idx".lstrip("/")
+
         if endpoint_url:
             parsed = urlparse(endpoint_url if "://" in endpoint_url else f"https://{endpoint_url}")
             scheme = parsed.scheme or "https"
