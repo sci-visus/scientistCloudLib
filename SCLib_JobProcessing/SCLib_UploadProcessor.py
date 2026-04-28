@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import shutil
+from urllib.parse import urlparse, urlencode
 
 try:
     from .SCLib_Config import get_config, get_collection_name, get_database_name
@@ -1213,7 +1214,12 @@ scope = drive
                     original_link = ""
                     if isinstance(job_config.source_config, dict):
                         original_link = str(job_config.source_config.get('original_link') or '').strip()
-                    google_drive_link = original_link or job_config.source_path
+                    if original_link:
+                        google_drive_link = original_link
+                    elif job_config.source_type == UploadSourceType.S3:
+                        google_drive_link = self._build_s3_https_link(job_config)
+                    else:
+                        google_drive_link = job_config.source_path
                 
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
@@ -1320,6 +1326,53 @@ scope = drive
                 return f"{size_bytes:.2f} {unit}"
             size_bytes /= 1024.0
         return f"{size_bytes:.2f} PB"
+
+    def _build_s3_https_link(self, job_config: UploadJobConfig) -> str:
+        """Build an HTTPS link for S3 sources when original_link is missing."""
+        source_config = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+        bucket = str(source_config.get("bucket_name") or "").strip()
+        object_key = str(source_config.get("object_key") or "").strip().lstrip("/")
+        endpoint_url = str(source_config.get("endpoint_url") or "").strip()
+        region_name = str(source_config.get("region_name") or "us-east-1").strip() or "us-east-1"
+        path_style = bool(source_config.get("path_style", False))
+        access_key = str(source_config.get("access_key_id") or "").strip()
+        secret_key = str(source_config.get("secret_access_key") or "").strip()
+
+        if not bucket:
+            return job_config.source_path
+
+        if endpoint_url:
+            parsed = urlparse(endpoint_url if "://" in endpoint_url else f"https://{endpoint_url}")
+            scheme = parsed.scheme or "https"
+            netloc = parsed.netloc or parsed.path
+            base_path = parsed.path if parsed.netloc else ""
+            base_path = base_path.rstrip("/")
+
+            if path_style:
+                path = f"/{bucket}"
+                if object_key:
+                    path += f"/{object_key}"
+                base_url = f"{scheme}://{netloc}{base_path}{path}"
+                if access_key and secret_key:
+                    query = urlencode({"access_key": access_key, "secret_key": secret_key})
+                    return f"{base_url}?{query}"
+                return base_url
+
+            key_path = f"/{object_key}" if object_key else ""
+            base_url = f"{scheme}://{bucket}.{netloc}{base_path}{key_path}"
+            if access_key and secret_key:
+                query = urlencode({"access_key": access_key, "secret_key": secret_key})
+                return f"{base_url}?{query}"
+            return base_url
+
+        if object_key:
+            base_url = f"https://{bucket}.s3.{region_name}.amazonaws.com/{object_key}"
+        else:
+            base_url = f"https://{bucket}.s3.{region_name}.amazonaws.com"
+        if access_key and secret_key:
+            query = urlencode({"access_key": access_key, "secret_key": secret_key})
+            return f"{base_url}?{query}"
+        return base_url
     
     def _generate_dataset_slug(self, dataset_name: str, user_email: str) -> str:
         """Generate a human-readable slug for the dataset."""
