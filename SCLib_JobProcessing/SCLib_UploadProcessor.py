@@ -38,6 +38,13 @@ logger = logging.getLogger(__name__)
 
 
 class SCLib_UploadProcessor:
+    REMOTE_LINK_SCHEMES = (
+        "s3://",
+        "http://",
+        "https://",
+        "pelican://",
+    )
+
     """
     Processes upload jobs asynchronously using various tools.
     Integrates with the SC_JobProcessing system.
@@ -1221,6 +1228,10 @@ scope = drive
                     else:
                         google_drive_link = job_config.source_path
                 
+                link_for_server_flag = str(google_drive_link or "").strip().lower()
+                is_remote_link = any(link_for_server_flag.startswith(scheme) for scheme in self.REMOTE_LINK_SCHEMES)
+                dataset_server_flag = "true" if is_remote_link else "false"
+
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
                     "name": job_config.dataset_name,
@@ -1235,6 +1246,7 @@ scope = drive
                     "folder_uuid": job_config.folder,
                     "team_uuid": job_config.team_uuid,
                     "source_type": job_config.source_type.value,
+                    "server": dataset_server_flag,
                     "source_path": job_config.source_path,
                     "destination_path": job_config.destination_path,
                     "total_size_bytes": job_config.total_size_bytes,
@@ -1258,6 +1270,7 @@ scope = drive
                             "$set": {
                                 "status": "uploading",
                                 "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
+                                "server": dataset_server_flag,
                                 "updated_at": datetime.utcnow()
                             },
                             "$push": {
