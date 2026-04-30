@@ -5,7 +5,7 @@ Enhanced dataset management with user-friendly identifiers and comprehensive ope
 """
 
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, status
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
 from typing import Optional, Dict, Any, List, Tuple
@@ -15,7 +15,7 @@ import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
-from urllib.parse import urlparse, parse_qsl, urlencode
+from urllib.parse import urlparse, parse_qsl, urlencode, quote
 import base64
 import json
 import hashlib
@@ -483,6 +483,48 @@ def _replace_filename_template(idx_text: str, new_template: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _proxy_base_url() -> str:
+    return (
+        os.getenv("SCLIB_INTERNAL_API_URL")
+        or os.getenv("SCLIB_DATASET_URL")
+        or os.getenv("SCLIB_API_URL")
+        or "http://sclib_fastapi:5001"
+    ).rstrip("/")
+
+
+def _create_object_proxy_token(
+    *,
+    bucket: str,
+    key_prefix: str,
+    endpoint_url: str,
+    region_name: str,
+    path_style: bool,
+    access_key_id: str,
+    secret_access_key: str,
+    expires_in_seconds: int = 3600,
+) -> str:
+    expires_at = int((datetime.utcnow() + timedelta(seconds=max(60, expires_in_seconds))).timestamp())
+    payload = {
+        "bucket": bucket,
+        "key_prefix": key_prefix,
+        "endpoint_url": endpoint_url or "",
+        "region_name": region_name or "us-east-1",
+        "path_style": bool(path_style),
+        "access_key_id": access_key_id,
+        "secret_access_key": secret_access_key,
+        "expires_at": expires_at,
+    }
+    return _encrypt_cache_payload(payload)
+
+
+def _decode_object_proxy_token(token: str) -> Dict[str, Any]:
+    payload = _decrypt_cache_payload(token or "")
+    expires_at = int(payload.get("expires_at") or 0)
+    if not expires_at or int(datetime.utcnow().timestamp()) >= expires_at:
+        raise HTTPException(status_code=401, detail="Object proxy token expired")
+    return payload
+
+
 def _build_and_store_resolved_idx(
     *,
     bucket: str,
@@ -559,22 +601,22 @@ def _build_and_store_resolved_idx(
     except Exception:
         filename_template_key = f"{key_prefix}/%04x.bin" if key_prefix else filename_template_key
 
-    signed_probe_url = s3.generate_presigned_url(
-        ClientMethod="get_object",
-        Params={"Bucket": bucket, "Key": filename_template_key.replace("%04x", "0000")},
-        ExpiresIn=3600
-    )
-    probe_parts = urlparse(signed_probe_url)
-    template_url = _public_s3_url(
+    key_prefix = filename_template_key.split("%04x", 1)[0]
+    proxy_token = _create_object_proxy_token(
         bucket=bucket,
-        key=filename_template_key,
+        key_prefix=key_prefix,
         endpoint_url=endpoint_url,
         region_name=region_name,
-        path_style=path_style
+        path_style=path_style,
+        access_key_id=access_key_id,
+        secret_access_key=secret_access_key,
+        expires_in_seconds=3600,
     )
-    query = dict(parse_qsl(probe_parts.query, keep_blank_values=True))
-    template_query = urlencode(query, doseq=False)
-    full_template = f"{template_url}?{template_query}" if template_query else template_url
+    quoted_template_key = quote(filename_template_key, safe="/%")
+    full_template = (
+        f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
+        f"?token={quote(proxy_token, safe='')}&key={quoted_template_key}"
+    )
     resolved_idx_text = _replace_filename_template(idx_text, full_template)
 
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1581,6 +1623,58 @@ async def create_openvisus_resolved_idx(
         raise
     except Exception as e:
         logger.error(f"Failed to create OpenVisus resolved idx: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/datasets/s3/object-proxy")
+async def s3_object_proxy(token: str, key: str):
+    """
+    Proxy S3 object reads with short-lived encrypted token payload.
+    Used by resolved idx filename_template for OpenVisus bin block access.
+    """
+    try:
+        payload = _decode_object_proxy_token(token)
+        bucket = str(payload.get("bucket") or "").strip()
+        key_prefix = str(payload.get("key_prefix") or "")
+        endpoint_url = str(payload.get("endpoint_url") or "").strip()
+        region_name = str(payload.get("region_name") or "us-east-1").strip() or "us-east-1"
+        path_style = bool(payload.get("path_style", True))
+        access_key_id = str(payload.get("access_key_id") or "").strip()
+        secret_access_key = str(payload.get("secret_access_key") or "")
+        requested_key = (key or "").lstrip("/")
+
+        if not bucket or not requested_key:
+            raise HTTPException(status_code=400, detail="Missing bucket or object key")
+        if key_prefix and not requested_key.startswith(key_prefix):
+            raise HTTPException(status_code=403, detail="Requested key outside allowed prefix")
+        if not access_key_id or not secret_access_key:
+            raise HTTPException(status_code=401, detail="Proxy token missing credentials")
+
+        import boto3
+        from botocore.client import Config as BotoConfig
+
+        client_kwargs: Dict[str, Any] = {
+            "service_name": "s3",
+            "region_name": region_name,
+            "aws_access_key_id": access_key_id,
+            "aws_secret_access_key": secret_access_key,
+            "config": BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path" if path_style else "virtual"}
+            )
+        }
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
+
+        s3 = boto3.client(**client_kwargs)
+        obj = s3.get_object(Bucket=bucket, Key=requested_key)
+        body = obj["Body"].read()
+        content_type = obj.get("ContentType") or "application/octet-stream"
+        return Response(content=body, media_type=content_type)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"S3 object proxy failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/datasets")
