@@ -2,7 +2,7 @@
 Parameter parsing utilities for Bokeh dashboards
 """
 import os
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit, urlunsplit
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -11,6 +11,48 @@ load_dotenv()
 def is_remote_dataset_identifier(value):
     candidate = str(value or "").strip().lower()
     return candidate.startswith("http") or candidate.startswith("s3") or candidate.startswith("pelican")
+
+def parse_remote_dataset_uri(remote_uri):
+    """
+    Parse a remote dataset URI into canonical idx/txt/csv URLs.
+
+    Rules:
+    - Preserve an explicit .idx filename if provided.
+    - If no .idx filename is provided, infer <last-segment>/<last-segment>.idx.
+    - Keep query parameters attached to each derived URL (for signed links).
+    """
+    uri = str(remote_uri or "").strip()
+    lower = uri.lower()
+    is_s3 = lower.startswith("s3://")
+    is_http_like = lower.startswith("http://") or lower.startswith("https://") or lower.startswith("pelican://")
+    if not is_s3 and not is_http_like:
+        return None
+
+    parts = urlsplit(uri)
+    path = (parts.path or "").rstrip("/")
+    query = parts.query
+
+    if path.lower().endswith(".idx"):
+        idx_path = path
+        base_path = path[:-4]
+    else:
+        mid_name = path.split("/")[-1]
+        base_path = f"{path}/{mid_name}"
+        idx_path = f"{base_path}.idx"
+
+    def _rebuild_url(path_value):
+        return urlunsplit((parts.scheme, parts.netloc, path_value, query, parts.fragment))
+
+    base_uri = _rebuild_url(base_path)
+    idx_uri = _rebuild_url(idx_path)
+    mid_file = base_path.split("/")[-1]
+    return {
+        "mode": "s3_explicit" if is_s3 else "http_explicit",
+        "mid_file": mid_file,
+        "idx_uri": idx_uri,
+        "txt_uri": f"{base_uri}.txt",
+        "csv_uri": f"{base_uri}.csv",
+    }
 
 def parse_url_parameters(request=None, status_callback=None):
     """
