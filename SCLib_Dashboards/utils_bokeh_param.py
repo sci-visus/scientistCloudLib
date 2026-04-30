@@ -45,13 +45,15 @@ def parse_remote_dataset_uri(remote_uri):
 
     base_uri = _rebuild_url(base_path)
     idx_uri = _rebuild_url(idx_path)
+    txt_uri = _rebuild_url(f"{base_path}.txt")
+    csv_uri = _rebuild_url(f"{base_path}.csv")
     mid_file = base_path.split("/")[-1]
     return {
         "mode": "s3_explicit" if is_s3 else "http_explicit",
         "mid_file": mid_file,
         "idx_uri": idx_uri,
-        "txt_uri": f"{base_uri}.txt",
-        "csv_uri": f"{base_uri}.csv",
+        "txt_uri": txt_uri,
+        "csv_uri": csv_uri,
     }
 
 def parse_url_parameters(request=None, status_callback=None):
