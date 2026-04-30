@@ -8,14 +8,14 @@ from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, sta
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 import uuid
 import os
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qsl, urlencode
 import base64
 import json
 import hashlib
@@ -180,6 +180,20 @@ class S3PresignRequest(BaseModel):
     expires_in: int = Field(3600, ge=60, le=604800, description="Signed URL lifetime in seconds")
     cache_credentials: bool = Field(True, description="Store credentials server-side for short-lived reuse")
     use_cached_credentials: bool = Field(True, description="Allow server-side credential cache lookup")
+
+class S3ResolvedIdxRequest(BaseModel):
+    """Request model for generating a converted OpenVisus-resolved idx file."""
+    dataset_identifier: Optional[str] = Field(None, description="Dataset identifier (uuid/slug/id/name)")
+    user_email: Optional[str] = Field(None, description="User email for private dataset access checks")
+    s3_uri: Optional[str] = Field(None, description="Direct s3:// URI (if not using dataset identifier)")
+    endpoint_url: Optional[str] = Field(None, description="S3-compatible endpoint URL")
+    region_name: str = Field("us-east-1", description="AWS region")
+    path_style: bool = Field(True, description="Use path-style endpoint addressing")
+    access_key_id: Optional[str] = Field(None, description="Temporary/runtime S3 access key")
+    secret_access_key: Optional[str] = Field(None, description="Temporary/runtime S3 secret key")
+    cache_credentials: bool = Field(True, description="Store credentials server-side for short-lived reuse")
+    use_cached_credentials: bool = Field(True, description="Allow server-side credential cache lookup")
+    output_filename: str = Field("visus.idx", description="Output idx filename in converted directory")
 
 
 def _boolish(value: Any) -> bool:
@@ -426,6 +440,36 @@ def _is_folder_like_s3_key(raw_key: str) -> bool:
         return True
     leaf = key.split("/")[-1]
     return "." not in leaf
+
+def _resolved_idx_target_dir(dataset_uuid: str, s3_uri: str) -> Tuple[str, Path]:
+    config = get_config()
+    converted_root = ""
+    if hasattr(config, "job_processing") and getattr(config.job_processing, "out_data_dir", ""):
+        converted_root = str(config.job_processing.out_data_dir)
+    if not converted_root and hasattr(config, "server") and getattr(config.server, "visus_datasets", ""):
+        converted_root = f"{config.server.visus_datasets}/converted"
+    if not converted_root:
+        converted_root = "/mnt/visus_datasets/converted"
+
+    target_uuid = (dataset_uuid or "").strip()
+    if not target_uuid:
+        target_uuid = hashlib.sha256((s3_uri or "").encode("utf-8")).hexdigest()[:32]
+    return target_uuid, Path(converted_root) / target_uuid
+
+def _replace_filename_template(idx_text: str, new_template: str) -> str:
+    lines = idx_text.splitlines()
+    template_idx = -1
+    for i, line in enumerate(lines):
+        if line.strip() == "(filename_template)" and i + 1 < len(lines):
+            template_idx = i + 1
+            break
+
+    if template_idx >= 0:
+        lines[template_idx] = new_template
+    else:
+        lines.extend(["(filename_template)", new_template])
+    return "\n".join(lines) + "\n"
+
 
 # Dependency to get upload processor (for identifier resolution)
 def get_processor():
@@ -1243,6 +1287,194 @@ async def presign_s3_dataset_url(
         raise
     except Exception as e:
         logger.error(f"Failed to generate S3 presigned URL: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/v1/datasets/s3/openvisus-resolved-idx")
+async def create_openvisus_resolved_idx(
+    request: S3ResolvedIdxRequest,
+    processor: Any = Depends(get_processor)
+):
+    """
+    Build/store a resolved idx file in converted/<dataset_uuid>/ for OpenVisus.
+    The resolved idx points bin template to authorized object URLs.
+    """
+    try:
+        s3_uri = (request.s3_uri or "").strip()
+        dataset = None
+        dataset_uuid = ""
+        cache_key = ""
+        user_email = _safe_email(request.user_email)
+        cache_ttl_seconds = int(os.getenv("S3_CREDENTIAL_CACHE_TTL_SECONDS", "604800"))
+
+        if request.dataset_identifier:
+            if request.dataset_identifier.startswith("s3://"):
+                s3_uri = s3_uri or request.dataset_identifier
+            else:
+                dataset_uuid = _resolve_dataset_identifier(request.dataset_identifier)
+                dataset = _get_dataset_by_uuid(dataset_uuid)
+                if not dataset:
+                    raise HTTPException(status_code=404, detail=f"Dataset not found: {request.dataset_identifier}")
+                if user_email and not _check_dataset_access(dataset, user_email):
+                    raise HTTPException(status_code=403, detail="Access denied to this dataset")
+                if not s3_uri:
+                    s3_uri = (dataset.get("google_drive_link") or dataset.get("source_path") or "").strip()
+
+        if not s3_uri.startswith("s3://"):
+            raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
+
+        parsed = urlparse(s3_uri)
+        bucket = parsed.netloc.strip()
+        requested_key = (parsed.path or "").lstrip("/")
+        if not bucket:
+            raise HTTPException(status_code=400, detail="Invalid S3 URI: missing bucket name")
+
+        is_dataset_public = _boolish(dataset.get("is_public")) if dataset else False
+        owner_email = _normalize_owner_email(dataset)
+        cache_key = _cache_lookup_key(dataset_uuid, s3_uri)
+
+        endpoint_url = (request.endpoint_url or "").strip()
+        region_name = (request.region_name or "us-east-1").strip() or "us-east-1"
+        path_style = bool(request.path_style)
+        access_key_id = (request.access_key_id or "").strip()
+        secret_access_key = request.secret_access_key or ""
+
+        if request.use_cached_credentials and not access_key_id and not secret_access_key and user_email and cache_key:
+            cached = _get_cached_s3_credentials(key_id=cache_key, user_email=user_email)
+            if cached:
+                access_key_id = (cached.get("access_key_id") or "").strip()
+                secret_access_key = cached.get("secret_access_key") or ""
+                endpoint_url = endpoint_url or (cached.get("endpoint_url") or "").strip()
+                region_name = (cached.get("region_name") or region_name).strip() or "us-east-1"
+                path_style = bool(cached.get("path_style", path_style))
+
+        if not access_key_id or not secret_access_key:
+            if is_dataset_public:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Public dataset mode is not supported for resolved idx generation; provide credentials."
+                )
+            raise HTTPException(
+                status_code=400,
+                detail="Resolved idx generation requires credentials or a valid cached credential entry"
+            )
+
+        try:
+            import boto3
+            from botocore.client import Config as BotoConfig
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"boto3 not available for signing: {e}")
+
+        client_kwargs: Dict[str, Any] = {
+            "service_name": "s3",
+            "region_name": region_name,
+            "aws_access_key_id": access_key_id,
+            "aws_secret_access_key": secret_access_key,
+            "config": BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": "path" if path_style else "virtual"}
+            )
+        }
+        if endpoint_url:
+            client_kwargs["endpoint_url"] = endpoint_url
+        s3 = boto3.client(**client_kwargs)
+
+        resolved_key = None
+        for candidate in _s3_key_candidates(requested_key):
+            try:
+                s3.head_object(Bucket=bucket, Key=candidate)
+                resolved_key = candidate
+                break
+            except Exception:
+                continue
+
+        if not resolved_key and _is_folder_like_s3_key(requested_key):
+            prefix = (requested_key or "").lstrip("/")
+            if prefix and not prefix.endswith("/"):
+                prefix = prefix + "/"
+            listed = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
+            idx_keys = sorted(
+                [
+                    (obj.get("Key") or "")
+                    for obj in listed.get("Contents", [])
+                    if isinstance(obj.get("Key"), str) and obj.get("Key", "").lower().endswith(".idx")
+                ]
+            )
+            if len(idx_keys) == 1:
+                resolved_key = idx_keys[0]
+            elif len(idx_keys) > 1:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Multiple .idx files found under prefix; provide exact s3://.../.idx path."
+                )
+
+        if not resolved_key:
+            candidate_summary = ", ".join(_s3_key_candidates(requested_key))
+            raise HTTPException(
+                status_code=404,
+                detail=f"S3 dataset object not found. Tried keys: {candidate_summary}"
+            )
+
+        idx_obj = s3.get_object(Bucket=bucket, Key=resolved_key)
+        idx_text = idx_obj["Body"].read().decode("utf-8")
+
+        key_prefix = resolved_key.rsplit("/", 1)[0] if "/" in resolved_key else ""
+        key_stem = resolved_key[:-4] if resolved_key.lower().endswith(".idx") else resolved_key
+        filename_template_key = f"{key_stem}/%04x.bin"
+        try:
+            s3.head_object(Bucket=bucket, Key=filename_template_key.replace("%04x", "0000"))
+        except Exception:
+            filename_template_key = f"{key_prefix}/%04x.bin" if key_prefix else filename_template_key
+
+        signed_probe_url = s3.generate_presigned_url(
+            ClientMethod="get_object",
+            Params={"Bucket": bucket, "Key": filename_template_key.replace("%04x", "0000")},
+            ExpiresIn=3600
+        )
+        probe_parts = urlparse(signed_probe_url)
+        template_url = _public_s3_url(
+            bucket=bucket,
+            key=filename_template_key,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
+            path_style=path_style
+        )
+        query = dict(parse_qsl(probe_parts.query, keep_blank_values=True))
+        template_query = urlencode(query, doseq=False)
+        full_template = f"{template_url}?{template_query}" if template_query else template_url
+        resolved_idx_text = _replace_filename_template(idx_text, full_template)
+
+        target_uuid, target_dir = _resolved_idx_target_dir(dataset_uuid, s3_uri)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        output_name = (request.output_filename or "visus.idx").strip() or "visus.idx"
+        resolved_idx_path = target_dir / output_name
+        resolved_idx_path.write_text(resolved_idx_text, encoding="utf-8")
+
+        if request.cache_credentials and user_email and cache_key and owner_email and owner_email == user_email:
+            _save_cached_s3_credentials(
+                key_id=cache_key,
+                user_email=user_email,
+                owner_email=owner_email,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                endpoint_url=endpoint_url,
+                region_name=region_name,
+                path_style=path_style,
+                ttl_seconds=cache_ttl_seconds
+            )
+
+        return {
+            "success": True,
+            "dataset_uuid": target_uuid,
+            "source_s3_uri": s3_uri,
+            "resolved_key": resolved_key,
+            "resolved_idx_path": str(resolved_idx_path),
+            "converted_dir": str(target_dir),
+            "filename_template": full_template,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to create OpenVisus resolved idx: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/datasets")
