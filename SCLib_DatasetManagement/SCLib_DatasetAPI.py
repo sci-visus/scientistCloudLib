@@ -1532,15 +1532,25 @@ async def create_openvisus_resolved_idx(
         marker_path = target_dir / f".{output_name}.generating"
 
         if resolved_idx_path.exists() and not request.force_refresh:
-            return {
-                "success": True,
-                "status": "ready",
-                "reused": True,
-                "dataset_uuid": target_uuid,
-                "source_s3_uri": s3_uri,
-                "resolved_idx_path": str(resolved_idx_path),
-                "converted_dir": str(target_dir),
-            }
+            try:
+                existing_text = resolved_idx_path.read_text(encoding="utf-8", errors="ignore")
+                has_proxy_template = "/api/v1/datasets/s3/object-proxy" in existing_text
+                if has_proxy_template:
+                    return {
+                        "success": True,
+                        "status": "ready",
+                        "reused": True,
+                        "dataset_uuid": target_uuid,
+                        "source_s3_uri": s3_uri,
+                        "resolved_idx_path": str(resolved_idx_path),
+                        "converted_dir": str(target_dir),
+                    }
+                logger.info(
+                    "Existing resolved idx is stale (no object-proxy template); regenerating: %s",
+                    resolved_idx_path,
+                )
+            except Exception as ex:
+                logger.warning("Failed reading existing resolved idx for reuse check (%s), regenerating", ex)
 
         def _build_job():
             try:
