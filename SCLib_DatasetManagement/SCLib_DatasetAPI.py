@@ -4,7 +4,7 @@ SCLib Dataset Management API
 Enhanced dataset management with user-friendly identifiers and comprehensive operations.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, status
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form, Request, status
 from fastapi.responses import JSONResponse, FileResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
@@ -1946,8 +1946,8 @@ async def create_openvisus_resolved_idx(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/v1/datasets/s3/object-proxy")
-async def s3_object_proxy(token: str, key: str):
+@app.api_route("/api/v1/datasets/s3/object-proxy", methods=["GET", "HEAD"])
+async def s3_object_proxy(request: Request, token: str, key: str):
     """
     Proxy S3 object reads with short-lived encrypted token payload.
     Used by resolved idx filename_template for OpenVisus bin block access.
@@ -1971,6 +1971,8 @@ async def s3_object_proxy(token: str, key: str):
 
         if not bucket or not requested_key:
             raise HTTPException(status_code=400, detail="Missing bucket or object key")
+        if requested_key.endswith("/"):
+            raise HTTPException(status_code=400, detail="Object proxy key must reference a file, not a folder prefix")
         if key_prefix and not requested_key.startswith(key_prefix):
             raise HTTPException(status_code=403, detail="Requested key outside allowed prefix")
         if not access_key_id or not secret_access_key:
@@ -1993,6 +1995,10 @@ async def s3_object_proxy(token: str, key: str):
             client_kwargs["endpoint_url"] = endpoint_url
 
         s3 = boto3.client(**client_kwargs)
+        if request.method.upper() == "HEAD":
+            s3.head_object(Bucket=bucket, Key=requested_key)
+            return Response(status_code=200)
+
         obj = s3.get_object(Bucket=bucket, Key=requested_key)
         body = obj["Body"].read()
         content_type = obj.get("ContentType") or "application/octet-stream"
@@ -2007,6 +2013,16 @@ async def s3_object_proxy(token: str, key: str):
         )
         raise
     except Exception as e:
+        try:
+            from botocore.exceptions import ClientError
+            if isinstance(e, ClientError):
+                code = str((e.response or {}).get("Error", {}).get("Code", "")).strip()
+                if code in {"NoSuchKey", "404", "NotFound"}:
+                    raise HTTPException(status_code=404, detail=f"S3 object not found: {requested_key}")
+        except HTTPException:
+            raise
+        except Exception:
+            pass
         logger.error(f"S3 object proxy failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
