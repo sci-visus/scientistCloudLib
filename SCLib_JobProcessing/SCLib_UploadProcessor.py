@@ -16,7 +16,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import tempfile
 import shutil
-from urllib.parse import urlparse, urlencode
+from urllib.parse import urlparse, urlencode, parse_qs
 from urllib import request as urllib_request, error as urllib_error
 
 try:
@@ -392,6 +392,25 @@ class SCLib_UploadProcessor:
                     object_key = parts[1] if len(parts) > 1 else ''
                 if not bucket_name:
                     raise ValueError(f"Invalid S3 source_path for dataset {dataset_uuid}: {source_path}")
+
+                access_key_id = str(dataset.get('s3_access_key_id') or '').strip()
+                secret_access_key = str(dataset.get('s3_secret_access_key') or '').strip()
+                endpoint_url = str(dataset.get('s3_endpoint_url') or '').strip()
+                region_name = str(dataset.get('s3_region_name') or 'us-east-1').strip() or 'us-east-1'
+                path_style = bool(dataset.get('s3_path_style', True))
+
+                # Backward-compat: recover credentials from google_drive_link query if present.
+                if not access_key_id or not secret_access_key:
+                    try:
+                        glink = str(dataset.get('google_drive_link') or '').strip()
+                        if glink.startswith('http://') or glink.startswith('https://'):
+                            parsed_link = urlparse(glink)
+                            q = parse_qs(parsed_link.query or '')
+                            access_key_id = access_key_id or str((q.get('access_key', [''])[0] or '')).strip()
+                            secret_access_key = secret_access_key or str((q.get('secret_key', [''])[0] or '')).strip()
+                    except Exception:
+                        pass
+
                 job_config = create_s3_upload_job(
                     bucket_name=bucket_name,
                     object_key=object_key,
@@ -399,13 +418,16 @@ class SCLib_UploadProcessor:
                     user_email=dataset.get('user') or dataset.get('user_id', ''),
                     dataset_name=dataset.get('name', ''),
                     sensor=sensor,
-                    access_key_id=None,
-                    secret_access_key=None,
+                    access_key_id=access_key_id or None,
+                    secret_access_key=secret_access_key or None,
                     convert=dataset.get('convert', False),
                     is_public=dataset.get('is_public', False),
                     is_downloadable=dataset.get('is_downloadable', 'only owner'),
                     folder=dataset.get('folder_uuid'),
-                    team_uuid=dataset.get('team_uuid')
+                    team_uuid=dataset.get('team_uuid'),
+                    endpoint_url=endpoint_url or None,
+                    region_name=region_name,
+                    path_style=path_style,
                 )
             elif source_type == UploadSourceType.URL:
                 source_path = dataset.get('source_path', '')
