@@ -17,6 +17,7 @@ from pathlib import Path
 import tempfile
 import shutil
 from urllib.parse import urlparse, urlencode
+from urllib import request as urllib_request, error as urllib_error
 
 try:
     from .SCLib_Config import get_config, get_collection_name, get_database_name
@@ -1255,6 +1256,22 @@ scope = drive
                     "created_at": job_config.created_at,
                     "updated_at": datetime.utcnow()
                 }
+
+                # Persist S3 connection details for stable server-side resolved-idx generation.
+                if job_config.source_type.value == "s3":
+                    source_cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+                    s3_access_key = str(source_cfg.get("access_key_id") or "").strip()
+                    s3_secret_key = str(source_cfg.get("secret_access_key") or "").strip()
+                    s3_endpoint = str(source_cfg.get("endpoint_url") or "").strip()
+                    s3_region = str(source_cfg.get("region_name") or "us-east-1").strip() or "us-east-1"
+                    s3_path_style = bool(source_cfg.get("path_style", True))
+                    if s3_access_key and s3_secret_key:
+                        dataset_doc["s3_access_key_id"] = s3_access_key
+                        dataset_doc["s3_secret_access_key"] = s3_secret_key
+                    if s3_endpoint:
+                        dataset_doc["s3_endpoint_url"] = s3_endpoint
+                    dataset_doc["s3_region_name"] = s3_region
+                    dataset_doc["s3_path_style"] = s3_path_style
                 
                 # Store job_id for status lookups (allows curl scripts to check status by job_id)
                 if job_id:
@@ -1291,6 +1308,21 @@ scope = drive
                     # Add google_drive_link if available and not already set
                     if google_drive_link and not existing_dataset.get('google_drive_link'):
                         update_data["$set"]["google_drive_link"] = google_drive_link
+
+                    if job_config.source_type.value == "s3":
+                        source_cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+                        s3_access_key = str(source_cfg.get("access_key_id") or "").strip()
+                        s3_secret_key = str(source_cfg.get("secret_access_key") or "").strip()
+                        s3_endpoint = str(source_cfg.get("endpoint_url") or "").strip()
+                        s3_region = str(source_cfg.get("region_name") or "us-east-1").strip() or "us-east-1"
+                        s3_path_style = bool(source_cfg.get("path_style", True))
+                        if s3_access_key and s3_secret_key:
+                            update_data["$set"]["s3_access_key_id"] = s3_access_key
+                            update_data["$set"]["s3_secret_access_key"] = s3_secret_key
+                        if s3_endpoint:
+                            update_data["$set"]["s3_endpoint_url"] = s3_endpoint
+                        update_data["$set"]["s3_region_name"] = s3_region
+                        update_data["$set"]["s3_path_style"] = s3_path_style
                     
                     update_result = collection.update_one(
                         {"uuid": job_config.dataset_uuid},
@@ -1492,9 +1524,83 @@ scope = drive
                     {"$set": update_data}
                 )
                 logger.info(f"Updated dataset status: {dataset_uuid} -> {update_data.get('status', status)}")
+
+                if (
+                    update_data.get("status") == "done"
+                    and job_config
+                    and job_config.source_type == UploadSourceType.S3
+                ):
+                    # Generate resolved idx at dataset-registration time (SCLib-owned), not dashboard-owned.
+                    self._trigger_resolved_idx_generation_async(dataset_uuid, job_config)
                 
         except Exception as e:
             logger.error(f"Error updating dataset status: {e}")
+
+    def _trigger_resolved_idx_generation_async(self, dataset_uuid: str, job_config: UploadJobConfig):
+        def _run():
+            try:
+                source_cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+                s3_uri = str(job_config.source_path or "").strip()
+                if not s3_uri.startswith("s3://"):
+                    bucket_name = str(source_cfg.get("bucket_name") or "").strip()
+                    object_key = str(source_cfg.get("object_key") or "").strip().lstrip("/")
+                    if bucket_name and object_key:
+                        s3_uri = f"s3://{bucket_name}/{object_key}"
+                if not s3_uri.startswith("s3://"):
+                    logger.warning("Skipping resolved idx pre-generation; missing s3:// uri for dataset %s", dataset_uuid)
+                    return
+
+                payload = {
+                    "dataset_identifier": dataset_uuid,
+                    "s3_uri": s3_uri,
+                    "access_key_id": str(source_cfg.get("access_key_id") or "").strip() or None,
+                    "secret_access_key": str(source_cfg.get("secret_access_key") or "") or None,
+                    "endpoint_url": str(source_cfg.get("endpoint_url") or "").strip() or None,
+                    "region_name": str(source_cfg.get("region_name") or "us-east-1").strip() or "us-east-1",
+                    "path_style": bool(source_cfg.get("path_style", True)),
+                    "cache_credentials": True,
+                    "use_cached_credentials": True,
+                    "background": True,
+                }
+
+                api_base = (
+                    os.getenv("SCLIB_INTERNAL_API_URL")
+                    or os.getenv("SCLIB_DATASET_URL")
+                    or os.getenv("SCLIB_API_URL")
+                    or "http://127.0.0.1:5001"
+                ).rstrip("/")
+                endpoint = f"{api_base}/api/v1/datasets/s3/openvisus-resolved-idx"
+
+                req = urllib_request.Request(
+                    endpoint,
+                    data=json.dumps(payload).encode("utf-8"),
+                    headers={"Content-Type": "application/json", "Accept": "application/json"},
+                    method="POST",
+                )
+                with urllib_request.urlopen(req, timeout=20) as resp:
+                    body = resp.read().decode("utf-8", errors="ignore")
+                    logger.info(
+                        "Triggered resolved idx pre-generation for %s via %s status=%s body=%s",
+                        dataset_uuid,
+                        endpoint,
+                        getattr(resp, "status", "unknown"),
+                        body[:300],
+                    )
+            except urllib_error.HTTPError as http_ex:
+                try:
+                    detail = http_ex.read().decode("utf-8", errors="ignore")
+                except Exception:
+                    detail = ""
+                logger.warning(
+                    "Resolved idx pre-generation request failed for %s status=%s detail=%s",
+                    dataset_uuid,
+                    getattr(http_ex, "code", "unknown"),
+                    detail[:300],
+                )
+            except Exception as ex:
+                logger.warning("Resolved idx pre-generation failed for %s: %s", dataset_uuid, ex)
+
+        threading.Thread(target=_run, daemon=True).start()
     
     def _create_conversion_job(self, dataset_uuid: str, job_config: UploadJobConfig, collection):
         """

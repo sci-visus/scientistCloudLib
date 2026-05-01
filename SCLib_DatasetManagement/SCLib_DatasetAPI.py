@@ -677,6 +677,17 @@ def _strip_query_fragment(url: str) -> str:
     return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
 
 
+def _extract_s3_credentials_from_link(url: str) -> Tuple[str, str]:
+    try:
+        parsed = urlparse((url or "").strip())
+        params = parse_qs(parsed.query or "")
+        access_key = str((params.get("access_key", [""])[0] or "")).strip()
+        secret_key = str((params.get("secret_key", [""])[0] or "")).strip()
+        return access_key, secret_key
+    except Exception:
+        return "", ""
+
+
 def _get_dataset_by_remote_uri(
     *,
     s3_uri: str,
@@ -1389,6 +1400,20 @@ async def presign_s3_dataset_url(
 
         access_key_id = (request.access_key_id or "").strip()
         secret_access_key = request.secret_access_key or ""
+
+        if dataset and (not access_key_id or not secret_access_key):
+            access_key_id = access_key_id or str(dataset.get("s3_access_key_id") or "").strip()
+            secret_access_key = secret_access_key or str(dataset.get("s3_secret_access_key") or "")
+            endpoint_url = endpoint_url or str(dataset.get("s3_endpoint_url") or "").strip()
+            region_name = str(dataset.get("s3_region_name") or region_name).strip() or "us-east-1"
+            if "s3_path_style" in dataset:
+                path_style = bool(dataset.get("s3_path_style"))
+
+        if dataset and (not access_key_id or not secret_access_key):
+            glink = str(dataset.get("google_drive_link") or "").strip()
+            link_access, link_secret = _extract_s3_credentials_from_link(glink)
+            access_key_id = access_key_id or link_access
+            secret_access_key = secret_access_key or link_secret
 
         if request.use_cached_credentials and not access_key_id and not secret_access_key and user_email and cache_key:
             cached = _get_cached_s3_credentials(key_id=cache_key, user_email=user_email)
