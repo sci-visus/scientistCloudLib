@@ -1647,7 +1647,23 @@ async def create_openvisus_resolved_idx(
                 if user_email and not _check_dataset_access(dataset, user_email):
                     raise HTTPException(status_code=403, detail="Access denied to this dataset")
                 if not s3_uri:
-                    s3_uri = (dataset.get("google_drive_link") or dataset.get("source_path") or "").strip()
+                    source_path = str(dataset.get("source_path") or "").strip()
+                    google_link = str(dataset.get("google_drive_link") or "").strip()
+                    if source_path.startswith("s3://"):
+                        s3_uri = source_path
+                    elif google_link.startswith("s3://"):
+                        s3_uri = google_link
+                    elif google_link.startswith("http://") or google_link.startswith("https://"):
+                        s3_uri = _http_object_url_to_s3_uri(google_link)
+                    elif source_path.startswith("http://") or source_path.startswith("https://"):
+                        s3_uri = _http_object_url_to_s3_uri(source_path)
+                    else:
+                        s3_uri = source_path or google_link
+
+        if (s3_uri.startswith("http://") or s3_uri.startswith("https://")) and not request.dataset_identifier:
+            converted = _http_object_url_to_s3_uri(s3_uri)
+            if converted:
+                s3_uri = converted
 
         if not s3_uri.startswith("s3://"):
             raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
