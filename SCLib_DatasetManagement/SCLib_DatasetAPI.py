@@ -520,12 +520,18 @@ def _filename_template_to_s3_key_pattern(template: str, bucket: str, resolved_id
 
 
 def _proxy_base_url() -> str:
-    return (
-        os.getenv("SCLIB_INTERNAL_API_URL")
-        or os.getenv("SCLIB_DATASET_URL")
+    # Prefer publicly reachable URLs for idx templates consumed by dashboards.
+    # Internal host is only a final fallback for local/container-only scenarios.
+    public_base = (
+        os.getenv("SCLIB_DATASET_URL")
         or os.getenv("SCLIB_API_URL")
-        or "http://sclib_fastapi:5001"
-    ).rstrip("/")
+        or os.getenv("SC_SERVER_URL")
+        or ""
+    ).strip()
+    if public_base:
+        return public_base.rstrip("/")
+
+    return (os.getenv("SCLIB_INTERNAL_API_URL") or "http://sclib_fastapi:5001").rstrip("/")
 
 
 def _create_object_proxy_token(
