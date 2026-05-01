@@ -453,7 +453,7 @@ def _is_folder_like_s3_key(raw_key: str) -> bool:
     leaf = key.split("/")[-1]
     return "." not in leaf
 
-def _resolved_idx_target_dir(dataset_uuid: str, s3_uri: str) -> Tuple[str, Path]:
+def _resolved_idx_target_dir(dataset_uuid: str) -> Tuple[str, Path]:
     config = get_config()
     converted_root = ""
     if hasattr(config, "job_processing") and getattr(config.job_processing, "out_data_dir", ""):
@@ -465,7 +465,7 @@ def _resolved_idx_target_dir(dataset_uuid: str, s3_uri: str) -> Tuple[str, Path]
 
     target_uuid = (dataset_uuid or "").strip()
     if not target_uuid:
-        target_uuid = hashlib.sha256((s3_uri or "").encode("utf-8")).hexdigest()[:32]
+        raise ValueError("dataset_uuid is required for resolved idx target directory")
     return target_uuid, Path(converted_root) / target_uuid
 
 def _replace_filename_template(idx_text: str, new_template: str) -> str:
@@ -668,6 +668,69 @@ def _get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dict[str, Any]]:
             if 'is_downloadable' not in dataset or dataset.get('is_downloadable') is None:
                 dataset['is_downloadable'] = 'only owner'
         return dataset
+
+
+def _strip_query_fragment(url: str) -> str:
+    parsed = urlparse((url or "").strip())
+    if not parsed.scheme:
+        return (url or "").strip()
+    return f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+
+
+def _get_dataset_by_remote_uri(
+    *,
+    s3_uri: str,
+    http_uri: str = "",
+    endpoint_url: str = "",
+    region_name: str = "us-east-1",
+    path_style: bool = True,
+) -> Optional[Dict[str, Any]]:
+    s3_uri = (s3_uri or "").strip()
+    http_uri = (http_uri or "").strip()
+    s3_no_q = _strip_query_fragment(s3_uri)
+    http_no_q = _strip_query_fragment(http_uri)
+
+    parsed = urlparse(s3_uri)
+    bucket = parsed.netloc.strip()
+    key = (parsed.path or "").lstrip("/")
+    if not http_uri and bucket and key:
+        endpoint_candidate = endpoint_url or os.getenv("S3_PUBLIC_ENDPOINT_URL", "") or os.getenv("S3_ENDPOINT_URL", "")
+        http_uri = _public_s3_url(
+            bucket=bucket,
+            key=key,
+            endpoint_url=endpoint_candidate,
+            region_name=region_name,
+            path_style=path_style,
+        )
+        http_no_q = _strip_query_fragment(http_uri)
+
+    candidates = []
+    for value in [s3_uri, s3_no_q, http_uri, http_no_q]:
+        value = (value or "").strip()
+        if value and value not in candidates:
+            candidates.append(value)
+
+    with mongo_collection_by_type_context('visstoredatas') as collection:
+        for candidate in candidates:
+            doc = collection.find_one({
+                "$or": [
+                    {"uuid": candidate},
+                    {"google_drive_link": candidate},
+                    {"source_path": candidate},
+                ]
+            })
+            if doc:
+                return doc
+
+        # Fallback: prefix match for google_drive_link where DB may include/queryless form.
+        for candidate in candidates:
+            if not candidate.startswith("http"):
+                continue
+            regex = f"^{re.escape(candidate)}(?:\\?.*)?$"
+            doc = collection.find_one({"google_drive_link": {"$regex": regex}})
+            if doc:
+                return doc
+    return None
 
 def _check_dataset_access(dataset: Dict[str, Any], user_email: str) -> bool:
     """Check if user has access to dataset."""
@@ -1294,6 +1357,20 @@ async def presign_s3_dataset_url(
         if not s3_uri.startswith("s3://"):
             raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
 
+        # If caller passed remote URL in uuid slot, recover canonical dataset UUID from DB.
+        if not dataset_uuid:
+            remote_doc = _get_dataset_by_remote_uri(
+                s3_uri=s3_uri,
+                http_uri=request.dataset_identifier if (request.dataset_identifier or "").startswith(("http://", "https://")) else "",
+                endpoint_url=request.endpoint_url or "",
+                region_name=request.region_name or "us-east-1",
+                path_style=bool(request.path_style),
+            )
+            if remote_doc and remote_doc.get("uuid"):
+                dataset_uuid = str(remote_doc.get("uuid")).strip()
+                if not dataset:
+                    dataset = remote_doc
+
         parsed = urlparse(s3_uri)
         bucket = parsed.netloc.strip()
         requested_key = (parsed.path or '').lstrip('/')
@@ -1490,6 +1567,17 @@ async def create_openvisus_resolved_idx(
         if not s3_uri.startswith("s3://"):
             raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
 
+        if not dataset_uuid:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Unable to resolve dataset UUID for this remote dataset. "
+                    "Create/select the dataset entry first and call with dataset_identifier "
+                    "as UUID/slug (or ensure google_drive_link/source_path matches). "
+                    "Hash fallback is disabled by design."
+                ),
+            )
+
         parsed = urlparse(s3_uri)
         bucket = parsed.netloc.strip()
         requested_key = (parsed.path or "").lstrip("/")
@@ -1526,7 +1614,7 @@ async def create_openvisus_resolved_idx(
                 detail="Resolved idx generation requires credentials or a valid cached credential entry"
             )
 
-        target_uuid, target_dir = _resolved_idx_target_dir(dataset_uuid, s3_uri)
+        target_uuid, target_dir = _resolved_idx_target_dir(dataset_uuid)
         output_name = (request.output_filename or "visus.idx").strip() or "visus.idx"
         resolved_idx_path = target_dir / output_name
         marker_path = target_dir / f".{output_name}.generating"
