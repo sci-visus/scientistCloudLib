@@ -550,11 +550,69 @@ def _create_object_proxy_token(
         "secret_access_key": secret_access_key,
         "expires_at": expires_at,
     }
-    return _encrypt_cache_payload(payload)
+    return _encrypt_object_proxy_payload(payload)
+
+
+def _encrypt_object_proxy_payload(payload: Dict[str, Any]) -> str:
+    secret = _cache_secret()
+    if not secret:
+        raise HTTPException(status_code=500, detail="S3 credential cache secret is not configured")
+    try:
+        from Crypto.Cipher import AES
+        from Crypto.Random import get_random_bytes
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Crypto backend unavailable: {e}")
+
+    key = hashlib.sha256(secret.encode("utf-8")).digest()
+    plaintext = json.dumps(payload).encode("utf-8")
+    nonce = get_random_bytes(12)
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    ciphertext, tag = cipher.encrypt_and_digest(plaintext)
+    blob = nonce + tag + ciphertext
+    # URL-safe base64 without padding avoids token corruption in query transport.
+    return base64.urlsafe_b64encode(blob).decode("utf-8").rstrip("=")
+
+
+def _decrypt_object_proxy_payload(token: str) -> Dict[str, Any]:
+    secret = _cache_secret()
+    if not secret:
+        raise HTTPException(status_code=500, detail="S3 credential cache secret is not configured")
+    try:
+        from Crypto.Cipher import AES
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Crypto backend unavailable: {e}")
+
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing object proxy token")
+
+    # Restore padding for urlsafe base64 token.
+    padded = token + ("=" * ((4 - (len(token) % 4)) % 4))
+    try:
+        blob = base64.urlsafe_b64decode(padded.encode("utf-8"))
+    except Exception:
+        # Backward compatibility for tokens generated with standard base64.
+        try:
+            blob = base64.b64decode(token.encode("utf-8"))
+        except Exception:
+            raise HTTPException(status_code=401, detail="Invalid object proxy token")
+
+    if len(blob) < 28:
+        raise HTTPException(status_code=401, detail="Invalid object proxy token")
+
+    nonce = blob[:12]
+    tag = blob[12:28]
+    ciphertext = blob[28:]
+    key = hashlib.sha256(secret.encode("utf-8")).digest()
+    cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
+    try:
+        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
+        return json.loads(plaintext.decode("utf-8"))
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid object proxy token")
 
 
 def _decode_object_proxy_token(token: str) -> Dict[str, Any]:
-    payload = _decrypt_cache_payload(token or "")
+    payload = _decrypt_object_proxy_payload(token or "")
     expires_at = int(payload.get("expires_at") or 0)
     if not expires_at or int(datetime.utcnow().timestamp()) >= expires_at:
         raise HTTPException(status_code=401, detail="Object proxy token expired")
@@ -666,10 +724,11 @@ def _build_and_store_resolved_idx(
         secret_access_key=secret_access_key,
         expires_in_seconds=3600,
     )
-    quoted_template_key = quote(filename_template_key, safe="/%")
+    # Keep template readable for OpenVisus: only one formatting token (%04x),
+    # and avoid percent-escaped query text.
     full_template = (
         f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
-        f"?token={quote(proxy_token, safe='')}&key={quoted_template_key}"
+        f"?token={proxy_token}&key={filename_template_key}"
     )
     logger.info(
         "Resolved idx template mapping: source_template=%s mapped_key_pattern=%s proxy_prefix=%s",
