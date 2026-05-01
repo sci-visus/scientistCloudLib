@@ -1628,22 +1628,13 @@ async def create_openvisus_resolved_idx(
                 region_name = (cached.get("region_name") or region_name).strip() or "us-east-1"
                 path_style = bool(cached.get("path_style", path_style))
 
-        if not access_key_id or not secret_access_key:
-            if is_dataset_public:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Public dataset mode is not supported for resolved idx generation; provide credentials."
-                )
-            raise HTTPException(
-                status_code=400,
-                detail="Resolved idx generation requires credentials or a valid cached credential entry"
-            )
-
         target_uuid, target_dir = _resolved_idx_target_dir(dataset_uuid)
         output_name = (request.output_filename or "visus.idx").strip() or "visus.idx"
         resolved_idx_path = target_dir / output_name
         marker_path = target_dir / f".{output_name}.generating"
 
+        # Fast path: if resolved idx already exists and is valid, reuse it without requiring credentials.
+        # This supports dashboard consumers that should not manage credential-bearing generation requests.
         if resolved_idx_path.exists() and not request.force_refresh:
             try:
                 existing_text = resolved_idx_path.read_text(encoding="utf-8", errors="ignore")
@@ -1664,6 +1655,18 @@ async def create_openvisus_resolved_idx(
                 )
             except Exception as ex:
                 logger.warning("Failed reading existing resolved idx for reuse check (%s), regenerating", ex)
+
+        # Only require credentials when generation/regeneration is actually needed.
+        if not access_key_id or not secret_access_key:
+            if is_dataset_public:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Public dataset mode is not supported for resolved idx generation; provide credentials."
+                )
+            raise HTTPException(
+                status_code=400,
+                detail="Resolved idx generation requires credentials or a valid cached credential entry"
+            )
 
         def _build_job():
             try:
