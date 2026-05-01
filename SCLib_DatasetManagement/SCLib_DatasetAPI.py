@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any, List, Tuple
 import uuid
 import os
 import logging
+import posixpath
 from datetime import datetime, timedelta
 from pathlib import Path
 import re
@@ -483,6 +484,41 @@ def _replace_filename_template(idx_text: str, new_template: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _extract_filename_template(idx_text: str) -> str:
+    lines = idx_text.splitlines()
+    for i, line in enumerate(lines):
+        if line.strip() == "(filename_template)" and i + 1 < len(lines):
+            return (lines[i + 1] or "").strip()
+    return ""
+
+
+def _filename_template_to_s3_key_pattern(template: str, bucket: str, resolved_idx_key: str = "") -> str:
+    raw = (template or "").strip()
+    if not raw:
+        return ""
+    idx_dir = resolved_idx_key.rsplit("/", 1)[0] if "/" in resolved_idx_key else ""
+
+    if raw.startswith("s3://"):
+        parsed = urlparse(raw)
+        key = (parsed.path or "").lstrip("/")
+        return key if parsed.netloc.strip() == bucket else ""
+
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urlparse(raw)
+        path = (parsed.path or "").lstrip("/")
+        # Common path-style endpoint: /<bucket>/<key_pattern>
+        if path.startswith(f"{bucket}/"):
+            return path[len(bucket) + 1:]
+        return path
+
+    # Relative templates (e.g. "./%04x.bin") are relative to the idx object directory.
+    if raw.startswith("./") or raw.startswith("../"):
+        joined = posixpath.normpath(posixpath.join(idx_dir, raw)) if idx_dir else posixpath.normpath(raw)
+        return joined.lstrip("/")
+
+    return raw.lstrip("/")
+
+
 def _proxy_base_url() -> str:
     return (
         os.getenv("SCLIB_INTERNAL_API_URL")
@@ -595,13 +631,31 @@ def _build_and_store_resolved_idx(
 
     key_prefix = resolved_key.rsplit("/", 1)[0] if "/" in resolved_key else ""
     key_stem = resolved_key[:-4] if resolved_key.lower().endswith(".idx") else resolved_key
-    filename_template_key = f"{key_stem}/%04x.bin"
-    try:
-        s3.head_object(Bucket=bucket, Key=filename_template_key.replace("%04x", "0000"))
-    except Exception:
-        filename_template_key = f"{key_prefix}/%04x.bin" if key_prefix else filename_template_key
+    existing_template = _extract_filename_template(idx_text)
+    logger.info(
+        "Resolved idx source details: bucket=%s resolved_key=%s existing_filename_template=%s",
+        bucket,
+        resolved_key,
+        existing_template,
+    )
+    filename_template_key = _filename_template_to_s3_key_pattern(
+        existing_template,
+        bucket,
+        resolved_idx_key=resolved_key,
+    )
+    if not filename_template_key or "%" not in filename_template_key:
+        # Fallback heuristic only when original idx has no usable template pattern.
+        filename_template_key = f"{key_stem}/%04x.bin"
+        try:
+            s3.head_object(Bucket=bucket, Key=filename_template_key.replace("%04x", "0000"))
+        except Exception:
+            filename_template_key = f"{key_prefix}/%04x.bin" if key_prefix else filename_template_key
 
-    key_prefix = filename_template_key.split("%04x", 1)[0]
+    wildcard_idx = filename_template_key.find("%")
+    if wildcard_idx >= 0:
+        key_prefix = filename_template_key[:wildcard_idx]
+    else:
+        key_prefix = filename_template_key.rsplit("/", 1)[0] + "/" if "/" in filename_template_key else ""
     proxy_token = _create_object_proxy_token(
         bucket=bucket,
         key_prefix=key_prefix,
@@ -616,6 +670,12 @@ def _build_and_store_resolved_idx(
     full_template = (
         f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
         f"?token={quote(proxy_token, safe='')}&key={quoted_template_key}"
+    )
+    logger.info(
+        "Resolved idx template mapping: source_template=%s mapped_key_pattern=%s proxy_prefix=%s",
+        existing_template,
+        filename_template_key,
+        key_prefix,
     )
     resolved_idx_text = _replace_filename_template(idx_text, full_template)
 
@@ -1779,6 +1839,12 @@ async def s3_object_proxy(token: str, key: str):
         access_key_id = str(payload.get("access_key_id") or "").strip()
         secret_access_key = str(payload.get("secret_access_key") or "")
         requested_key = (key or "").lstrip("/")
+        logger.info(
+            "Object proxy request: bucket=%s requested_key=%s allowed_prefix=%s",
+            bucket,
+            requested_key,
+            key_prefix,
+        )
 
         if not bucket or not requested_key:
             raise HTTPException(status_code=400, detail="Missing bucket or object key")
