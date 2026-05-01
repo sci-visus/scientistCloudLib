@@ -582,17 +582,18 @@ def _decrypt_object_proxy_payload(token: str) -> Dict[str, Any]:
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Crypto backend unavailable: {e}")
 
-    if not token:
+    normalized_token = (token or "").strip()
+    if not normalized_token:
         raise HTTPException(status_code=401, detail="Missing object proxy token")
 
     # Restore padding for urlsafe base64 token.
-    padded = token + ("=" * ((4 - (len(token) % 4)) % 4))
+    padded = normalized_token + ("=" * ((4 - (len(normalized_token) % 4)) % 4))
     try:
         blob = base64.urlsafe_b64decode(padded.encode("utf-8"))
     except Exception:
         # Backward compatibility for tokens generated with standard base64.
         try:
-            blob = base64.b64decode(token.encode("utf-8"))
+            blob = base64.b64decode(normalized_token.replace(" ", "+").encode("utf-8"))
         except Exception:
             raise HTTPException(status_code=401, detail="Invalid object proxy token")
 
@@ -714,6 +715,7 @@ def _build_and_store_resolved_idx(
         key_prefix = filename_template_key[:wildcard_idx]
     else:
         key_prefix = filename_template_key.rsplit("/", 1)[0] + "/" if "/" in filename_template_key else ""
+    token_ttl_seconds = int(os.getenv("S3_OBJECT_PROXY_TOKEN_TTL_SECONDS", "604800"))
     proxy_token = _create_object_proxy_token(
         bucket=bucket,
         key_prefix=key_prefix,
@@ -722,7 +724,7 @@ def _build_and_store_resolved_idx(
         path_style=path_style,
         access_key_id=access_key_id,
         secret_access_key=secret_access_key,
-        expires_in_seconds=3600,
+        expires_in_seconds=token_ttl_seconds,
     )
     # Keep template readable for OpenVisus: only one formatting token (%04x),
     # and avoid percent-escaped query text.
@@ -1725,7 +1727,26 @@ async def create_openvisus_resolved_idx(
                 s3_uri = converted
 
         if not s3_uri.startswith("s3://"):
+            converted = _http_object_url_to_s3_uri(s3_uri)
+            if converted:
+                s3_uri = converted
+        if not s3_uri.startswith("s3://"):
             raise HTTPException(status_code=400, detail="s3_uri must start with s3://")
+
+        # If caller passed remote URL in uuid slot (or omitted identifier),
+        # recover canonical dataset UUID from DB using remote URI matching.
+        if not dataset_uuid:
+            remote_doc = _get_dataset_by_remote_uri(
+                s3_uri=s3_uri,
+                http_uri=request.dataset_identifier if (request.dataset_identifier or "").startswith(("http://", "https://")) else "",
+                endpoint_url=request.endpoint_url or "",
+                region_name=request.region_name or "us-east-1",
+                path_style=bool(request.path_style),
+            )
+            if remote_doc and remote_doc.get("uuid"):
+                dataset_uuid = str(remote_doc.get("uuid")).strip()
+                if not dataset:
+                    dataset = remote_doc
 
         if not dataset_uuid:
             raise HTTPException(
@@ -1753,6 +1774,20 @@ async def create_openvisus_resolved_idx(
         path_style = bool(request.path_style)
         access_key_id = (request.access_key_id or "").strip()
         secret_access_key = request.secret_access_key or ""
+
+        if dataset and (not access_key_id or not secret_access_key):
+            access_key_id = access_key_id or str(dataset.get("s3_access_key_id") or "").strip()
+            secret_access_key = secret_access_key or str(dataset.get("s3_secret_access_key") or "")
+            endpoint_url = endpoint_url or str(dataset.get("s3_endpoint_url") or "").strip()
+            region_name = str(dataset.get("s3_region_name") or region_name).strip() or "us-east-1"
+            if "s3_path_style" in dataset:
+                path_style = bool(dataset.get("s3_path_style"))
+
+        if dataset and (not access_key_id or not secret_access_key):
+            glink = str(dataset.get("google_drive_link") or "").strip()
+            link_access, link_secret = _extract_s3_credentials_from_link(glink)
+            access_key_id = access_key_id or link_access
+            secret_access_key = secret_access_key or link_secret
 
         if request.use_cached_credentials and not access_key_id and not secret_access_key and user_email and cache_key:
             cached = _get_cached_s3_credentials(key_id=cache_key, user_email=user_email)
@@ -1904,6 +1939,7 @@ async def s3_object_proxy(token: str, key: str):
     Proxy S3 object reads with short-lived encrypted token payload.
     Used by resolved idx filename_template for OpenVisus bin block access.
     """
+    requested_key = (key or "").lstrip("/")
     try:
         payload = _decode_object_proxy_token(token)
         bucket = str(payload.get("bucket") or "").strip()
@@ -1913,7 +1949,6 @@ async def s3_object_proxy(token: str, key: str):
         path_style = bool(payload.get("path_style", True))
         access_key_id = str(payload.get("access_key_id") or "").strip()
         secret_access_key = str(payload.get("secret_access_key") or "")
-        requested_key = (key or "").lstrip("/")
         logger.info(
             "Object proxy request: bucket=%s requested_key=%s allowed_prefix=%s",
             bucket,
@@ -1949,7 +1984,14 @@ async def s3_object_proxy(token: str, key: str):
         body = obj["Body"].read()
         content_type = obj.get("ContentType") or "application/octet-stream"
         return Response(content=body, media_type=content_type)
-    except HTTPException:
+    except HTTPException as exc:
+        logger.warning(
+            "S3 object proxy rejected request status=%s detail=%s key=%s token_len=%s",
+            exc.status_code,
+            str(exc.detail),
+            requested_key,
+            len(token or ""),
+        )
         raise
     except Exception as e:
         logger.error(f"S3 object proxy failed: {e}", exc_info=True)
