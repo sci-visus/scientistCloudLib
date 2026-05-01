@@ -1656,6 +1656,17 @@ async def create_openvisus_resolved_idx(
             except Exception as ex:
                 logger.warning("Failed reading existing resolved idx for reuse check (%s), regenerating", ex)
 
+        # If background generation is already running, report pending instead of failing on missing creds.
+        if marker_path.exists() and not request.force_refresh:
+            return {
+                "success": False,
+                "status": "pending",
+                "dataset_uuid": target_uuid,
+                "source_s3_uri": s3_uri,
+                "resolved_idx_path": str(resolved_idx_path),
+                "converted_dir": str(target_dir),
+            }
+
         # Only require credentials when generation/regeneration is actually needed.
         if not access_key_id or not secret_access_key:
             if is_dataset_public:
