@@ -526,10 +526,17 @@ def _proxy_base_url() -> str:
         os.getenv("SCLIB_DATASET_URL")
         or os.getenv("SCLIB_API_URL")
         or os.getenv("SC_SERVER_URL")
+        or os.getenv("DEPLOY_SERVER")
         or ""
     ).strip()
     if public_base:
         return public_base.rstrip("/")
+
+    domain_name = (os.getenv("DOMAIN_NAME") or "").strip()
+    if domain_name:
+        if not domain_name.startswith(("http://", "https://")):
+            domain_name = f"https://{domain_name}"
+        return domain_name.rstrip("/")
 
     return (os.getenv("SCLIB_INTERNAL_API_URL") or "http://sclib_fastapi:5001").rstrip("/")
 
