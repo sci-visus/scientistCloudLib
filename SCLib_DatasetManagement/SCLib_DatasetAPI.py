@@ -760,12 +760,10 @@ def _build_and_store_resolved_idx(
         resolved_idx_key=resolved_key,
     )
     if not filename_template_key or "%" not in filename_template_key:
-        # Fallback heuristic only when original idx has no usable template pattern.
+        # Fallback only when original idx has no usable template pattern.
+        # Do not probe specific indices like 0000 here; OpenVisus decides which
+        # concrete block files to request from the printf template at runtime.
         filename_template_key = f"{key_stem}/%04x.bin"
-        try:
-            s3.head_object(Bucket=bucket, Key=filename_template_key.replace("%04x", "0000"))
-        except Exception:
-            filename_template_key = f"{key_prefix}/%04x.bin" if key_prefix else filename_template_key
 
     wildcard_idx = filename_template_key.find("%")
     if wildcard_idx >= 0:
