@@ -541,6 +541,50 @@ def _proxy_base_url() -> str:
     return (os.getenv("SCLIB_INTERNAL_API_URL") or "http://sclib_fastapi:5001").rstrip("/")
 
 
+def _create_resolved_idx_read_token(
+    *,
+    dataset_uuid: str,
+    file_name: str,
+    expires_in_seconds: int = 3600,
+) -> str:
+    """
+    Time-limited token for reading a stored resolved OpenVisus idx from the API as raw bytes.
+    OpenVisus needs an HTTP(S) dataset URL so remote filename_template (object-proxy) is honored;
+    loading from a local filesystem path often skips HTTP bin fetches entirely.
+    """
+    expires_at = int((datetime.utcnow() + timedelta(seconds=max(60, expires_in_seconds))).timestamp())
+    payload = {
+        "kind": "resolved_idx_read",
+        "dataset_uuid": str(dataset_uuid or "").strip(),
+        "file_name": str(file_name or "").strip() or "visus.idx",
+        "expires_at": expires_at,
+    }
+    return _encrypt_object_proxy_payload(payload)
+
+
+def _decode_resolved_idx_read_token(token: str) -> Dict[str, Any]:
+    payload = _decrypt_object_proxy_payload(token or "")
+    if str(payload.get("kind") or "") != "resolved_idx_read":
+        raise HTTPException(status_code=401, detail="Invalid resolved idx token")
+    expires_at = int(payload.get("expires_at") or 0)
+    if expires_at <= int(datetime.utcnow().timestamp()):
+        raise HTTPException(status_code=401, detail="Resolved idx token expired")
+    return payload
+
+
+def _resolved_idx_http_url(*, dataset_uuid: str, file_name: str) -> str:
+    ttl = int(os.getenv("RESOLVED_IDX_READ_TOKEN_TTL_SECONDS", "604800"))
+    tok = _create_resolved_idx_read_token(
+        dataset_uuid=dataset_uuid,
+        file_name=file_name,
+        expires_in_seconds=ttl,
+    )
+    from urllib.parse import quote
+
+    safe_name = quote(str(file_name or "visus.idx"), safe="")
+    return f"{_proxy_base_url()}/api/v1/datasets/resolved-idx/{tok}/{safe_name}"
+
+
 def _create_object_proxy_token(
     *,
     bucket: str,
@@ -1834,6 +1878,10 @@ async def create_openvisus_resolved_idx(
                         "dataset_uuid": target_uuid,
                         "source_s3_uri": s3_uri,
                         "resolved_idx_path": str(resolved_idx_path),
+                        "resolved_idx_http_url": _resolved_idx_http_url(
+                            dataset_uuid=target_uuid,
+                            file_name=output_name,
+                        ),
                         "converted_dir": str(target_dir),
                     }
                 logger.info(
@@ -1851,6 +1899,10 @@ async def create_openvisus_resolved_idx(
                 "dataset_uuid": target_uuid,
                 "source_s3_uri": s3_uri,
                 "resolved_idx_path": str(resolved_idx_path),
+                "resolved_idx_http_url": _resolved_idx_http_url(
+                    dataset_uuid=target_uuid,
+                    file_name=output_name,
+                ),
                 "converted_dir": str(target_dir),
             }
 
@@ -1905,6 +1957,10 @@ async def create_openvisus_resolved_idx(
                 "dataset_uuid": target_uuid,
                 "source_s3_uri": s3_uri,
                 "resolved_idx_path": str(resolved_idx_path),
+                "resolved_idx_http_url": _resolved_idx_http_url(
+                    dataset_uuid=target_uuid,
+                    file_name=output_name,
+                ),
                 "converted_dir": str(target_dir),
             }
 
@@ -1940,6 +1996,10 @@ async def create_openvisus_resolved_idx(
             "source_s3_uri": s3_uri,
             "resolved_key": built.get("resolved_key"),
             "resolved_idx_path": built.get("resolved_idx_path"),
+            "resolved_idx_http_url": _resolved_idx_http_url(
+                dataset_uuid=target_uuid,
+                file_name=output_name,
+            ),
             "converted_dir": str(target_dir),
             "filename_template": built.get("filename_template"),
         }
@@ -2049,6 +2109,63 @@ async def s3_object_proxy_path(request: Request, token: str, key: str):
     more predictably than `key=` query parameters.
     """
     return await _s3_object_proxy_impl(request, token, key)
+
+
+@app.api_route(
+    "/api/v1/datasets/resolved-idx/{token}/{file_name:path}",
+    methods=["GET", "HEAD"],
+)
+async def serve_resolved_openvisus_idx_file(request: Request, token: str, file_name: str):
+    """
+    Serve a stored resolved OpenVisus idx as raw bytes for `ov.LoadDataset(https://...)`.
+    This is separate from JSON `file-content` and avoids OpenVisus treating the dataset
+    as a local file (which can prevent object-proxy bin fetches from being issued).
+    """
+    try:
+        payload = _decode_resolved_idx_read_token(token)
+        dataset_uuid = str(payload.get("dataset_uuid") or "").strip()
+        expected_name = str(payload.get("file_name") or "visus.idx").strip() or "visus.idx"
+        if not dataset_uuid:
+            raise HTTPException(status_code=400, detail="Missing dataset uuid in token")
+
+        from urllib.parse import unquote
+
+        clean_name = (unquote(file_name or "") or "").strip()
+        if "/" in clean_name or clean_name.startswith(".."):
+            raise HTTPException(status_code=400, detail="Invalid file name")
+        if clean_name != expected_name:
+            raise HTTPException(status_code=400, detail="File name does not match token")
+
+        _, dataset_dir = _resolved_idx_target_dir(dataset_uuid)
+        full_path = (dataset_dir / clean_name).resolve()
+        try:
+            full_path.relative_to(dataset_dir.resolve())
+        except ValueError:
+            raise HTTPException(status_code=403, detail="Invalid resolved idx path")
+
+        if not full_path.exists() or not full_path.is_file():
+            raise HTTPException(status_code=404, detail="Resolved idx file not found")
+
+        logger.info(
+            "Resolved idx file serve: dataset_uuid=%s file=%s method=%s",
+            dataset_uuid,
+            clean_name,
+            request.method.upper(),
+        )
+
+        if request.method.upper() == "HEAD":
+            return Response(status_code=200)
+
+        return FileResponse(
+            path=str(full_path),
+            media_type="text/plain",
+            filename=full_path.name,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to serve resolved idx file: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/v1/datasets")
 async def create_dataset(
