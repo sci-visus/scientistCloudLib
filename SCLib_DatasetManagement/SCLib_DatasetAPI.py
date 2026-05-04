@@ -2058,8 +2058,13 @@ async def _s3_object_proxy_impl(request: Request, token: str, key: str):
 
         s3 = boto3.client(**client_kwargs)
         if request.method.upper() == "HEAD":
-            s3.head_object(Bucket=bucket, Key=requested_key)
-            return Response(status_code=200)
+            meta = s3.head_object(Bucket=bucket, Key=requested_key)
+            headers: Dict[str, str] = {}
+            if meta.get("ContentLength") is not None:
+                headers["Content-Length"] = str(meta.get("ContentLength"))
+            if meta.get("ContentType"):
+                headers["Content-Type"] = str(meta.get("ContentType"))
+            return Response(status_code=200, headers=headers)
 
         obj = s3.get_object(Bucket=bucket, Key=requested_key)
         body = obj["Body"].read()
