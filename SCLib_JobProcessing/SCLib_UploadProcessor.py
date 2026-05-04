@@ -45,6 +45,22 @@ class SCLib_UploadProcessor:
         "https://",
         "pelican://",
     )
+    DASHBOARD_ID_NORMALIZATION = {
+        "4d_dashboard": "4d_dashboardLite",
+        "4d_dashboardlite": "4d_dashboardLite",
+        "4d dashboard": "4d_dashboardLite",
+        "4d dashboard (new)": "4d_dashboardLite",
+        "4d dashboard new": "4d_dashboardLite",
+        "openvisus": "OpenVisusSlice",
+        "openvisusslice": "OpenVisusSlice",
+        "openvisus slice": "OpenVisusSlice",
+        "3dplotly": "3DPlotly",
+        "3d plotly": "3DPlotly",
+        "3d vtk": "3DVTK",
+        "3dvtk": "3DVTK",
+        "darkmatter": "DarkMatter",
+        "magicscan": "magicscan",
+    }
 
     """
     Processes upload jobs asynchronously using various tools.
@@ -1255,6 +1271,14 @@ scope = drive
                 is_remote_link = any(link_for_server_flag.startswith(scheme) for scheme in self.REMOTE_LINK_SCHEMES)
                 dataset_server_flag = "true" if is_remote_link else "false"
 
+                metadata = job_config.metadata if isinstance(job_config.metadata, dict) else {}
+                dataset_dimensions = str(metadata.get("dimensions") or "").strip()
+                preferred_dashboard_raw = str(metadata.get("preferred_dashboard") or "").strip()
+                preferred_dashboard = self.DASHBOARD_ID_NORMALIZATION.get(
+                    preferred_dashboard_raw.lower(),
+                    preferred_dashboard_raw,
+                )
+
                 dataset_doc = {
                     "uuid": job_config.dataset_uuid,
                     "name": job_config.dataset_name,
@@ -1278,6 +1302,10 @@ scope = drive
                     "created_at": job_config.created_at,
                     "updated_at": datetime.utcnow()
                 }
+                if dataset_dimensions:
+                    dataset_doc["dimensions"] = dataset_dimensions
+                if preferred_dashboard:
+                    dataset_doc["preferred_dashboard"] = preferred_dashboard
 
                 # Persist S3 connection details for stable server-side resolved-idx generation.
                 if job_config.source_type.value == "s3":
@@ -1322,6 +1350,10 @@ scope = drive
                                 }
                             }
                         }
+                    if dataset_dimensions:
+                        update_data["$set"]["dimensions"] = dataset_dimensions
+                    if preferred_dashboard:
+                        update_data["$set"]["preferred_dashboard"] = preferred_dashboard
                     
                     # Store job_id for status lookups
                     if job_id:

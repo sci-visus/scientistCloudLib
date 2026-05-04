@@ -739,11 +739,15 @@ def _build_and_store_resolved_idx(
         secret_access_key=secret_access_key,
         expires_in_seconds=token_ttl_seconds,
     )
-    # Keep template readable for OpenVisus: only one formatting token (%04x),
-    # and avoid percent-escaped query text.
+    # Query strings parse `%` as percent-encoding before FastAPI sees `key`.
+    # OpenVisus filename templates use printf tokens like `%04x`; those MUST be
+    # encoded as `%2504x` in the URL so that after one decode round-trip the
+    # handler receives literal `%04x...` (not `\x04` garbage).
+    safe_token = quote(str(proxy_token or ""), safe="")
+    safe_key_pattern = quote(str(filename_template_key or ""), safe="/")
     full_template = (
         f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
-        f"?token={proxy_token}&key={filename_template_key}"
+        f"?token={safe_token}&key={safe_key_pattern}"
     )
     logger.info(
         "Resolved idx template mapping: source_template=%s mapped_key_pattern=%s proxy_prefix=%s",

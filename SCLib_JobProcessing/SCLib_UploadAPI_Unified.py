@@ -94,6 +94,9 @@ class UploadRequest(BaseModel):
     is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
+    tags: Optional[str] = Field(None, max_length=500, description="Optional tags for the dataset (comma-separated)")
+    dimensions: Optional[str] = Field(None, max_length=255, description="Optional dataset dimensions")
+    preferred_dashboard: Optional[str] = Field(None, max_length=255, description="Optional preferred dashboard")
 
     @validator('source_config')
     def validate_source_config(cls, v, values):
@@ -238,6 +241,13 @@ async def initiate_upload(
     For cloud sources, this creates a standard job. For local files, use the /upload endpoint.
     """
     try:
+        tags = [tag.strip() for tag in (request.tags or "").split(",") if tag.strip()]
+        metadata = {}
+        if request.dimensions is not None:
+            metadata["dimensions"] = str(request.dimensions).strip()
+        if request.preferred_dashboard is not None:
+            metadata["preferred_dashboard"] = str(request.preferred_dashboard).strip()
+
         # Generate unique job ID
         job_id = f"upload_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
         
@@ -310,7 +320,9 @@ async def initiate_upload(
                 is_downloadable=request.is_downloadable,
                 folder=request.folder,
                 team_uuid=request.team_uuid,
-                source_config_override=source_config  # Pass full config including OAuth flags
+                source_config_override=source_config,  # Pass full config including OAuth flags
+                tags=tags,
+                metadata=metadata,
             )
             upload_type = "standard"
         elif request.source_type == UploadSourceType.S3:
@@ -331,6 +343,8 @@ async def initiate_upload(
                 endpoint_url=request.source_config.get('endpoint_url'),
                 region_name=request.source_config.get('region_name', 'us-east-1'),
                 path_style=bool(request.source_config.get('path_style', False)),
+                tags=tags,
+                metadata=metadata,
             )
             upload_type = "standard"
         elif request.source_type == UploadSourceType.URL:
@@ -344,7 +358,9 @@ async def initiate_upload(
                 is_public=request.is_public,
                 is_downloadable=request.is_downloadable,
                 folder=request.folder,
-                team_uuid=request.team_uuid
+                team_uuid=request.team_uuid,
+                tags=tags,
+                metadata=metadata,
             )
             upload_type = "standard"
         else:
