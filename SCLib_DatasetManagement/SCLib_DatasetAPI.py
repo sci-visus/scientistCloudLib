@@ -739,15 +739,15 @@ def _build_and_store_resolved_idx(
         secret_access_key=secret_access_key,
         expires_in_seconds=token_ttl_seconds,
     )
-    # Query strings parse `%` as percent-encoding before FastAPI sees `key`.
-    # OpenVisus filename templates use printf tokens like `%04x`; those MUST be
-    # encoded as `%2504x` in the URL so that after one decode round-trip the
-    # handler receives literal `%04x...` (not `\x04` garbage).
-    safe_token = quote(str(proxy_token or ""), safe="")
-    safe_key_pattern = quote(str(filename_template_key or ""), safe="/")
+    # IMPORTANT: do not put OpenVisus printf tokens (`%04x`, etc.) in a *query*
+    # parameter. URL parsers treat `%..` as percent-encoded bytes before FastAPI
+    # sees `key`, which corrupts the pattern. Do not "URL-encode %" into `%25`
+    # inside the idx file either — OpenVisus printf expansion does not decode
+    # `%25` back to `%`. Use a path-based URL so `%04x` remains literal in the
+    # stored template and only undergoes normal URL percent-decoding once.
     full_template = (
         f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
-        f"?token={safe_token}&key={safe_key_pattern}"
+        f"/{proxy_token}/{filename_template_key}"
     )
     logger.info(
         "Resolved idx template mapping: source_template=%s mapped_key_pattern=%s proxy_prefix=%s",
@@ -1950,11 +1950,9 @@ async def create_openvisus_resolved_idx(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.api_route("/api/v1/datasets/s3/object-proxy", methods=["GET", "HEAD"])
-async def s3_object_proxy(request: Request, token: str, key: str):
+async def _s3_object_proxy_impl(request: Request, token: str, key: str):
     """
-    Proxy S3 object reads with short-lived encrypted token payload.
-    Used by resolved idx filename_template for OpenVisus bin block access.
+    Core S3 object proxy: fetch `key` from `bucket` using credentials in `token`.
     """
     requested_key = (key or "").lstrip("/")
     try:
@@ -2029,6 +2027,28 @@ async def s3_object_proxy(request: Request, token: str, key: str):
             pass
         logger.error(f"S3 object proxy failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.api_route("/api/v1/datasets/s3/object-proxy", methods=["GET", "HEAD"])
+async def s3_object_proxy_query(request: Request, token: str, key: str):
+    """
+    Legacy query form: /object-proxy?token=...&key=...
+    Prefer path form for new resolved idx (printf tokens in `key` break query transport).
+    """
+    return await _s3_object_proxy_impl(request, token, key)
+
+
+@app.api_route(
+    "/api/v1/datasets/s3/object-proxy/{token}/{key:path}",
+    methods=["GET", "HEAD"],
+)
+async def s3_object_proxy_path(request: Request, token: str, key: str):
+    """
+    Path form: /object-proxy/{token}/path/to/object/%04x.bin
+    OpenVisus expands printf tokens in the URL; path routing preserves `%` handling
+    more predictably than `key=` query parameters.
+    """
+    return await _s3_object_proxy_impl(request, token, key)
 
 @app.post("/api/v1/datasets")
 async def create_dataset(
