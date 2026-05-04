@@ -2010,8 +2010,14 @@ async def create_openvisus_resolved_idx(
 
 def _parse_bytes_range_header(range_header: str) -> Optional[str]:
     """
-    Return S3 `Range` parameter for get_object, e.g. "bytes=0-1023".
-    Only single-range `bytes=a-b` is supported; multipart/unsatisfiable -> None.
+    Map a single HTTP `Range` value to S3 `get_object(Range=...)`.
+
+    Passthrough only: no byte caps or truncation—same semantics as S3 for one range:
+    - closed: ``bytes=a-b``
+    - open-ended: ``bytes=a-`` (through end of object)
+    - suffix: ``bytes=-n`` (last n bytes)
+
+    Multipart ranges (comma-separated) are not passed (S3 ``get_object`` takes one range).
     """
     raw = (range_header or "").strip()
     if not raw:
@@ -2021,14 +2027,23 @@ def _parse_bytes_range_header(range_header: str) -> Optional[str]:
     spec = raw.split("=", 1)[1].strip()
     if "," in spec:
         return None
+
+    # Suffix range: bytes=-N (last N bytes)
+    if spec.startswith("-") and len(spec) > 1:
+        n = spec[1:]
+        if n.isdigit():
+            return f"bytes=-{n}"
+        return None
+
     if "-" not in spec:
         return None
     start_s, end_s = spec.split("-", 1)
     if not start_s.isdigit():
         return None
-    if end_s and not end_s.isdigit():
-        return None
-    if not end_s:
+    # Open-ended: bytes=start-
+    if end_s == "":
+        return f"bytes={start_s}-"
+    if not end_s.isdigit():
         return None
     return f"bytes={start_s}-{end_s}"
 
