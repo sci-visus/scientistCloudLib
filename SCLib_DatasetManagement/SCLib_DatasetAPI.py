@@ -2008,6 +2008,31 @@ async def create_openvisus_resolved_idx(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _parse_bytes_range_header(range_header: str) -> Optional[str]:
+    """
+    Return S3 `Range` parameter for get_object, e.g. "bytes=0-1023".
+    Only single-range `bytes=a-b` is supported; multipart/unsatisfiable -> None.
+    """
+    raw = (range_header or "").strip()
+    if not raw:
+        return None
+    if not raw.lower().startswith("bytes="):
+        return None
+    spec = raw.split("=", 1)[1].strip()
+    if "," in spec:
+        return None
+    if "-" not in spec:
+        return None
+    start_s, end_s = spec.split("-", 1)
+    if not start_s.isdigit():
+        return None
+    if end_s and not end_s.isdigit():
+        return None
+    if not end_s:
+        return None
+    return f"bytes={start_s}-{end_s}"
+
+
 async def _s3_object_proxy_impl(request: Request, token: str, key: str):
     """
     Core S3 object proxy: fetch `key` from `bucket` using credentials in `token`.
@@ -2022,11 +2047,14 @@ async def _s3_object_proxy_impl(request: Request, token: str, key: str):
         path_style = bool(payload.get("path_style", True))
         access_key_id = str(payload.get("access_key_id") or "").strip()
         secret_access_key = str(payload.get("secret_access_key") or "")
+        range_header = request.headers.get("range") or request.headers.get("Range") or ""
+        s3_range = _parse_bytes_range_header(range_header)
         logger.info(
-            "Object proxy request: bucket=%s requested_key=%s allowed_prefix=%s",
+            "Object proxy request: bucket=%s requested_key=%s allowed_prefix=%s range=%s",
             bucket,
             requested_key,
             key_prefix,
+            s3_range or (range_header.strip() or None),
         )
 
         if not bucket or not requested_key:
@@ -2062,11 +2090,28 @@ async def _s3_object_proxy_impl(request: Request, token: str, key: str):
                 headers["Content-Length"] = str(meta.get("ContentLength"))
             if meta.get("ContentType"):
                 headers["Content-Type"] = str(meta.get("ContentType"))
+            # Advertise range support for clients (OpenVisus) that issue byte-range reads.
+            headers["Accept-Ranges"] = "bytes"
             return Response(status_code=200, headers=headers)
 
-        obj = s3.get_object(Bucket=bucket, Key=requested_key)
+        get_kwargs: Dict[str, Any] = {"Bucket": bucket, "Key": requested_key}
+        if s3_range:
+            get_kwargs["Range"] = s3_range
+        obj = s3.get_object(**get_kwargs)
         body = obj["Body"].read()
         content_type = obj.get("ContentType") or "application/octet-stream"
+        out_headers: Dict[str, str] = {}
+        if s3_range and obj.get("ContentRange"):
+            out_headers["Content-Range"] = str(obj.get("ContentRange"))
+            out_headers["Accept-Ranges"] = "bytes"
+            if obj.get("ContentLength") is not None:
+                out_headers["Content-Length"] = str(obj.get("ContentLength"))
+            return Response(
+                content=body,
+                media_type=content_type,
+                status_code=206,
+                headers=out_headers,
+            )
         return Response(content=body, media_type=content_type)
     except HTTPException as exc:
         logger.warning(
@@ -2084,6 +2129,11 @@ async def _s3_object_proxy_impl(request: Request, token: str, key: str):
                 code = str((e.response or {}).get("Error", {}).get("Code", "")).strip()
                 if code in {"NoSuchKey", "404", "NotFound"}:
                     raise HTTPException(status_code=404, detail=f"S3 object not found: {requested_key}")
+                if code in {"InvalidRange"}:
+                    raise HTTPException(
+                        status_code=416,
+                        detail=f"S3 range not satisfiable for key: {requested_key}",
+                    )
         except HTTPException:
             raise
         except Exception:
