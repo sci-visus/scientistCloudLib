@@ -258,6 +258,16 @@ def get_tool_config(source_type: UploadSourceType) -> Dict[str, Any]:
     return TOOL_CONFIGS.get(source_type, {})
 
 
+def effective_convert_for_sensor(sensor: SensorType, convert: bool) -> bool:
+    """
+    IDX datasets always use the conversion pipeline (materialize when remote, ARCO when needed).
+    Client/UI cannot disable conversion for IDX without changing sensor type.
+    """
+    if sensor == SensorType.IDX:
+        return True
+    return bool(convert)
+
+
 def create_upload_job_config(
     source_type: UploadSourceType,
     source_path: str,
@@ -284,7 +294,7 @@ def create_upload_job_config(
         user_email=user_email,
         dataset_name=dataset_name,
         sensor=sensor,
-        convert=convert,
+        convert=effective_convert_for_sensor(sensor, convert),
         is_public=is_public,
         is_downloadable=is_downloadable,
         folder=folder,

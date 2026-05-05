@@ -436,7 +436,7 @@ class SCLib_UploadProcessor:
                     sensor=sensor,
                     access_key_id=access_key_id or None,
                     secret_access_key=secret_access_key or None,
-                    convert=dataset.get('convert', False),
+                    convert=dataset.get('convert', True),
                     is_public=dataset.get('is_public', False),
                     is_downloadable=dataset.get('is_downloadable', 'only owner'),
                     folder=dataset.get('folder_uuid'),
@@ -657,6 +657,12 @@ class SCLib_UploadProcessor:
             job_config.convert and sensor_name == SensorType.IDX.value
         )
         if not should_materialize_for_conversion:
+            logger.info(
+                "Skipping S3 download to %s (sensor=%s convert=%s; need IDX + convert=true for local mirror)",
+                job_config.destination_path,
+                sensor_name,
+                getattr(job_config, "convert", None),
+            )
             return
 
         source_cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}

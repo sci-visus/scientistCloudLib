@@ -543,6 +543,21 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
         self.assertEqual(config.source_config['access_key_id'], "AKIA...")
         self.assertEqual(config.source_config['secret_access_key'], "secret...")
     
+    def test_idx_sensor_forces_convert_true(self):
+        """IDX datasets always enter the conversion pipeline (e.g. ARCO), ignoring convert=false."""
+        config = create_s3_upload_job(
+            bucket_name="bucket",
+            object_key="prefix/",
+            dataset_uuid="uuid-idx",
+            user_email="user@example.com",
+            dataset_name="IDX DS",
+            sensor=SensorType.IDX,
+            convert=False,
+            is_public=False,
+        )
+        self.assertEqual(config.sensor, SensorType.IDX)
+        self.assertTrue(config.convert)
+    
     def test_create_url_upload_job(self):
         """Test creating URL upload job."""
         config = create_url_upload_job(

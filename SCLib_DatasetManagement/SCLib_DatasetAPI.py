@@ -906,7 +906,7 @@ def _build_and_store_resolved_idx(
 
             # Convert to ARCO.
             # NOTE: OpenVisus CLI usage is: copy-dataset [--arco] src dst
-            subprocess.run(
+            _copy = subprocess.run(
                 [
                     "python3",
                     "-m",
@@ -917,11 +917,15 @@ def _build_and_store_resolved_idx(
                     str(src_idx_path),
                     str(dst_dir),
                 ],
-                check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+            if _copy.returncode != 0:
+                out = (_copy.stdout or "").strip()
+                raise RuntimeError(
+                    f"OpenVisus copy-dataset failed (exit {_copy.returncode}). Output:\n{out or '(no stdout)'}"
+                )
 
             # Find the generated idx filename (OpenVisus typically outputs visus.idx).
             idx_candidates = [
@@ -937,7 +941,7 @@ def _build_and_store_resolved_idx(
             dst_idx_path = idx_candidates[0]
 
             # Compress output dataset in-place (relative bin objects next to the idx).
-            subprocess.run(
+            _cmp = subprocess.run(
                 [
                     "python3",
                     "-m",
@@ -947,11 +951,15 @@ def _build_and_store_resolved_idx(
                     compression,
                     str(dst_idx_path),
                 ],
-                check=True,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
             )
+            if _cmp.returncode != 0:
+                out = (_cmp.stdout or "").strip()
+                raise RuntimeError(
+                    f"OpenVisus compress-dataset failed (exit {_cmp.returncode}). Output:\n{out or '(no stdout)'}"
+                )
 
             # Replace target_dir with the converted output.
             if target_dir.exists():
