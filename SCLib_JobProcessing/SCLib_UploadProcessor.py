@@ -1500,8 +1500,9 @@ scope = drive
                 parts = without_scheme.split("/", 1)
                 if len(parts) > 1:
                     object_key = parts[1].lstrip("/")
-        if object_key.endswith("/") or object_key == "":
-            object_key = f"{object_key.rstrip('/')}/visus.idx".lstrip("/")
+        # Do not invent `visus.idx` for folder prefixes. Dataset APIs discover the real `.idx`
+        # under the prefix; forcing `visus.idx` breaks datasets whose descriptor is named e.g.
+        # `07180827_0000_F0001.idx`.
 
         if endpoint_url:
             parsed = urlparse(endpoint_url if "://" in endpoint_url else f"https://{endpoint_url}")

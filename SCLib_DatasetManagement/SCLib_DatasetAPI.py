@@ -456,6 +456,68 @@ def _is_folder_like_s3_key(raw_key: str) -> bool:
     leaf = key.split("/")[-1]
     return "." not in leaf
 
+
+def _list_single_idx_under_prefix(s3: Any, bucket: str, prefix: str) -> Optional[str]:
+    """Return the sole `.idx` key under prefix, or None; raise if multiple."""
+    prefix = (prefix or "").lstrip("/")
+    if not prefix:
+        return None
+    if prefix and not prefix.endswith("/"):
+        prefix = prefix + "/"
+    listed = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
+    idx_keys = sorted(
+        [
+            (obj.get("Key") or "")
+            for obj in listed.get("Contents", [])
+            if isinstance(obj.get("Key"), str) and obj.get("Key", "").lower().endswith(".idx")
+        ]
+    )
+    if len(idx_keys) == 1:
+        return idx_keys[0]
+    if len(idx_keys) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Multiple .idx files found under the provided S3 prefix. "
+                "Please provide an exact s3://.../.idx path."
+            ),
+        )
+    return None
+
+
+def _resolve_s3_idx_object_key(s3: Any, bucket: str, requested_key: str) -> str:
+    """
+    Resolve which S3 object holds the dataset IDX: try candidate keys, then list prefixes.
+    Handles legacy metadata that defaulted to .../visus.idx when the real file has another name.
+    """
+    req = (requested_key or "").lstrip("/")
+
+    for candidate in _s3_key_candidates(req):
+        try:
+            s3.head_object(Bucket=bucket, Key=candidate)
+            return candidate
+        except Exception:
+            continue
+
+    if _is_folder_like_s3_key(req) and req.strip("/"):
+        found = _list_single_idx_under_prefix(s3, bucket, req)
+        if found:
+            return found
+
+    leaf = req.rsplit("/", 1)[-1] if req else ""
+    if leaf.lower() == "visus.idx" and "/" in req:
+        parent = req.rsplit("/", 1)[0]
+        found = _list_single_idx_under_prefix(s3, bucket, parent)
+        if found:
+            return found
+
+    candidate_summary = ", ".join(_s3_key_candidates(req))
+    raise HTTPException(
+        status_code=404,
+        detail=f"S3 dataset object not found. Tried keys: {candidate_summary}",
+    )
+
+
 def _resolved_idx_target_dir(dataset_uuid: str) -> Tuple[str, Path]:
     config = get_config()
     converted_root = ""
@@ -739,41 +801,7 @@ def _build_and_store_resolved_idx(
         client_kwargs["endpoint_url"] = endpoint_url
     s3 = boto3.client(**client_kwargs)
 
-    resolved_key = None
-    for candidate in _s3_key_candidates(requested_key):
-        try:
-            s3.head_object(Bucket=bucket, Key=candidate)
-            resolved_key = candidate
-            break
-        except Exception:
-            continue
-
-    if not resolved_key and _is_folder_like_s3_key(requested_key):
-        prefix = (requested_key or "").lstrip("/")
-        if prefix and not prefix.endswith("/"):
-            prefix = prefix + "/"
-        listed = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
-        idx_keys = sorted(
-            [
-                (obj.get("Key") or "")
-                for obj in listed.get("Contents", [])
-                if isinstance(obj.get("Key"), str) and obj.get("Key", "").lower().endswith(".idx")
-            ]
-        )
-        if len(idx_keys) == 1:
-            resolved_key = idx_keys[0]
-        elif len(idx_keys) > 1:
-            raise HTTPException(
-                status_code=400,
-                detail="Multiple .idx files found under prefix; provide exact s3://.../.idx path."
-            )
-
-    if not resolved_key:
-        candidate_summary = ", ".join(_s3_key_candidates(requested_key))
-        raise HTTPException(
-            status_code=404,
-            detail=f"S3 dataset object not found. Tried keys: {candidate_summary}"
-        )
+    resolved_key = _resolve_s3_idx_object_key(s3, bucket, requested_key)
 
     idx_obj = s3.get_object(Bucket=bucket, Key=resolved_key)
     idx_text = idx_obj["Body"].read().decode("utf-8")
@@ -1810,52 +1838,7 @@ async def presign_s3_dataset_url(
 
         # Validate and resolve to an existing key when credentials are available.
         # This prevents returning signed URLs to empty folder-marker objects.
-        resolved_key = None
-        for candidate in _s3_key_candidates(requested_key):
-            try:
-                s3.head_object(Bucket=bucket, Key=candidate)
-                resolved_key = candidate
-                break
-            except Exception:
-                continue
-
-        # If direct candidates fail and URI looks like a folder, try auto-discovery
-        # of an IDX object under that prefix.
-        if not resolved_key and _is_folder_like_s3_key(requested_key):
-            prefix = (requested_key or "").lstrip("/")
-            if prefix and not prefix.endswith("/"):
-                prefix = prefix + "/"
-            try:
-                listed = s3.list_objects_v2(Bucket=bucket, Prefix=prefix, MaxKeys=1000)
-                idx_keys = sorted(
-                    [
-                        (obj.get("Key") or "")
-                        for obj in listed.get("Contents", [])
-                        if isinstance(obj.get("Key"), str) and obj.get("Key", "").lower().endswith(".idx")
-                    ]
-                )
-                if len(idx_keys) == 1:
-                    resolved_key = idx_keys[0]
-                elif len(idx_keys) > 1:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            "Multiple .idx files found under the provided S3 prefix. "
-                            "Please provide an exact s3://.../.idx path."
-                        )
-                    )
-            except HTTPException:
-                raise
-            except Exception:
-                # Keep fallback behavior below.
-                pass
-
-        if not resolved_key:
-            candidate_summary = ", ".join(_s3_key_candidates(requested_key))
-            raise HTTPException(
-                status_code=404,
-                detail=f"S3 dataset object not found. Tried keys: {candidate_summary}"
-            )
+        resolved_key = _resolve_s3_idx_object_key(s3, bucket, requested_key)
 
         signed_url = s3.generate_presigned_url(
             ClientMethod="get_object",
