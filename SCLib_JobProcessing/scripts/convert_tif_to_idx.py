@@ -44,13 +44,13 @@ def process_tif_as_time(tif_filename,each_time, output_idx_dir,num_timesteps=0):
     if depth>=2:
         if not os.path.exists('visus.idx'):
             print('creating idx file')
-            db = CreateIdx(url='visus.idx', dims=[width, height,depth], fields=fields, time=[0, num_timesteps, "time%0000d/"])
+            db = CreateIdx(url='visus.idx', dims=[width, height,depth], fields=fields, compression='zip', arco='2mb', time=[0, num_timesteps, "time%0000d/"])
         else:
             db=LoadDataset('visus.idx')
     if depth<2:
         if not os.path.exists('visus.idx'):
             print('creating idx file')
-            db = CreateIdx(url='visus.idx', dims=[width, height], fields=fields, time=[0, num_timesteps, "time%0000d/"])
+            db = CreateIdx(url='visus.idx', dims=[width, height], fields=fields, compression='zip', arco='2mb', time=[0, num_timesteps, "time%0000d/"])
         else:
             db=LoadDataset('visus.idx')
     db.write(image_stack_data, time=each_time)
@@ -75,13 +75,13 @@ def process_tif_as_stack(tif_filename,depth,all_data, output_idx_dir ,num_steps=
     if depth>=2:
         if not os.path.exists('visus.idx'):
             print('creating idx file')
-            db = CreateIdx(url='visus.idx', dims=[width, height,depth], fields=fields, time=[0, num_steps, "time%0000d/"])
+            db = CreateIdx(url='visus.idx', dims=[width, height,depth], fields=fields, compression='zip', arco='2mb', time=[0, num_steps, "time%0000d/"])
         else:
             db=LoadDataset('visus.idx')
     if depth<2:
         if not os.path.exists('visus.idx'):
             print('creating idx file')
-            db = CreateIdx(url='visus.idx', dims=[width, height], fields=fields, time=[0, num_steps, "time%0000d/"])
+            db = CreateIdx(url='visus.idx', dims=[width, height], fields=fields, compression='zip', arco='2mb', time=[0, num_steps, "time%0000d/"])
         else:
             db=LoadDataset('visus.idx')
     timesteps=[int(it) for it in db.getTimesteps()]

@@ -89,7 +89,8 @@ def convert_hdf5_to_idx(src_filename, idx_filename,input_dir):
             url=idx_filename,
             dims=dims,
             fields=[field],
-            compression="raw")
+            arco="2mb",
+            compression="zip")
 
         print(f"Dataset created with dimensions: {W}x{H}x{D}")
         db.write(data)

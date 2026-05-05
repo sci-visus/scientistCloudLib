@@ -108,7 +108,7 @@ elif len(sorted_tif_filenames) == 1:
         field=ov.Field("data" ,f"uint8[{bandCount}]",'row_major')
         bitmask=ov.DatasetBitmask.guess(ord('V'),ov.PointNi.fromString(f"{sizeX} {sizeY}"), True).toString()
         assert(bitmask.endswith("01") or bitmask.endswith("10"))
-        db=ov.CreateIdx(url=dst, dim=2, dims=[sizeX,sizeY], fields=[field], arco="2mb", compression="raw", bitmask=bitmask)  # first write uncompressed
+        db=ov.CreateIdx(url=dst, dim=2, dims=[sizeX,sizeY], fields=[field], arco="2mb", compression="zip", bitmask=bitmask)  # create ARCO + zip directly
         print(f"OpenVisus {dst} created")
         #db = CreateIdx(url='visus.idx', dims=[width, height], fields=fields, time=[0, num_steps, "time%0000d/"])
     else:
@@ -198,7 +198,7 @@ elif len(sorted_tif_filenames) > 1:
         field=ov.Field("data" ,f"uint8[{bandCount}]",'row_major')
         bitmask=ov.DatasetBitmask.guess(ord('V'),ov.PointNi.fromString(f"{sizeX} {sizeY}"), True).toString()
         assert(bitmask.endswith("01") or bitmask.endswith("10"))
-        db=ov.CreateIdx(url=dst, dim=2, dims=[sizeX,sizeY], fields=[field], arco="2mb", compression="raw", bitmask=bitmask)  # first write uncompressed
+        db=ov.CreateIdx(url=dst, dim=2, dims=[sizeX,sizeY], fields=[field], arco="2mb", compression="zip", bitmask=bitmask)  # create ARCO + zip directly
         print(f"OpenVisus {dst} created")
 
     else:

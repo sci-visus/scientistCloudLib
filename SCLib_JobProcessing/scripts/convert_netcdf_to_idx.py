@@ -53,13 +53,13 @@ def convert_netcdf_to_idx(src_filename,variable, idx_filename ):
 
     ### Create OpenVisus File
     import OpenVisus as ov
-    arco="modvisus"
+    arco="2mb"
 
     db=ov.CreateIdx(
         url=idx_filename,
         dims=dims,
         fields=[ov.Field("data",str(data.dtype),"row_major")],
-        compression="raw",
+        compression="zip",
         time=[0,num_timesteps,"time_%04d/"],
         arco=arco)
 

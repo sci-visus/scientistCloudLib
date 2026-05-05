@@ -168,7 +168,8 @@ def Convert4DNexus_simple(Xs_dataset_name, Ys_dataset_name, presample_dataset_na
                     url=idx_filename,
                     dims=list(reversed(volume_data.shape)),
                     fields=[field],
-                    compression="raw")
+                    arco="2mb",
+                    compression="zip")
                 
                 print(f"📝 Creating IDX file: {idx_filename}")
                 print(f"📐 Dimensions: {list(reversed(volume_data.shape))}")
