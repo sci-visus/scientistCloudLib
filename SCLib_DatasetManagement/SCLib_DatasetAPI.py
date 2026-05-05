@@ -21,6 +21,8 @@ import base64
 import json
 import hashlib
 import threading
+import subprocess
+import shutil
 
 try:
     from ..SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
@@ -492,6 +494,37 @@ def _extract_filename_template(idx_text: str) -> str:
     return ""
 
 
+def _extract_arco_value(idx_text: str) -> int:
+    """
+    Extract idx (arco) numeric value.
+    In OpenVisus idx files, arco is typically:
+      (arco)
+      0
+    or occasionally:
+      (arco) 0
+    """
+    lines = (idx_text or "").splitlines()
+    for i, line in enumerate(lines):
+        s = (line or "").strip()
+        if s.lower().startswith("(arco)"):
+            rest = s[len("(arco)") :].strip()
+            if rest:
+                m = re.search(r"(-?\d+)", rest)
+                if m:
+                    return int(m.group(1))
+            # Look ahead for next non-empty line
+            for j in range(i + 1, len(lines)):
+                nxt = (lines[j] or "").strip()
+                if not nxt:
+                    continue
+                m2 = re.search(r"(-?\d+)", nxt)
+                if m2:
+                    return int(m2.group(1))
+                break
+            break
+    return 0
+
+
 def _filename_template_to_s3_key_pattern(template: str, bucket: str, resolved_idx_key: str = "") -> str:
     raw = (template or "").strip()
     if not raw:
@@ -798,9 +831,135 @@ def _build_and_store_resolved_idx(
         key_prefix,
     )
     resolved_idx_text = _replace_filename_template(idx_text, full_template)
+    # If the source idx is not ARCO (arco == 0), convert it into a cloud-friendly ARCO layout.
+    # We convert using OpenVisus while pointing the src idx to the object-proxy URL template,
+    # so blocks are fetched from the authorized proxy during conversion (no full local download).
+    def _parse_arco_value(idx_txt: str) -> int:
+        lines = (idx_txt or "").splitlines()
+        for i, line in enumerate(lines):
+            s = (line or "").strip()
+            if s.lower().startswith("(arco)"):
+                # Value might be on the same line or on a following line.
+                rest = s[len("(arco)") :].strip()
+                if rest:
+                    m = re.search(r"(-?\d+)", rest)
+                    if m:
+                        return int(m.group(1))
+                # Look ahead to the first non-empty value line
+                for j in range(i + 1, len(lines)):
+                    nxt = (lines[j] or "").strip()
+                    if not nxt:
+                        continue
+                    m2 = re.search(r"(-?\d+)", nxt)
+                    if m2:
+                        return int(m2.group(1))
+                    break
+                break
+        return 0
+
+    arco_value = _parse_arco_value(idx_text)
+    arco_size = str(os.getenv("OPENVISUS_ARCO", "2mb")).strip() or "2mb"
+    compression = str(os.getenv("OPENVISUS_COMPRESSION", "zip")).strip() or "zip"
 
     target_dir.mkdir(parents=True, exist_ok=True)
     resolved_idx_path = target_dir / output_name
+
+    if arco_value == 0:
+        work_root = target_dir.parent / f"{target_dir.name}__arco_work__{uuid.uuid4().hex[:8]}"
+        src_dir = work_root / "src"
+        dst_dir = work_root / "dst"
+        src_dir.mkdir(parents=True, exist_ok=True)
+        dst_dir.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Write a temporary src idx for OpenVisus copy-dataset that reads via object-proxy.
+            src_idx_path = src_dir / output_name
+            src_idx_path.write_text(resolved_idx_text, encoding="utf-8")
+
+            # Convert to ARCO.
+            # NOTE: OpenVisus CLI usage is: copy-dataset [--arco] src dst
+            subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "OpenVisus",
+                    "copy-dataset",
+                    "--arco",
+                    arco_size,
+                    str(src_idx_path),
+                    str(dst_dir),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            # Find the generated idx filename (OpenVisus typically outputs visus.idx).
+            idx_candidates = [
+                p
+                for p in dst_dir.rglob("*")
+                if p.is_file() and p.name.lower() == output_name.lower()
+            ]
+            if not idx_candidates:
+                idx_candidates = [p for p in dst_dir.rglob("*.idx") if p.is_file()]
+            if not idx_candidates:
+                raise RuntimeError(f"ARCO conversion completed but no *.idx found in {dst_dir}")
+
+            dst_idx_path = idx_candidates[0]
+
+            # Compress output dataset in-place (relative bin objects next to the idx).
+            subprocess.run(
+                [
+                    "python3",
+                    "-m",
+                    "OpenVisus",
+                    "compress-dataset",
+                    "--compression",
+                    compression,
+                    str(dst_idx_path),
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            # Replace target_dir with the converted output.
+            if target_dir.exists():
+                shutil.rmtree(target_dir)
+            shutil.copytree(dst_dir, target_dir)
+
+            # Normalize path in case OpenVisus used a different idx name.
+            if not resolved_idx_path.exists():
+                # Prefer exact output_name, otherwise keep first idx we find.
+                fixed_candidates = [p for p in target_dir.rglob("*.idx") if p.is_file()]
+                if fixed_candidates:
+                    resolved_idx_path = fixed_candidates[0]
+            return {
+                "resolved_key": resolved_key,
+                "filename_template": full_template,
+                "resolved_idx_path": str(resolved_idx_path),
+            }
+        except Exception as arco_exc:
+            logger.warning(
+                "ARCO conversion failed for dataset_uuid=%s (arco_size=%s, compression=%s). Falling back to non-ARCO resolved idx. error=%s",
+                str(target_dir.name),
+                arco_size,
+                compression,
+                arco_exc,
+            )
+            # Ensure the resolved idx exists even if ARCO conversion fails.
+            resolved_idx_path.write_text(resolved_idx_text, encoding="utf-8")
+            return {
+                "resolved_key": resolved_key,
+                "filename_template": full_template,
+                "resolved_idx_path": str(resolved_idx_path),
+            }
+        finally:
+            shutil.rmtree(work_root, ignore_errors=True)
+
+    # Default: ARCO already present, just write the object-proxy resolved idx.
     resolved_idx_path.write_text(resolved_idx_text, encoding="utf-8")
     return {
         "resolved_key": resolved_key,
@@ -1868,7 +2027,8 @@ async def create_openvisus_resolved_idx(
             try:
                 existing_text = resolved_idx_path.read_text(encoding="utf-8", errors="ignore")
                 has_proxy_template = "/api/v1/datasets/s3/object-proxy" in existing_text
-                if has_proxy_template:
+                existing_arco = _extract_arco_value(existing_text)
+                if has_proxy_template or existing_arco != 0:
                     return {
                         "success": True,
                         "status": "ready",

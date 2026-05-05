@@ -23,14 +23,14 @@ try:
     from .SCLib_Config import get_config, get_collection_name, get_database_name
     from .SCLib_MongoConnection import get_collection_by_type, mongo_collection_by_type_context
     from .SCLib_UploadJobTypes import (
-        UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress,
+        UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress, SensorType,
         UploadJobManager, get_tool_config
     )
 except ImportError:
     from SCLib_Config import get_config, get_collection_name, get_database_name
     from SCLib_MongoConnection import get_collection_by_type, mongo_collection_by_type_context
     from SCLib_UploadJobTypes import (
-        UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress,
+        UploadJobConfig, UploadSourceType, UploadStatus, UploadProgress, SensorType,
         UploadJobManager, get_tool_config
     )
 
@@ -642,16 +642,67 @@ class SCLib_UploadProcessor:
         self._download_from_google_drive_oauth(job_id, service, file_id, job_config.destination_path, user_email)
     
     def _process_s3_upload(self, job_id: str, job_config: UploadJobConfig):
-        """Register S3 as remote link (no server-side data copy)."""
+        """Register S3 dataset and optionally materialize files for conversion."""
         bucket_name = job_config.source_config.get("bucket_name")
         object_key = job_config.source_config.get("object_key") or ""
         if not bucket_name:
             raise ValueError("S3 registration requires bucket_name")
 
-        # Keep status flow consistent with URL-based remote datasets.
         remote_uri = f"s3://{bucket_name}/{str(object_key).lstrip('/')}" if object_key else f"s3://{bucket_name}"
         logger.info(f"Registering remote S3 dataset URI {remote_uri} for dataset {job_config.dataset_uuid}")
         self._update_job_status(job_id, UploadStatus.UPLOADING)
+
+        sensor_name = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper()
+        should_materialize_for_conversion = bool(
+            job_config.convert and sensor_name == SensorType.IDX.value
+        )
+        if not should_materialize_for_conversion:
+            return
+
+        source_cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+        access_key_id = str(source_cfg.get("access_key_id") or "").strip()
+        secret_access_key = str(source_cfg.get("secret_access_key") or "").strip()
+        endpoint_url = str(source_cfg.get("endpoint_url") or "").strip() or None
+        region_name = str(source_cfg.get("region_name") or "us-east-1").strip() or "us-east-1"
+        path_style = bool(source_cfg.get("path_style", True))
+
+        if not access_key_id or not secret_access_key:
+            raise ValueError(
+                "S3 IDX conversion requires access_key_id and secret_access_key to download source dataset"
+            )
+
+        # Download dataset into upload/<uuid>/ so the background conversion pipeline can run.
+        # If object_key points to an idx file, fetch the parent prefix recursively (idx + bins + sidecars).
+        key = str(object_key or "").lstrip("/")
+        if key.lower().endswith(".idx"):
+            prefix = key.rsplit("/", 1)[0] + "/" if "/" in key else ""
+        elif key and not key.endswith("/"):
+            prefix = key + "/"
+        else:
+            prefix = key
+
+        destination_dir = str(job_config.destination_path or "").strip()
+        if not destination_dir:
+            raise ValueError("Missing destination_path for S3 IDX materialization")
+        os.makedirs(destination_dir, exist_ok=True)
+
+        logger.info(
+            "Downloading S3 IDX dataset for background conversion: bucket=%s prefix=%s dest=%s",
+            bucket_name,
+            prefix,
+            destination_dir,
+        )
+        self._download_from_s3_aws_cli(
+            job_id=job_id,
+            bucket_name=bucket_name,
+            object_key=prefix,
+            dest_path=destination_dir,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
+            path_style=path_style,
+        )
     
     def _process_url_upload(self, job_id: str, job_config: UploadJobConfig):
         """Process URL-based upload by storing URL in database instead of downloading."""
@@ -1554,7 +1605,13 @@ scope = drive
                 if status == "completed":
                     # Check if conversion is needed
                     is_remote_link = bool(job_config and job_config.source_type in [UploadSourceType.S3, UploadSourceType.URL])
-                    if job_config and job_config.convert and not is_remote_link:
+                    is_s3_idx_conversion = bool(
+                        job_config
+                        and job_config.source_type == UploadSourceType.S3
+                        and str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper() == SensorType.IDX.value
+                        and job_config.convert
+                    )
+                    if job_config and job_config.convert and (not is_remote_link or is_s3_idx_conversion):
                         # Set status to "conversion queued" instead of "done"
                         update_data["status"] = "conversion queued"
                         update_data["data_conversion_needed"] = True

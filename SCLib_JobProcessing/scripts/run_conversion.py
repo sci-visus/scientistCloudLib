@@ -14,6 +14,7 @@ import logging
 import argparse
 import tempfile
 import json
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -348,6 +349,123 @@ class DatasetConverter:
                         if file.is_file():
                             os.chmod(file, 0o644)
                 break
+
+        # Ensure visus.idx exists and convert to ARCO if needed.
+        self._convert_idx_to_arco_if_needed()
+
+    def _extract_arco_value(self, idx_path: Path) -> int:
+        """Read (arco) value from idx file. Returns 0 when missing/invalid."""
+        try:
+            lines = idx_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        except Exception:
+            return 0
+
+        for i, line in enumerate(lines):
+            s = (line or "").strip()
+            if s.lower().startswith("(arco)"):
+                rest = s[len("(arco)") :].strip()
+                if rest:
+                    m = re.search(r"(-?\d+)", rest)
+                    if m:
+                        return int(m.group(1))
+                for j in range(i + 1, len(lines)):
+                    nxt = (lines[j] or "").strip()
+                    if not nxt:
+                        continue
+                    m2 = re.search(r"(-?\d+)", nxt)
+                    if m2:
+                        return int(m2.group(1))
+                    break
+                break
+        return 0
+
+    def _convert_idx_to_arco_if_needed(self) -> None:
+        """
+        Convert non-ARCO visus.idx datasets in output_dir to ARCO layout.
+        This keeps the existing background conversion pipeline but ensures
+        S3 IDX datasets become cloud-friendly before dashboards open.
+        """
+        visus_idx = self.output_dir / "visus.idx"
+        if not visus_idx.exists():
+            logger.info("No visus.idx found after IDX staging; skipping ARCO conversion")
+            return
+
+        arco_value = self._extract_arco_value(visus_idx)
+        if arco_value != 0:
+            logger.info(f"Dataset already ARCO (arco={arco_value}); skipping ARCO conversion")
+            return
+
+        arco_size = str(os.getenv("OPENVISUS_ARCO", "2mb")).strip() or "2mb"
+        compression = str(os.getenv("OPENVISUS_COMPRESSION", "zip")).strip() or "zip"
+        logger.info(f"Converting non-ARCO IDX dataset to ARCO (arco={arco_size}, compression={compression})")
+
+        tmp_dir = self.output_dir.parent / f"{self.output_dir.name}__arco_tmp"
+        backup_dir = self.output_dir.parent / f"{self.output_dir.name}__pre_arco_backup"
+
+        if tmp_dir.exists():
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+        if backup_dir.exists():
+            shutil.rmtree(backup_dir, ignore_errors=True)
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Convert to ARCO in temp destination.
+        subprocess.run(
+            [
+                "python3",
+                "-m",
+                "OpenVisus",
+                "copy-dataset",
+                "--arco",
+                arco_size,
+                str(visus_idx),
+                str(tmp_dir),
+            ],
+            check=True,
+        )
+
+        # Locate converted idx and compress it.
+        converted_idx = tmp_dir / "visus.idx"
+        if not converted_idx.exists():
+            candidates = [p for p in tmp_dir.rglob("*.idx") if p.is_file()]
+            if not candidates:
+                raise ConversionError(f"ARCO conversion produced no idx in {tmp_dir}")
+            converted_idx = candidates[0]
+
+        subprocess.run(
+            [
+                "python3",
+                "-m",
+                "OpenVisus",
+                "compress-dataset",
+                "--compression",
+                compression,
+                str(converted_idx),
+            ],
+            check=True,
+        )
+
+        # Swap converted output into output_dir atomically-ish.
+        shutil.move(str(self.output_dir), str(backup_dir))
+        try:
+            shutil.move(str(tmp_dir), str(self.output_dir))
+
+            # Preserve sidecar metadata files if converter did not emit them.
+            for ext in ("*.txt", "*.csv"):
+                for src in backup_dir.glob(ext):
+                    dst = self.output_dir / src.name
+                    if not dst.exists():
+                        shutil.copy2(src, dst)
+
+            logger.info(f"ARCO conversion completed: {self.output_dir}")
+        except Exception:
+            # Restore original output on failure.
+            if self.output_dir.exists():
+                shutil.rmtree(self.output_dir, ignore_errors=True)
+            shutil.move(str(backup_dir), str(self.output_dir))
+            raise
+        finally:
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+            shutil.rmtree(backup_dir, ignore_errors=True)
     
     def _convert_rgb_drone(self) -> None:
         """Convert RGB drone images using slampy."""
