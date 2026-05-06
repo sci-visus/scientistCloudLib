@@ -914,7 +914,20 @@ class SCLib_UploadProcessor:
                     dest_file = dest_path
                     # Ensure parent directory exists
                     os.makedirs(os.path.dirname(dest_file), exist_ok=True)
-                shutil.copy2(source_path, dest_file)
+                # Chunked/materialized flows can already place file at final destination.
+                # Treat same-source/destination as already uploaded instead of raising.
+                try:
+                    same_file = os.path.samefile(source_path, dest_file)
+                except Exception:
+                    same_file = os.path.abspath(source_path) == os.path.abspath(dest_file)
+                if not same_file:
+                    shutil.copy2(source_path, dest_file)
+                else:
+                    logger.info(
+                        "Source and destination are identical for job %s (%s); skipping copy",
+                        job_id,
+                        source_path,
+                    )
             else:
                 shutil.copytree(source_path, dest_path, dirs_exist_ok=True)
             
