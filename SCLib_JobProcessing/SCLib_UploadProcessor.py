@@ -286,17 +286,28 @@ class SCLib_UploadProcessor:
         """
         try:
             with mongo_collection_by_type_context('visstoredatas') as collection:
-                # Find datasets with status "uploading" that need processing
-                # Process all source types (google_drive, s3, url, local)
-                datasets_to_upload = collection.find({
-                    'status': 'uploading'
-                }).limit(1)  # Process one at a time
-                
-                dataset = next(datasets_to_upload, None)
-                if dataset:
-                    logger.info(f"Found dataset with status 'uploading' that needs processing: {dataset['uuid']}")
-                    # Reconstruct job config from dataset and process it
+                # Find candidate datasets with status "uploading" that need processing.
+                # Iterate a small batch so one stale uploading dataset does not starve others.
+                datasets_to_upload = collection.find(
+                    {'status': 'uploading'}
+                ).sort('updated_at', -1).limit(25)
+
+                for dataset in datasets_to_upload:
+                    dataset_uuid = dataset.get('uuid', '<unknown>')
+                    logger.info(
+                        "Found dataset with status 'uploading' that needs processing: %s",
+                        dataset_uuid
+                    )
+                    before_updated_at = dataset.get('updated_at')
+
+                    # Reconstruct job config from dataset and process it.
                     self._process_dataset_upload_from_status(dataset)
+
+                    # Process only one actionable dataset per tick.
+                    refreshed = collection.find_one({'uuid': dataset_uuid}, {'updated_at': 1})
+                    after_updated_at = (refreshed or {}).get('updated_at')
+                    if before_updated_at != after_updated_at:
+                        break
         except Exception as e:
             logger.error(f"Error processing status-based uploads: {e}")
     
