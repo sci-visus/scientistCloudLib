@@ -1409,6 +1409,12 @@ scope = drive
                                 "status": "uploading",
                                 "user_id": job_config.user_email,  # Ensure user_id is set for compatibility
                                 "server": dataset_server_flag,
+                                # Keep processing pointers aligned with the latest submitted file/job.
+                                # Status-based worker reconstructs job configs from top-level fields.
+                                "source_path": job_config.source_path,
+                                "destination_path": job_config.destination_path,
+                                "sensor": job_config.sensor.value,
+                                "convert": job_config.convert,
                                 "updated_at": datetime.utcnow()
                             },
                             "$push": {
