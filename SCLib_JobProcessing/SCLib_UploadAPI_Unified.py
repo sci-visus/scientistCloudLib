@@ -21,11 +21,13 @@ import logging
 import aiofiles
 from pathlib import Path
 import math
+from pymongo import ReturnDocument
 
 try:
     from .SCLib_Config import get_config
     from .SCLib_UploadProcessor import get_upload_processor
     from .SCLib_MongoConnection import mongo_collection_by_type_context
+    from .SCLib_MongoConnection import get_mongo_database
     from .SCLib_UploadJobTypes import (
         UploadJobConfig, UploadSourceType, SensorType, UploadStatus,
         create_local_upload_job, create_google_drive_upload_job,
@@ -35,6 +37,7 @@ except ImportError:
     from SCLib_Config import get_config
     from SCLib_UploadProcessor import get_upload_processor
     from SCLib_MongoConnection import mongo_collection_by_type_context
+    from SCLib_MongoConnection import get_mongo_database
     from SCLib_UploadJobTypes import (
         UploadJobConfig, UploadSourceType, SensorType, UploadStatus,
         create_local_upload_job, create_google_drive_upload_job,
@@ -157,6 +160,7 @@ class JobStatusResponse(BaseModel):
     """Response for job status."""
     job_id: str = Field(..., description="Job identifier")
     status: UploadStatus = Field(..., description="Current job status")
+    canonical_state: str = Field(..., description="Canonical transfer state")
     progress_percentage: float = Field(0.0, ge=0.0, le=100.0, description="Progress percentage")
     bytes_uploaded: Optional[int] = Field(None, description="Bytes uploaded so far")
     bytes_total: Optional[int] = Field(None, description="Total bytes to upload")
@@ -176,24 +180,65 @@ class SupportedSourcesResponse(BaseModel):
 # Helper functions
 def get_upload_session(upload_id: str) -> Dict[str, Any]:
     """Get upload session data."""
-    if upload_id not in upload_sessions:
+    if upload_id in upload_sessions:
+        return upload_sessions[upload_id]
+    db = get_mongo_database()
+    doc = db["upload_sessions"].find_one({"upload_id": upload_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="Upload session not found")
-    return upload_sessions[upload_id]
+    session = _deserialize_session(doc)
+    upload_sessions[upload_id] = session
+    return session
 
 def create_upload_session(upload_id: str, data: Dict[str, Any]) -> None:
     """Create new upload session."""
-    upload_sessions[upload_id] = {
+    session = {
         **data,
-        'created_at': datetime.now(),
-        'uploaded_chunks': set(),
-        'chunk_hashes': {}
+        'created_at': datetime.now(timezone.utc),
+        'uploaded_chunks': set(data.get('uploaded_chunks', [])),
+        'chunk_hashes': data.get('chunk_hashes', {}),
+        'updated_at': datetime.now(timezone.utc),
     }
+    upload_sessions[upload_id] = session
+    db = get_mongo_database()
+    db["upload_sessions"].find_one_and_update(
+        {"upload_id": upload_id},
+        {"$set": _serialize_session(upload_id, session)},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
 
 def update_upload_session(upload_id: str, chunk_index: int, chunk_hash: str) -> None:
     """Update upload session with new chunk."""
-    if upload_id in upload_sessions:
-        upload_sessions[upload_id]['uploaded_chunks'].add(chunk_index)
-        upload_sessions[upload_id]['chunk_hashes'][chunk_index] = chunk_hash
+    session = get_upload_session(upload_id)
+    session['uploaded_chunks'].add(chunk_index)
+    session['chunk_hashes'][str(chunk_index)] = chunk_hash
+    session['updated_at'] = datetime.now(timezone.utc)
+    db = get_mongo_database()
+    db["upload_sessions"].update_one(
+        {"upload_id": upload_id},
+        {"$set": _serialize_session(upload_id, session)},
+        upsert=True,
+    )
+
+def delete_upload_session(upload_id: str) -> None:
+    upload_sessions.pop(upload_id, None)
+    db = get_mongo_database()
+    db["upload_sessions"].delete_one({"upload_id": upload_id})
+
+def _serialize_session(upload_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
+    serializable = dict(session)
+    serializable.pop("content", None)
+    serializable["upload_id"] = upload_id
+    serializable["uploaded_chunks"] = sorted(list(serializable.get("uploaded_chunks", set())))
+    serializable["updated_at"] = datetime.now(timezone.utc)
+    return serializable
+
+def _deserialize_session(doc: Dict[str, Any]) -> Dict[str, Any]:
+    session = dict(doc)
+    session.pop("_id", None)
+    session["uploaded_chunks"] = set(session.get("uploaded_chunks", []))
+    return session
 
 def determine_upload_type(file_size: int) -> str:
     """Determine if file should use standard or chunked upload."""
@@ -202,6 +247,24 @@ def determine_upload_type(file_size: int) -> str:
 # Dependency to get upload processor
 def get_processor():
     return upload_processor
+
+def canonical_state_from_status(status: str) -> str:
+    mapping = {
+        "queued": "queued",
+        "initializing": "queued",
+        "uploading": "uploading",
+        "processing": "uploading",
+        "completed": "uploaded",
+        "conversion queued": "conversion_queued",
+        "converting": "converting",
+        "done": "ready",
+        "ready": "ready",
+        "failed": "failed",
+        "conversion failed": "failed",
+        "cancelled": "cancelled",
+        "canceled": "cancelled",
+    }
+    return mapping.get(str(status or "").strip().lower(), "queued")
 
 # API Endpoints
 
@@ -417,24 +480,35 @@ async def upload_file(
         if not file.filename:
             raise HTTPException(status_code=400, detail="No file selected")
         
-        # Read file content to determine size
-        content = await file.read()
-        file_size = len(content)
+        upload_uuid = dataset_identifier if (dataset_identifier and not add_to_existing) else (str(uuid.uuid4()) if not dataset_identifier else None)
+        temp_dir = tempfile.mkdtemp()
+        target_name = file.filename
+        staged_file = os.path.join(temp_dir, target_name)
+        file_size = 0
+        with open(staged_file, "wb") as out:
+            while True:
+                chunk = await file.read(1024 * 1024 * 8)
+                if not chunk:
+                    break
+                out.write(chunk)
+                file_size += len(chunk)
         
         # Determine upload type based on file size
         upload_type = determine_upload_type(file_size)
         
         if upload_type == "chunked":
-            # Use chunked upload for large files
+            with open(staged_file, "rb") as staged:
+                chunked_content = staged.read()
             return await _handle_chunked_upload(
-                content, file.filename, file_size, user_email, dataset_name,
+                chunked_content, file.filename, file_size, user_email, dataset_name,
                 sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
             )
         else:
-            # Use standard upload for smaller files
             return await _handle_standard_upload(
-                content, file.filename, user_email, dataset_name,
-                sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
+                b"", file.filename, user_email, dataset_name,
+                sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor,
+                staged_file_path=staged_file,
+                staged_file_size=file_size,
             )
         
     except Exception as e:
@@ -558,7 +632,9 @@ async def upload_file_by_path(
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, is_downloadable: str, folder: Optional[str],
-    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
+    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any,
+    staged_file_path: Optional[str] = None,
+    staged_file_size: Optional[int] = None,
 ) -> UploadResponse:
     """Handle standard upload for smaller files."""
     # For large files, we should work directly with the original file path
@@ -569,11 +645,12 @@ async def _handle_standard_upload(
     # for local files, which would eliminate the need for /tmp copying.
     
     # Save uploaded file to temporary location (unavoidable with current API design)
-    temp_dir = tempfile.mkdtemp()
-    temp_file_path = os.path.join(temp_dir, filename)
-    
-    with open(temp_file_path, "wb") as buffer:
-        buffer.write(content)
+    temp_file_path = staged_file_path
+    if not temp_file_path:
+        temp_dir = tempfile.mkdtemp()
+        temp_file_path = os.path.join(temp_dir, filename)
+        with open(temp_file_path, "wb") as buffer:
+            buffer.write(content)
     
     # Create local upload job
     # Resolve dataset identifier to UUID if provided
@@ -635,7 +712,8 @@ async def _handle_standard_upload(
         raise HTTPException(status_code=500, detail=f"Failed to create upload job: {str(e)}")
     
     # Estimate duration based on file size
-    file_size_mb = len(content) / (1024 * 1024)
+    file_size_bytes = staged_file_size if staged_file_size is not None else len(content)
+    file_size_mb = file_size_bytes / (1024 * 1024)
     estimated_duration = max(60, int(file_size_mb * 2))  # 2 seconds per MB, minimum 1 minute
     
     return UploadResponse(
@@ -696,7 +774,6 @@ async def _handle_chunked_upload(
         'dataset_uuid': upload_uuid,  # Include dataset UUID for directory uploads
         'total_chunks': total_chunks,
         'chunk_size': CHUNK_SIZE,
-        'content': content  # Store content for processing
     }
     
     create_upload_session(upload_id, session_data)
@@ -1088,6 +1165,7 @@ async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)
             return JobStatusResponse(
                 job_id=job_id,
                 status=UploadStatus.UPLOADING if not session.get('is_complete', False) else UploadStatus.COMPLETED,
+                canonical_state="uploading" if not session.get('is_complete', False) else "uploaded",
                 progress_percentage=progress,
                 bytes_uploaded=int(session['file_size'] * progress / 100) if progress > 0 else 0,
                 bytes_total=session['file_size'],
@@ -1120,6 +1198,7 @@ async def get_upload_status(job_id: str, processor: Any = Depends(get_processor)
             return JobStatusResponse(
                 job_id=status.job_id,
                 status=status.status,
+                canonical_state=canonical_state_from_status(status.status.value),
                 progress_percentage=status.progress_percentage,
                 bytes_uploaded=status.bytes_uploaded,
                 bytes_total=status.bytes_total,
@@ -1147,7 +1226,7 @@ async def cancel_upload(job_id: str, processor: Any = Depends(get_processor)):
                 shutil.rmtree(upload_dir)
             
             # Remove session
-            del upload_sessions[job_id]
+            delete_upload_session(job_id)
             
             return {"message": f"Chunked upload {job_id} cancelled and cleaned up"}
         else:

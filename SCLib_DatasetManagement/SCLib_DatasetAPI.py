@@ -2814,6 +2814,7 @@ async def trigger_conversion(
                 {
                     "$set": {
                         "status": "conversion queued",
+                        "canonical_state": "conversion_queued",
                         "data_conversion_needed": True,
                         "updated_at": datetime.utcnow()
                     },
@@ -3576,8 +3577,7 @@ async def update_specific_setting(
         # Allowed settings
         allowed_settings = {
             'name', 'description', 'tags', 'folder_uuid', 'team_uuid',
-            'sensor', 'dimensions', 'preferred_dashboard', 'is_public', 'is_downloadable', 'data_conversion_needed',
-            'status'  # Allow status updates for retry operations
+            'sensor', 'dimensions', 'preferred_dashboard', 'is_public', 'is_downloadable', 'data_conversion_needed'
         }
         
         if setting_name not in allowed_settings:
@@ -3588,6 +3588,12 @@ async def update_specific_setting(
             "date_updated": datetime.utcnow()
         }
         
+        if setting_name == 'status':
+            raise HTTPException(
+                status_code=400,
+                detail="Direct status mutation is not allowed. Use explicit conversion/upload endpoints."
+            )
+
         # Convert value based on setting type
         if setting_name == 'tags':
             update_data[setting_name] = [tag.strip() for tag in setting_value.split(',')]

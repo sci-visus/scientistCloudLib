@@ -15,6 +15,7 @@ import argparse
 import tempfile
 import json
 import re
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -148,12 +149,42 @@ class DatasetConverter:
             if self.upload_to_aws:
                 self._upload_to_aws(self.input_dir)
                 self._upload_to_aws(self.output_dir)
+            self._validate_output_contract()
+            self._write_success_manifest()
             
             logger.info("Conversion completed successfully")
             
         except Exception as e:
             logger.error(f"Conversion failed: {e}", exc_info=True)
             raise
+
+    def _validate_output_contract(self) -> None:
+        """Basic integrity gate before reporting conversion success."""
+        if self.sensor_type in ("4D_NEXUS", "NEXUS"):
+            return
+        if not self.output_dir.exists():
+            raise ConversionError(f"Output directory missing: {self.output_dir}")
+        if self.sensor_type == "IDX":
+            if not any(p.is_file() and p.suffix.lower() == ".idx" for p in self.output_dir.rglob("*.idx")):
+                raise ConversionError(f"IDX conversion produced no descriptor under {self.output_dir}")
+            return
+        # Generic output contract for non-IDX conversions.
+        if not any(p.is_file() for p in self.output_dir.rglob("*")):
+            raise ConversionError(f"Conversion produced no output files under {self.output_dir}")
+
+    def _write_success_manifest(self) -> None:
+        """Write a small manifest marker used for restart-safe promotion checks."""
+        if not self.output_dir.exists():
+            return
+        manifest = {
+            "status": "success",
+            "sensor": self.sensor_type,
+            "input_dir": str(self.input_dir),
+            "output_dir": str(self.output_dir),
+            "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        }
+        marker = self.output_dir / "_SUCCESS.json"
+        marker.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     
     def _unzip_if_needed(self) -> None:
         """Unzip .zip and .7z files in the input directory."""

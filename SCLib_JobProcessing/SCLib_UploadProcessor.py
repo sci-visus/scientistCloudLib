@@ -18,6 +18,7 @@ import tempfile
 import shutil
 from urllib.parse import urlparse, urlencode, parse_qs
 from urllib import request as urllib_request, error as urllib_error
+from pymongo import ReturnDocument
 
 try:
     from .SCLib_Config import get_config, get_collection_name, get_database_name
@@ -60,6 +61,23 @@ class SCLib_UploadProcessor:
         "3dvtk": "3DVTK",
         "darkmatter": "DarkMatter",
         "magicscan": "magicscan",
+    }
+    UPLOAD_LEASE_SECONDS = int(os.getenv("SC_UPLOAD_LEASE_SECONDS", "120"))
+    HEARTBEAT_SECONDS = int(os.getenv("SC_UPLOAD_HEARTBEAT_SECONDS", "10"))
+    CANONICAL_STATE_MAP = {
+        "queued": "queued",
+        "initializing": "queued",
+        "uploading": "uploading",
+        "processing": "uploading",
+        "completed": "uploaded",
+        "conversion queued": "conversion_queued",
+        "converting": "converting",
+        "done": "ready",
+        "ready": "ready",
+        "failed": "failed",
+        "conversion failed": "failed",
+        "cancelled": "cancelled",
+        "canceled": "cancelled",
     }
 
     """
@@ -286,30 +304,70 @@ class SCLib_UploadProcessor:
         """
         try:
             with mongo_collection_by_type_context('visstoredatas') as collection:
-                # Find candidate datasets with status "uploading" that need processing.
-                # Iterate a small batch so one stale uploading dataset does not starve others.
-                datasets_to_upload = collection.find(
-                    {'status': 'uploading'}
-                ).sort('updated_at', -1).limit(25)
-
-                for dataset in datasets_to_upload:
-                    dataset_uuid = dataset.get('uuid', '<unknown>')
-                    logger.info(
-                        "Found dataset with status 'uploading' that needs processing: %s",
-                        dataset_uuid
-                    )
-                    before_updated_at = dataset.get('updated_at')
-
-                    # Reconstruct job config from dataset and process it.
-                    self._process_dataset_upload_from_status(dataset)
-
-                    # Process only one actionable dataset per tick.
-                    refreshed = collection.find_one({'uuid': dataset_uuid}, {'updated_at': 1})
-                    after_updated_at = (refreshed or {}).get('updated_at')
-                    if before_updated_at != after_updated_at:
+                for _ in range(25):
+                    claimed = self._claim_next_upload_dataset(collection)
+                    if not claimed:
                         break
+                    dataset_uuid = claimed.get("uuid", "<unknown>")
+                    logger.info("Claimed upload dataset lease: %s", dataset_uuid)
+                    try:
+                        self._heartbeat_upload_lease(dataset_uuid, collection)
+                        self._process_dataset_upload_from_status(claimed)
+                    finally:
+                        self._release_upload_lease(dataset_uuid, collection)
+                    break
         except Exception as e:
             logger.error(f"Error processing status-based uploads: {e}")
+
+    def _claim_next_upload_dataset(self, collection):
+        """Atomically claim one upload dataset using a short lease."""
+        now = datetime.utcnow()
+        lease_until = now + timedelta(seconds=self.UPLOAD_LEASE_SECONDS)
+        query = {
+            "status": "uploading",
+            "$or": [
+                {"upload_lease_expires_at": {"$exists": False}},
+                {"upload_lease_expires_at": {"$lte": now}},
+            ],
+        }
+        update = {
+            "$set": {
+                "upload_lease_owner": self.worker_thread.name if self.worker_thread else f"pid:{os.getpid()}",
+                "upload_lease_expires_at": lease_until,
+                "upload_claimed_at": now,
+                "upload_heartbeat_at": now,
+                "updated_at": now,
+            }
+        }
+        return collection.find_one_and_update(
+            query,
+            update,
+            sort=[("updated_at", -1)],
+            return_document=ReturnDocument.AFTER,
+        )
+
+    def _heartbeat_upload_lease(self, dataset_uuid: str, collection) -> None:
+        now = datetime.utcnow()
+        collection.update_one(
+            {"uuid": dataset_uuid},
+            {
+                "$set": {
+                    "upload_heartbeat_at": now,
+                    "upload_lease_expires_at": now + timedelta(seconds=self.UPLOAD_LEASE_SECONDS),
+                    "updated_at": now,
+                }
+            },
+        )
+
+    def _release_upload_lease(self, dataset_uuid: str, collection) -> None:
+        collection.update_one(
+            {"uuid": dataset_uuid},
+            {"$unset": {
+                "upload_lease_owner": "",
+                "upload_lease_expires_at": "",
+                "upload_claimed_at": "",
+            }},
+        )
     
     def _process_dataset_upload_from_status(self, dataset: Dict[str, Any]):
         """Process an upload from a dataset document (status-based architecture).
@@ -1232,11 +1290,16 @@ class SCLib_UploadProcessor:
         self.active_jobs[job_id] = process
         
         try:
+            last_heartbeat = 0.0
             # Monitor progress
             while process.poll() is None:
                 if not self.running:
                     process.terminate()
                     break
+                now_ts = time.time()
+                if now_ts - last_heartbeat >= self.HEARTBEAT_SECONDS:
+                    self._touch_dataset_heartbeat(job_config.dataset_uuid)
+                    last_heartbeat = now_ts
                 
                 # Read output and parse progress
                 output = process.stdout.readline()
@@ -1254,6 +1317,13 @@ class SCLib_UploadProcessor:
         finally:
             if job_id in self.active_jobs:
                 del self.active_jobs[job_id]
+
+    def _touch_dataset_heartbeat(self, dataset_uuid: str) -> None:
+        try:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                self._heartbeat_upload_lease(dataset_uuid, collection)
+        except Exception:
+            pass
     
     def _parse_progress_output(self, job_id: str, output: str, job_config: UploadJobConfig):
         """Parse progress output from various tools."""
@@ -1385,13 +1455,18 @@ scope = drive
         try:
             from datetime import datetime, timedelta, timezone
             
-            # Clean up datasets with status 'uploading' older than 1 hour
+            # Clean up datasets with status 'uploading' older than 1 hour and no active lease/heartbeat
             cutoff_time = datetime.utcnow() - timedelta(hours=1)
+            lease_cutoff = datetime.utcnow() - timedelta(seconds=max(self.UPLOAD_LEASE_SECONDS * 2, 120))
             
             with mongo_collection_by_type_context('visstoredatas') as collection:
                 old_datasets = collection.find({
                     "status": "uploading",
-                    "updated_at": {"$lt": cutoff_time}
+                    "updated_at": {"$lt": cutoff_time},
+                    "$or": [
+                        {"upload_heartbeat_at": {"$exists": False}},
+                        {"upload_heartbeat_at": {"$lt": lease_cutoff}},
+                    ],
                 }, {"uuid": 1, "updated_at": 1})
                 
                 old_dataset_uuids = [ds["uuid"] for ds in old_datasets]
@@ -1766,6 +1841,7 @@ scope = drive
             with mongo_collection_by_type_context('visstoredatas') as collection:
                 update_data = {
                     "status": status,
+                    "canonical_state": self.CANONICAL_STATE_MAP.get(str(status).strip().lower(), "queued"),
                     "updated_at": datetime.utcnow()
                 }
                 

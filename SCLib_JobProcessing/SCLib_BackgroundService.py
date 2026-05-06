@@ -14,6 +14,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from pymongo import MongoClient
+from pymongo import ReturnDocument
 
 # Helper for timezone-aware UTC datetime (replaces deprecated datetime.utcnow())
 def utc_now():
@@ -42,6 +43,8 @@ class SCLib_BackgroundService:
         # job_queue removed - status-based processing uses visstoredatas directly
         self.worker_id = f"sc_worker_{os.getpid()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         self.running = False
+        self.conversion_lease_seconds = int(os.getenv("SC_CONVERSION_LEASE_SECONDS", "180"))
+        self.conversion_heartbeat_seconds = int(os.getenv("SC_CONVERSION_HEARTBEAT_SECONDS", "10"))
         
         # Background service is conversion-focused. Upload processing should run in FastAPI
         # to avoid duplicate workers racing on status-based uploads.
@@ -131,13 +134,7 @@ class SCLib_BackgroundService:
             db = self.mongo_client[db_name]
             datasets_collection = db['visstoredatas']
             
-            # Find datasets that need conversion (status-based processing)
-            datasets_to_convert = datasets_collection.find({
-                'status': 'conversion queued'
-            }).limit(1)  # Process one at a time
-            
-            dataset = next(datasets_to_convert, None)
-            
+            dataset = self._claim_next_conversion_dataset(datasets_collection)
             if dataset:
                 self._process_dataset_conversion(dataset)
             else:
@@ -154,6 +151,53 @@ class SCLib_BackgroundService:
         except Exception as e:
             print(f"Error in job processing: {e}")
             print(traceback.format_exc())
+
+    def _claim_next_conversion_dataset(self, datasets_collection):
+        now = utc_now()
+        lease_until = now + timedelta(seconds=self.conversion_lease_seconds)
+        return datasets_collection.find_one_and_update(
+            {
+                "status": "conversion queued",
+                "$or": [
+                    {"conversion_lease_expires_at": {"$exists": False}},
+                    {"conversion_lease_expires_at": {"$lte": now}},
+                ],
+            },
+            {
+                "$set": {
+                    "status": "converting",
+                    "conversion_lease_owner": self.worker_id,
+                    "conversion_lease_expires_at": lease_until,
+                    "conversion_heartbeat_at": now,
+                    "updated_at": now,
+                }
+            },
+            sort=[("updated_at", -1)],
+            return_document=ReturnDocument.AFTER,
+        )
+
+    def _heartbeat_conversion_lease(self, dataset_uuid: str) -> None:
+        db_name = self.settings.get('db_name', 'scientistcloud')
+        db = self.mongo_client[db_name]
+        db['visstoredatas'].update_one(
+            {'uuid': dataset_uuid},
+            {'$set': {
+                'conversion_heartbeat_at': utc_now(),
+                'conversion_lease_expires_at': utc_now() + timedelta(seconds=self.conversion_lease_seconds),
+                'updated_at': utc_now(),
+            }}
+        )
+
+    def _release_conversion_lease(self, dataset_uuid: str) -> None:
+        db_name = self.settings.get('db_name', 'scientistcloud')
+        db = self.mongo_client[db_name]
+        db['visstoredatas'].update_one(
+            {'uuid': dataset_uuid},
+            {'$unset': {
+                'conversion_lease_owner': '',
+                'conversion_lease_expires_at': '',
+            }}
+        )
     
     def _process_dataset_conversion(self, dataset: Dict[str, Any]):
         """
@@ -165,35 +209,11 @@ class SCLib_BackgroundService:
         
         print(f"Processing conversion for dataset {dataset_uuid} ({dataset_name})")
         
-        # Create lock file based on dataset UUID
-        lock_file = f"/tmp/sc_conversion_{dataset_uuid}.lock"
-        
-        # Check if already processing (lock file exists and process is running)
-        if os.path.exists(lock_file):
-            try:
-                with open(lock_file, 'r') as f:
-                    pid = int(f.read().strip())
-                if self._is_process_running(pid):
-                    print(f"Dataset {dataset_uuid} is already being processed (PID: {pid})")
-                    return
-            except (ValueError, OSError):
-                # Lock file exists but invalid, remove it
-                os.remove(lock_file)
-        
         try:
-            # Create lock file
-            with open(lock_file, 'w') as f:
-                f.write(str(os.getpid()))
-            
-            # Update dataset status to "converting"
             db_name = self.settings.get('db_name', 'scientistcloud')
             db = self.mongo_client[db_name]
             datasets_collection = db['visstoredatas']
-            
-            datasets_collection.update_one(
-                {'uuid': dataset_uuid},
-                {'$set': {'status': 'converting', 'updated_at': utc_now()}}
-            )
+            self._heartbeat_conversion_lease(dataset_uuid)
             
             # Get paths from dataset or environment
             config = self._get_config()
@@ -227,7 +247,8 @@ class SCLib_BackgroundService:
                 input_path=input_path,
                 output_path=output_path,
                 sensor=sensor,
-                conversion_params=conversion_params
+                conversion_params=conversion_params,
+                heartbeat_callback=lambda: self._heartbeat_conversion_lease(dataset_uuid),
             )
 
             converted_arco_idx_path = None
@@ -238,10 +259,13 @@ class SCLib_BackgroundService:
                     raise Exception(
                         f"Converted IDX is not ARCO under {output_path}"
                     )
+            if not self._has_success_marker(output_path):
+                raise Exception(f"Conversion did not produce _SUCCESS marker under {output_path}")
             
             # Mark as completed
             done_update = {
                 'status': 'done',
+                'canonical_state': 'ready',
                 'updated_at': utc_now(),
                 'completed_at': utc_now()
             }
@@ -249,7 +273,7 @@ class SCLib_BackgroundService:
                 done_update['converted_idx_path'] = converted_arco_idx_path
             datasets_collection.update_one(
                 {'uuid': dataset_uuid},
-                {'$set': done_update}
+                {'$set': done_update, '$unset': {'conversion_lease_owner': '', 'conversion_lease_expires_at': ''}}
             )
             
             print(f"✅ Dataset {dataset_uuid} conversion completed successfully")
@@ -259,12 +283,7 @@ class SCLib_BackgroundService:
             print(f"❌ Dataset {dataset_uuid} conversion failed: {e}")
             self._handle_conversion_failure(dataset_uuid, e)
         finally:
-            # Cleanup lock file
-            if os.path.exists(lock_file):
-                try:
-                    os.remove(lock_file)
-                except OSError:
-                    pass
+            self._release_conversion_lease(dataset_uuid)
     
     def _get_config(self):
         """Get configuration."""
@@ -280,7 +299,8 @@ class SCLib_BackgroundService:
     
     def _handle_dataset_conversion_direct(self, dataset_uuid: str, input_path: str, 
                                          output_path: str, sensor: str, 
-                                         conversion_params: Dict[str, Any]) -> Dict[str, Any]:
+                                         conversion_params: Dict[str, Any],
+                                         heartbeat_callback=None) -> Dict[str, Any]:
         """Handle dataset conversion directly (no job wrapper)."""
         import json
         
@@ -317,17 +337,26 @@ class SCLib_BackgroundService:
             stderr=subprocess.PIPE,
             text=True
         )
-        
+        stdout_chunks = []
+        stderr_chunks = []
+        last_heartbeat = time.time()
+        while process.poll() is None:
+            if heartbeat_callback and (time.time() - last_heartbeat) >= self.conversion_heartbeat_seconds:
+                heartbeat_callback()
+                last_heartbeat = time.time()
+            time.sleep(1)
         stdout, stderr = process.communicate()
+        stdout_chunks.append(stdout or "")
+        stderr_chunks.append(stderr or "")
         
         if process.returncode == 0:
             return {
                 'status': 'success',
                 'message': 'Dataset conversion completed',
-                'stdout': stdout
+                'stdout': "".join(stdout_chunks)
             }
         else:
-            raise Exception(f"Dataset conversion failed with return code {process.returncode}: {stderr}")
+            raise Exception(f"Dataset conversion failed with return code {process.returncode}: {''.join(stderr_chunks)}")
 
     def _extract_arco_value(self, idx_path: str) -> int:
         """Extract (arco) numeric value from an idx file."""
@@ -384,6 +413,10 @@ class SCLib_BackgroundService:
 
         print(f"❌ Missing ARCO converted idx under {output_path}")
         return None
+
+    def _has_success_marker(self, output_path: str) -> bool:
+        marker = os.path.join(output_path, "_SUCCESS.json")
+        return os.path.isfile(marker)
     
     def _handle_conversion_failure(self, dataset_uuid: str, error: Exception):
         """Handle conversion failure - update dataset status."""
@@ -409,6 +442,7 @@ class SCLib_BackgroundService:
                         'status': 'conversion queued',
                         'conversion_retry_count': retry_count + 1,
                         'conversion_last_error': str(error),
+                        'canonical_state': 'conversion_queued',
                         'updated_at': utc_now()
                     }}
                 )
@@ -420,6 +454,7 @@ class SCLib_BackgroundService:
                     {'$set': {
                         'status': 'conversion failed',
                         'conversion_last_error': str(error),
+                        'canonical_state': 'failed',
                         'updated_at': utc_now()
                     }}
                 )
@@ -458,6 +493,7 @@ class SCLib_BackgroundService:
                         {'$set': {
                             'status': 'conversion failed',
                             'conversion_last_error': f'Stale job: input directory does not exist: {input_path}',
+                            'canonical_state': 'failed',
                             'updated_at': utc_now()
                         }}
                     )
@@ -468,17 +504,11 @@ class SCLib_BackgroundService:
                         {'uuid': dataset_uuid},
                         {'$set': {
                             'status': 'conversion queued',
+                            'canonical_state': 'conversion_queued',
                             'updated_at': utc_now()
                         }}
                     )
-                
-                # Remove lock file if it exists
-                lock_file = f"/tmp/sc_conversion_{dataset_uuid}.lock"
-                if os.path.exists(lock_file):
-                    try:
-                        os.remove(lock_file)
-                    except OSError:
-                        pass
+                self._release_conversion_lease(dataset_uuid)
                         
         except Exception as e:
             print(f"Error cleaning up old datasets: {e}")

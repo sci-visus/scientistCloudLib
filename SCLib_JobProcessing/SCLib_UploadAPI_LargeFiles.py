@@ -20,10 +20,12 @@ import logging
 import aiofiles
 from pathlib import Path
 import math
+from pymongo import ReturnDocument
 
 try:
     from .SCLib_Config import get_config
     from .SCLib_UploadProcessor import get_upload_processor
+    from .SCLib_MongoConnection import get_mongo_database
     from .SCLib_UploadJobTypes import (
         UploadJobConfig, UploadSourceType, SensorType, UploadStatus,
         create_local_upload_job, create_google_drive_upload_job,
@@ -32,6 +34,7 @@ try:
 except ImportError:
     from SCLib_Config import get_config
     from SCLib_UploadProcessor import get_upload_processor
+    from SCLib_MongoConnection import get_mongo_database
     from SCLib_UploadJobTypes import (
         UploadJobConfig, UploadSourceType, SensorType, UploadStatus,
         create_local_upload_job, create_google_drive_upload_job,
@@ -124,24 +127,61 @@ upload_sessions: Dict[str, Dict[str, Any]] = {}
 
 def get_upload_session(upload_id: str) -> Dict[str, Any]:
     """Get upload session data."""
-    if upload_id not in upload_sessions:
+    if upload_id in upload_sessions:
+        return upload_sessions[upload_id]
+    db = get_mongo_database()
+    doc = db["upload_sessions"].find_one({"upload_id": upload_id})
+    if not doc:
         raise HTTPException(status_code=404, detail="Upload session not found")
-    return upload_sessions[upload_id]
+    session = _deserialize_session(doc)
+    upload_sessions[upload_id] = session
+    return session
 
 def create_upload_session(upload_id: str, data: Dict[str, Any]) -> None:
     """Create new upload session."""
-    upload_sessions[upload_id] = {
+    session = {
         **data,
         'created_at': datetime.now(),
-        'uploaded_chunks': set(),
+        'uploaded_chunks': set(data.get('uploaded_chunks', [])),
         'chunk_hashes': {}
     }
+    upload_sessions[upload_id] = session
+    db = get_mongo_database()
+    db["upload_sessions"].find_one_and_update(
+        {"upload_id": upload_id},
+        {"$set": _serialize_session(upload_id, session)},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
 
 def update_upload_session(upload_id: str, chunk_index: int, chunk_hash: str) -> None:
     """Update upload session with new chunk."""
-    if upload_id in upload_sessions:
-        upload_sessions[upload_id]['uploaded_chunks'].add(chunk_index)
-        upload_sessions[upload_id]['chunk_hashes'][chunk_index] = chunk_hash
+    session = get_upload_session(upload_id)
+    session['uploaded_chunks'].add(chunk_index)
+    session['chunk_hashes'][str(chunk_index)] = chunk_hash
+    db = get_mongo_database()
+    db["upload_sessions"].update_one(
+        {"upload_id": upload_id},
+        {"$set": _serialize_session(upload_id, session)},
+        upsert=True,
+    )
+
+def delete_upload_session(upload_id: str) -> None:
+    upload_sessions.pop(upload_id, None)
+    db = get_mongo_database()
+    db["upload_sessions"].delete_one({"upload_id": upload_id})
+
+def _serialize_session(upload_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(session)
+    payload["upload_id"] = upload_id
+    payload["uploaded_chunks"] = sorted(list(payload.get("uploaded_chunks", set())))
+    return payload
+
+def _deserialize_session(doc: Dict[str, Any]) -> Dict[str, Any]:
+    payload = dict(doc)
+    payload.pop("_id", None)
+    payload["uploaded_chunks"] = set(payload.get("uploaded_chunks", []))
+    return payload
 
 # Dependency to get upload processor
 def get_processor():
@@ -487,16 +527,11 @@ async def get_upload_limits():
 async def cancel_large_upload(upload_id: str):
     """Cancel a large file upload and clean up resources."""
     try:
-        if upload_id not in upload_sessions:
-            raise HTTPException(status_code=404, detail="Upload session not found")
-        
-        # Clean up files
+        _ = get_upload_session(upload_id)
         upload_dir = os.path.join(TEMP_DIR, upload_id)
         if os.path.exists(upload_dir):
             shutil.rmtree(upload_dir)
-        
-        # Remove session
-        del upload_sessions[upload_id]
+        delete_upload_session(upload_id)
         
         return {"message": f"Upload session {upload_id} cancelled and cleaned up"}
         

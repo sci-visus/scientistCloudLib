@@ -198,6 +198,7 @@ class UploadResponse(BaseModel):
 class JobStatusResponse(BaseModel):
     job_id: str = Field(..., description="Job identifier")
     status: UploadStatus = Field(..., description="Current job status")
+    canonical_state: str = Field(..., description="Canonical transfer state")
     progress_percentage: float = Field(0.0, ge=0.0, le=100.0, description="Progress percentage")
     bytes_uploaded: Optional[int] = Field(None, description="Bytes uploaded so far")
     bytes_total: Optional[int] = Field(None, description="Total bytes to upload")
@@ -222,6 +223,24 @@ class SupportedSourcesResponse(BaseModel):
 # Dependency to get upload processor
 def get_processor():
     return upload_processor
+
+def canonical_state_from_status(status: str) -> str:
+    mapping = {
+        "queued": "queued",
+        "initializing": "queued",
+        "uploading": "uploading",
+        "processing": "uploading",
+        "completed": "uploaded",
+        "conversion queued": "conversion_queued",
+        "converting": "converting",
+        "done": "ready",
+        "ready": "ready",
+        "failed": "failed",
+        "conversion failed": "failed",
+        "cancelled": "cancelled",
+        "canceled": "cancelled",
+    }
+    return mapping.get(str(status or "").strip().lower(), "queued")
 
 # Helper function to resolve user email
 def resolve_user_email(auth_result: AuthResult, provided_email: Optional[str] = None) -> str:
@@ -298,9 +317,6 @@ async def initiate_upload(
             dataset_name=request.dataset_name
         )
         
-        # Generate unique job ID
-        job_id = f"upload_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
-        
         # Create upload job based on source type
         if request.source_type == UploadSourceType.GOOGLE_DRIVE:
             job_config = create_google_drive_upload_job(
@@ -351,8 +367,8 @@ async def initiate_upload(
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported source type: {request.source_type}")
         
-        # Submit job to processor
-        background_tasks.add_task(processor.submit_upload_job, job_config)
+        # Submit synchronously so returned ID matches persisted dataset/files job_id.
+        actual_job_id = processor.submit_upload_job(job_config)
         
         # Estimate duration based on source type and size
         estimated_duration = 300  # Default 5 minutes
@@ -362,7 +378,7 @@ async def initiate_upload(
             estimated_duration = 600  # 10 minutes for Google Drive
         
         return UploadResponse(
-            job_id=job_id,
+            job_id=actual_job_id,
             status="queued",
             message=f"Upload job initiated for {request.source_type}",
             estimated_duration=estimated_duration,
@@ -423,9 +439,6 @@ async def upload_file(
         content = await file.read()
         file_size = len(content)
         
-        # Generate unique job ID
-        job_id = f"upload_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
-        
         # Save uploaded file to temporary location
         temp_dir = tempfile.mkdtemp()
         temp_file_path = os.path.join(temp_dir, file.filename)
@@ -460,15 +473,15 @@ async def upload_file(
             tags=tags
         )
         
-        # Submit job to processor
-        background_tasks.add_task(processor.submit_upload_job, job_config)
+        # Submit synchronously so the job id returned to clients is durable.
+        actual_job_id = processor.submit_upload_job(job_config)
         
         # Estimate duration based on file size
         file_size_mb = file_size / (1024 * 1024)
         estimated_duration = max(60, int(file_size_mb * 2))  # 2 seconds per MB, minimum 1 minute
         
         return UploadResponse(
-            job_id=job_id,
+            job_id=actual_job_id,
             status="queued",
             message=f"File upload initiated: {file.filename}",
             estimated_duration=estimated_duration,
@@ -504,6 +517,7 @@ async def get_upload_status(
         return JobStatusResponse(
             job_id=status.job_id,
             status=status.status,
+            canonical_state=canonical_state_from_status(status.status.value),
             progress_percentage=status.progress_percentage,
             bytes_uploaded=status.bytes_uploaded,
             bytes_total=status.bytes_total,
@@ -574,6 +588,7 @@ async def list_upload_jobs(
                              UploadStatus.FAILED if dataset.get('status') == 'failed' else
                              UploadStatus.CANCELLED if dataset.get('status') == 'cancelled' else
                              UploadStatus.QUEUED,
+                    'canonical_state': canonical_state_from_status(dataset.get('status', 'queued')),
                     'progress_percentage': 0.0,  # Could calculate from dataset if available
                     'bytes_uploaded': dataset.get('total_size_bytes', 0),
                     'bytes_total': dataset.get('total_size_bytes', 0),
