@@ -7,6 +7,51 @@ import json
 from datetime import datetime
 import numpy as np
 
+
+def _select_netcdf_variable(ds, preferred_name: str):
+    """
+    Pick a 2D or 3D variable to convert. Using ds.variables.keys()[0] breaks files like
+    McIDAS NetCDF where the first keys are scalars (version, sensorID, ...).
+    """
+    preferred_name = (preferred_name or "").strip()
+    if preferred_name:
+        if preferred_name not in ds.variables:
+            raise ValueError(f"Requested variable {preferred_name!r} not found in NetCDF")
+        var = ds.variables[preferred_name]
+        rank = len(var.shape)
+        if rank not in (2, 3):
+            raise ValueError(
+                f"Variable {preferred_name!r} has rank {rank}; only 2D or 3D arrays are supported"
+            )
+        return var
+
+    keys = list(ds.variables.keys())
+    # Prefer common payload names (satellite / generic grids)
+    for name in ("data", "Data", "DATA", "band_data", "image"):
+        if name in ds.variables:
+            var = ds.variables[name]
+            if len(var.shape) in (2, 3):
+                print(f"Selected variable {name!r} (preferred name match), shape={var.shape}")
+                return var
+
+    # First 3D then 2D by declaration order (stable; mirrors CDL when library preserves order)
+    for name in keys:
+        var = ds.variables[name]
+        if len(var.shape) == 3:
+            print(f"Selected variable {name!r} (first 3D), shape={var.shape}")
+            return var
+    for name in keys:
+        var = ds.variables[name]
+        if len(var.shape) == 2:
+            print(f"Selected variable {name!r} (first 2D), shape={var.shape}")
+            return var
+
+    raise ValueError(
+        "No 2D or 3D variable found to convert. "
+        f"Variables: {[(k, tuple(ds.variables[k].shape)) for k in keys]}"
+    )
+
+
 def convert_netcdf_to_idx(src_filename,variable, idx_filename ):
     import netCDF4 as nc
     ds = nc.Dataset(src_filename)
@@ -20,14 +65,8 @@ def convert_netcdf_to_idx(src_filename,variable, idx_filename ):
     #Print the NetCDF variables
     pprint(ds.variables)
 
-    if (len(variable)>0):
-        #Crap, now we need to pick a variable to convert... sigh..
-        var=ds.variables[variable]  #Replace this with one of them...
-        print(var)
-    else:
-        #grab first one
-        allkeys = list(ds.variables.keys())
-        var = ds.variables[allkeys[0]]
+    var = _select_netcdf_variable(ds, variable)
+    print(var)
 
     #Read the NetCDF binary data in memory
     import time
@@ -41,12 +80,12 @@ def convert_netcdf_to_idx(src_filename,variable, idx_filename ):
         dims = [W, H]
     elif len(var.shape) == 3: # LTS: 6.16.2025: How can we determine if the dataset is 3D?
         data = var[:, :, :]
+        # Interpret first axis as time / bands / channels (e.g. bands x lines x elems).
         num_timesteps, H, W = data.shape[0], data.shape[1], data.shape[2]
         m, M = np.min(data), np.max(data)
         dims = [W, H]
     else:
-        print("Dataset dimensionality is not supported.")
-        return
+        raise ValueError(f"Dataset dimensionality not supported: rank={len(var.shape)} shape={var.shape}")
 
     read_sec = time.time() - t1
     print(f"NetCDF file loaded in {read_sec} seconds dtype={data.dtype} num_timesteps={num_timesteps} W={W} H={H} m={m} M={M}")
@@ -85,8 +124,12 @@ def main():
     parser = argparse.ArgumentParser(description='Process NetCDF files.')
     parser.add_argument('src_file_directory',    type=str,
                         help='directory containing src files')
-    # parser.add_argument('variable',   type=str,
-    #                     help='variable chosen to display from netCDF file (see getVariable_netcdf.py)')
+    parser.add_argument(
+        '--variable',
+        type=str,
+        default='',
+        help='NetCDF variable name to convert (default: auto — prefers "data", then first 3D/2D array)',
+    )
     args = parser.parse_args()
     input  = args.src_file_directory
     if os.path.isdir(input):
@@ -95,25 +138,30 @@ def main():
         dir = os.path.dirname(input)
 
     print(dir)
-    variable = ''
-    # if (args.variable):
-    #     variable  = args.variable[0]
-    # else:
-    #     variable = ''
-    # print('------variable-------')
-    # print(variable)
-    # print(variable[0])
+    variable = args.variable or ''
 
-    src_filename=''
-    for file in os.listdir(dir):
-        if file.endswith(".nc"):
-            print(os.path.join(dir, file))
-            src_filename =os.path.join(dir, file)
+    nc_paths = sorted(
+        p for p in glob.glob(os.path.join(dir, '*.nc'))
+        if os.path.isfile(p)
+    )
+    if not nc_paths:
+        print(f"No .nc files in {dir}", file=sys.stderr)
+        sys.exit(2)
+    if len(nc_paths) > 1:
+        print(
+            "Warning: multiple NetCDF files in directory; converting the first sorted path:",
+            nc_paths[0],
+            file=sys.stderr,
+        )
+    src_filename = nc_paths[0]
 
     print('------src_filename-------')
     print(src_filename)
-    convert_netcdf_to_idx(src_filename, variable, idx_filename=os.path.join(dir,'visus.idx'))
-    #convert_netcdf_to_idx(src_filename, variable, idx_filename= 'visus.idx')
+    try:
+        convert_netcdf_to_idx(src_filename, variable, idx_filename=os.path.join(dir,'visus.idx'))
+    except Exception as ex:
+        print(f"convert_netcdf_to_idx failed: {ex}", file=sys.stderr)
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
