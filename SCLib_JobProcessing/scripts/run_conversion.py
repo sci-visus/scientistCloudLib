@@ -409,6 +409,8 @@ class DatasetConverter:
         tmp_dir.mkdir(parents=True, exist_ok=True)
 
         # Convert to ARCO in temp destination.
+        # IMPORTANT: OpenVisus copy-dataset expects a destination IDX path, not just a directory.
+        tmp_idx = tmp_dir / "visus.idx"
         subprocess.run(
             [
                 "python3",
@@ -418,7 +420,7 @@ class DatasetConverter:
                 "--arco",
                 arco_size,
                 str(visus_idx),
-                str(tmp_dir),
+                str(tmp_idx),
             ],
             check=True,
         )
@@ -455,6 +457,27 @@ class DatasetConverter:
                     dst = self.output_dir / src.name
                     if not dst.exists():
                         shutil.copy2(src, dst)
+
+            # Guarantee canonical location for dashboards:
+            # converted/<uuid>/visus.idx must exist even if converter emitted another idx name.
+            canonical_idx = self.output_dir / "visus.idx"
+            if not canonical_idx.exists():
+                idx_candidates = [p for p in self.output_dir.rglob("*.idx") if p.is_file()]
+                if not idx_candidates:
+                    raise ConversionError(f"ARCO conversion produced no idx in {self.output_dir}")
+                source_idx = idx_candidates[0]
+                try:
+                    rel_target = os.path.relpath(str(source_idx), start=str(self.output_dir))
+                    canonical_idx.symlink_to(rel_target)
+                except Exception:
+                    shutil.copy2(source_idx, canonical_idx)
+
+            # Enforce ARCO output contract for converted/<uuid>/visus.idx.
+            final_arco = self._extract_arco_value(canonical_idx)
+            if final_arco == 0:
+                raise ConversionError(
+                    f"ARCO conversion did not update {canonical_idx} (arco=0)"
+                )
 
             logger.info(f"ARCO conversion completed: {self.output_dir}")
         except Exception:

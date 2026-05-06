@@ -317,6 +317,14 @@ class SCLib_UploadProcessor:
                 ),
                 None
             )
+            if dataset_files and pending_file is None:
+                # All known file jobs are terminal; nothing left for upload worker to execute.
+                # Avoid generating synthetic retry jobs that can duplicate processing.
+                logger.debug(
+                    "Dataset %s has no non-terminal file jobs; skipping upload-worker processing",
+                    dataset_uuid,
+                )
+                return
             
             # Convert string source type to enum
             try:
@@ -1698,6 +1706,24 @@ scope = drive
                         # For multi-file datasets, do not queue conversion until all file jobs are terminal.
                         all_terminal, non_terminal = self._file_jobs_terminal_state(dataset_uuid, collection)
                         if all_terminal:
+                            is_idx_sensor = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper() == SensorType.IDX.value
+                            if is_idx_sensor and not self._idx_materialized_for_conversion(dataset_uuid):
+                                update_data["status"] = "uploading"
+                                update_data["data_conversion_needed"] = False
+                                update_data["error_message"] = (
+                                    "IDX dataset is incomplete: waiting for both .idx and .bin files before conversion."
+                                )
+                                logger.warning(
+                                    "Dataset %s IDX conversion deferred: missing .idx/.bin materialization in upload directory",
+                                    dataset_uuid,
+                                )
+                                collection.update_one(
+                                    {"uuid": dataset_uuid},
+                                    {"$set": update_data}
+                                )
+                                logger.info(f"Updated dataset status: {dataset_uuid} -> {update_data.get('status', status)}")
+                                return
+
                             # Set status to "conversion queued" instead of "done"
                             update_data["status"] = "conversion queued"
                             update_data["data_conversion_needed"] = True
@@ -1754,6 +1780,21 @@ scope = drive
         except Exception:
             # Fail-open to avoid deadlocking datasets in uploading forever.
             return True, 0
+
+    def _idx_materialized_for_conversion(self, dataset_uuid: str) -> bool:
+        """
+        Verify local IDX upload has enough materialized data to convert.
+        Requires at least one `.idx` descriptor and at least one `.bin` payload file.
+        """
+        try:
+            upload_dir = Path(f"/mnt/visus_datasets/upload/{dataset_uuid}")
+            if not upload_dir.exists() or not upload_dir.is_dir():
+                return False
+            has_idx = any(p.is_file() for p in upload_dir.rglob("*.idx"))
+            has_bin = any(p.is_file() for p in upload_dir.rglob("*.bin"))
+            return bool(has_idx and has_bin)
+        except Exception:
+            return False
 
     def _create_conversion_job(self, dataset_uuid: str, job_config: UploadJobConfig, collection):
         """
