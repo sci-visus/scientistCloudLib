@@ -1206,9 +1206,34 @@ class SCLib_UploadProcessor:
         # Update dataset status in visstoredatas collection (no jobs collection)
         job_config = self.job_manager.upload_configs.get(job_id)
         if job_config:
+            # Keep per-file status in dataset.files[] in sync for multi-file datasets.
+            self._update_dataset_file_job_status(
+                dataset_uuid=job_config.dataset_uuid,
+                job_id=job_id,
+                status=status.value,
+                error_message=error_message,
+            )
             # Map upload status to dataset status
             dataset_status = self._map_upload_status_to_dataset_status(status, job_config)
             self._update_dataset_status(job_config.dataset_uuid, dataset_status, error_message, job_config)
+
+    def _update_dataset_file_job_status(self, dataset_uuid: str, job_id: str, status: str, error_message: str = ""):
+        """Update a specific files[].status entry by job_id."""
+        try:
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                update_doc = {
+                    "files.$.status": str(status or "").strip() or "queued",
+                    "files.$.updated_at": datetime.utcnow(),
+                }
+                if error_message:
+                    update_doc["files.$.error_message"] = str(error_message)
+                collection.update_one(
+                    {"uuid": dataset_uuid, "files.job_id": job_id},
+                    {"$set": update_doc},
+                )
+        except Exception:
+            # Non-fatal: dataset-level status is still maintained.
+            pass
     
     def _update_job_progress(self, job_id: str, percentage: float, uploaded_bytes: int, total_bytes: int):
         """Update job progress (in-memory only, status-based architecture)."""
@@ -1370,6 +1395,7 @@ scope = drive
                         "destination_path": job_config.destination_path,
                         "source_type": job_config.source_type.value,
                         "job_id": job_id,
+                        "status": "queued",
                         "total_size_bytes": job_config.total_size_bytes,
                         "created_at": job_config.created_at
                     }]
@@ -1423,6 +1449,7 @@ scope = drive
                                     "destination_path": job_config.destination_path,
                                     "source_type": job_config.source_type.value,
                                     "job_id": job_id,
+                                    "status": "queued",
                                     "total_size_bytes": job_config.total_size_bytes,
                                     "created_at": job_config.created_at
                                 }
@@ -1470,6 +1497,8 @@ scope = drive
                         "source_path": job_config.source_path,
                         "destination_path": job_config.destination_path,
                         "source_type": job_config.source_type.value,
+                        "job_id": job_id,
+                        "status": "queued",
                         "total_size_bytes": job_config.total_size_bytes,
                         "created_at": job_config.created_at
                     }]
@@ -1640,13 +1669,24 @@ scope = drive
                         and job_config.convert
                     )
                     if job_config and job_config.convert and (not is_remote_link or is_s3_idx_conversion):
-                        # Set status to "conversion queued" instead of "done"
-                        update_data["status"] = "conversion queued"
-                        update_data["data_conversion_needed"] = True
-                        logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
-                        
-                        # Automatically create conversion job in the queue
-                        self._create_conversion_job(dataset_uuid, job_config, collection)
+                        # For multi-file datasets, do not queue conversion until all file jobs are terminal.
+                        all_terminal, non_terminal = self._file_jobs_terminal_state(dataset_uuid, collection)
+                        if all_terminal:
+                            # Set status to "conversion queued" instead of "done"
+                            update_data["status"] = "conversion queued"
+                            update_data["data_conversion_needed"] = True
+                            logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
+
+                            # Automatically create conversion job in the queue
+                            self._create_conversion_job(dataset_uuid, job_config, collection)
+                        else:
+                            update_data["status"] = "uploading"
+                            update_data["data_conversion_needed"] = False
+                            logger.info(
+                                "Upload file finished for dataset=%s; waiting for remaining file jobs before conversion. non_terminal=%s",
+                                dataset_uuid,
+                                non_terminal,
+                            )
                     else:
                         # No conversion needed, mark as done
                         update_data["status"] = "done"  # Match existing schema
@@ -1666,6 +1706,28 @@ scope = drive
 
         except Exception as e:
             logger.error(f"Error updating dataset status: {e}")
+
+    def _file_jobs_terminal_state(self, dataset_uuid: str, collection) -> tuple[bool, int]:
+        """
+        Returns (all_terminal, non_terminal_count) for dataset files[] job statuses.
+        If files[] is missing/empty, treat as terminal to preserve legacy single-file behavior.
+        """
+        try:
+            dataset = collection.find_one({"uuid": dataset_uuid}, {"files": 1}) or {}
+            files = dataset.get("files") or []
+            if not isinstance(files, list) or len(files) == 0:
+                return True, 0
+
+            terminal_statuses = {"completed", "done", "failed", "cancelled", "canceled"}
+            non_terminal = 0
+            for item in files:
+                st = str((item or {}).get("status") or "queued").strip().lower()
+                if st not in terminal_statuses:
+                    non_terminal += 1
+            return non_terminal == 0, non_terminal
+        except Exception:
+            # Fail-open to avoid deadlocking datasets in uploading forever.
+            return True, 0
 
     def _create_conversion_job(self, dataset_uuid: str, job_config: UploadJobConfig, collection):
         """
