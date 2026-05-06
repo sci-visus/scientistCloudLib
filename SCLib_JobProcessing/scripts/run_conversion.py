@@ -269,20 +269,8 @@ class DatasetConverter:
             if fix_script.exists():
                 subprocess.run(["python3", str(fix_script), str(slam_html)], check=True)
         
-        # Handle visus.midx -> visus.idx symlink
-        visus_midx = self.output_dir / "visus.midx"
-        visus_idx = self.output_dir / "visus.idx"
-        if visus_midx.exists() and not visus_idx.exists():
-            logger.info(f"Creating symlink: {visus_midx} -> {visus_idx}")
-            visus_idx.symlink_to(visus_midx)
-        
-        # Move visus.idx to top level if found buried
-        found_idx = next(self.output_dir.rglob("visus.idx"), None)
-        if found_idx and found_idx.parent != self.output_dir:
-            logger.info(f"Moving visus.idx to top level: {found_idx}")
-            shutil.move(str(found_idx), str(self.output_dir / "visus.idx"))
-        
-        # Don't do this.. the idx file has links to the directory of data, no need to rename it, visus.idx points to the real .idx, which points to the directory. 
+        # Don't do this.. the idx file has links to the directory of data, no need to rename it.
+        # Keep original IDX filename(s) unchanged for dashboard/file-browser consistency.
         # COmment out, AAG: 2025-11-17: Move visus directory to top level if found buried
         # found_visus = next(self.output_dir.rglob("visus"), None)
         # if found_visus and found_visus.is_dir() and found_visus.parent != self.output_dir:
@@ -326,20 +314,6 @@ class DatasetConverter:
                 else:
                     logger.info(f"Directory already at top level: {corresponding_dir}")
                 
-                # Create symbolic link from visus.idx to the actual .idx file
-                visus_idx_link = self.output_dir / "visus.idx"
-                if visus_idx_link.exists():
-                    if visus_idx_link.is_symlink():
-                        visus_idx_link.unlink()
-                    else:
-                        logger.warning(f"visus.idx exists and is not a symlink, removing: {visus_idx_link}")
-                        visus_idx_link.unlink()
-                
-                # Create relative symlink (relative to output_dir)
-                relative_idx_path = idx_file.name
-                logger.info(f"Creating symlink: {visus_idx_link} -> {relative_idx_path}")
-                visus_idx_link.symlink_to(relative_idx_path)
-                
                 # Fix permissions
                 if idx_file.exists():
                     os.chmod(idx_file, 0o644)
@@ -350,24 +324,7 @@ class DatasetConverter:
                             os.chmod(file, 0o644)
                 break
 
-        # Fallback: for flat IDX datasets (e.g. filename_template ./%04x.bin) there may be
-        # no idx+directory pair above, but we still need canonical visus.idx for ARCO conversion.
-        visus_idx_fallback = self.output_dir / "visus.idx"
-        if not visus_idx_fallback.exists():
-            top_level_idx_candidates = [
-                p for p in self.output_dir.glob("*.idx")
-                if p.is_file() and p.name != "visus.idx"
-            ]
-            if top_level_idx_candidates:
-                src_idx = top_level_idx_candidates[0]
-                try:
-                    visus_idx_fallback.symlink_to(src_idx.name)
-                    logger.info(f"Created fallback symlink: {visus_idx_fallback} -> {src_idx.name}")
-                except Exception:
-                    shutil.copy2(src_idx, visus_idx_fallback)
-                    logger.info(f"Created fallback copy: {visus_idx_fallback} from {src_idx.name}")
-
-        # Ensure visus.idx exists and convert to ARCO if needed.
+        # Convert to ARCO if needed (preserving original IDX filename).
         self._convert_idx_to_arco_if_needed()
 
     def _extract_arco_value(self, idx_path: Path) -> int:
@@ -398,18 +355,25 @@ class DatasetConverter:
 
     def _convert_idx_to_arco_if_needed(self) -> None:
         """
-        Convert non-ARCO visus.idx datasets in output_dir to ARCO layout.
+        Convert non-ARCO IDX datasets in output_dir to ARCO layout.
+        Preserve original IDX filename instead of forcing visus.idx.
         This keeps the existing background conversion pipeline but ensures
         S3 IDX datasets become cloud-friendly before dashboards open.
         """
-        visus_idx = self.output_dir / "visus.idx"
-        if not visus_idx.exists():
-            logger.info("No visus.idx found after IDX staging; skipping ARCO conversion")
+        idx_candidates = sorted(
+            [
+                p for p in self.output_dir.glob("*.idx")
+                if p.is_file() and p.name != "visus.idx"
+            ]
+        )
+        source_idx = idx_candidates[0] if idx_candidates else (self.output_dir / "visus.idx")
+        if not source_idx.exists():
+            logger.info("No source .idx found after IDX staging; skipping ARCO conversion")
             return
 
-        arco_value = self._extract_arco_value(visus_idx)
+        arco_value = self._extract_arco_value(source_idx)
         if arco_value != 0:
-            logger.info(f"Dataset already ARCO (arco={arco_value}); skipping ARCO conversion")
+            logger.info(f"Dataset already ARCO (arco={arco_value}) at {source_idx.name}; skipping ARCO conversion")
             return
 
         arco_size = str(os.getenv("OPENVISUS_ARCO", "2mb")).strip() or "2mb"
@@ -427,7 +391,7 @@ class DatasetConverter:
 
         # Convert to ARCO in temp destination.
         # IMPORTANT: OpenVisus copy-dataset expects a destination IDX path, not just a directory.
-        tmp_idx = tmp_dir / "visus.idx"
+        tmp_idx = tmp_dir / source_idx.name
         subprocess.run(
             [
                 "python3",
@@ -436,14 +400,14 @@ class DatasetConverter:
                 "copy-dataset",
                 "--arco",
                 arco_size,
-                str(visus_idx),
+                str(source_idx),
                 str(tmp_idx),
             ],
             check=True,
         )
 
         # Locate converted idx and compress it.
-        converted_idx = tmp_dir / "visus.idx"
+        converted_idx = tmp_dir / source_idx.name
         if not converted_idx.exists():
             candidates = [p for p in tmp_dir.rglob("*.idx") if p.is_file()]
             if not candidates:
@@ -463,17 +427,6 @@ class DatasetConverter:
             check=True,
         )
 
-        # Track original top-level idx names so UI-visible files stay in sync after ARCO conversion.
-        original_idx_names = []
-        try:
-            original_idx_names = [
-                p.name
-                for p in self.output_dir.glob("*.idx")
-                if p.is_file() and p.name != "visus.idx"
-            ]
-        except Exception:
-            original_idx_names = []
-
         # Swap converted output into output_dir atomically-ish.
         shutil.move(str(self.output_dir), str(backup_dir))
         try:
@@ -486,39 +439,19 @@ class DatasetConverter:
                     if not dst.exists():
                         shutil.copy2(src, dst)
 
-            # Guarantee canonical location for dashboards:
-            # converted/<uuid>/visus.idx must exist even if converter emitted another idx name.
-            canonical_idx = self.output_dir / "visus.idx"
-            if not canonical_idx.exists():
+            # Enforce ARCO output contract for the converted source idx filename.
+            final_idx = self.output_dir / converted_idx.name
+            if not final_idx.exists():
                 idx_candidates = [p for p in self.output_dir.rglob("*.idx") if p.is_file()]
                 if not idx_candidates:
                     raise ConversionError(f"ARCO conversion produced no idx in {self.output_dir}")
-                source_idx = idx_candidates[0]
-                try:
-                    rel_target = os.path.relpath(str(source_idx), start=str(self.output_dir))
-                    canonical_idx.symlink_to(rel_target)
-                except Exception:
-                    shutil.copy2(source_idx, canonical_idx)
+                final_idx = idx_candidates[0]
 
-            # Enforce ARCO output contract for converted/<uuid>/visus.idx.
-            final_arco = self._extract_arco_value(canonical_idx)
+            final_arco = self._extract_arco_value(final_idx)
             if final_arco == 0:
                 raise ConversionError(
-                    f"ARCO conversion did not update {canonical_idx} (arco=0)"
+                    f"ARCO conversion did not update {final_idx} (arco=0)"
                 )
-
-            # Keep original idx filename(s) present and ARCO so dataset file browser
-            # shows consistent content regardless of which idx the user opens.
-            for idx_name in original_idx_names:
-                alias_path = self.output_dir / idx_name
-                if alias_path == canonical_idx:
-                    continue
-                try:
-                    if alias_path.exists() or alias_path.is_symlink():
-                        alias_path.unlink()
-                except Exception:
-                    pass
-                shutil.copy2(canonical_idx, alias_path)
 
             logger.info(f"ARCO conversion completed: {self.output_dir}")
         except Exception:
