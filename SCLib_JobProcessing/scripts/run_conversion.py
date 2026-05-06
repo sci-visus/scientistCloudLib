@@ -446,6 +446,17 @@ class DatasetConverter:
             check=True,
         )
 
+        # Track original top-level idx names so UI-visible files stay in sync after ARCO conversion.
+        original_idx_names = []
+        try:
+            original_idx_names = [
+                p.name
+                for p in self.output_dir.glob("*.idx")
+                if p.is_file() and p.name != "visus.idx"
+            ]
+        except Exception:
+            original_idx_names = []
+
         # Swap converted output into output_dir atomically-ish.
         shutil.move(str(self.output_dir), str(backup_dir))
         try:
@@ -478,6 +489,19 @@ class DatasetConverter:
                 raise ConversionError(
                     f"ARCO conversion did not update {canonical_idx} (arco=0)"
                 )
+
+            # Keep original idx filename(s) present and ARCO so dataset file browser
+            # shows consistent content regardless of which idx the user opens.
+            for idx_name in original_idx_names:
+                alias_path = self.output_dir / idx_name
+                if alias_path == canonical_idx:
+                    continue
+                try:
+                    if alias_path.exists() or alias_path.is_symlink():
+                        alias_path.unlink()
+                except Exception:
+                    pass
+                shutil.copy2(canonical_idx, alias_path)
 
             logger.info(f"ARCO conversion completed: {self.output_dir}")
         except Exception:

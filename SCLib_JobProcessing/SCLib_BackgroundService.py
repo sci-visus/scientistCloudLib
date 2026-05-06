@@ -10,6 +10,7 @@ import json
 import subprocess
 import traceback
 import psutil
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List
 from pymongo import MongoClient
@@ -228,6 +229,13 @@ class SCLib_BackgroundService:
                 sensor=sensor,
                 conversion_params=conversion_params
             )
+
+            # Hard verification gate: IDX conversions are only "done" when converted visus.idx is ARCO.
+            if str(sensor or "").strip().upper() == "IDX":
+                if not self._is_converted_idx_arco(output_path):
+                    raise Exception(
+                        f"Converted IDX is not ARCO at {os.path.join(output_path, 'visus.idx')}"
+                    )
             
             # Mark as completed
             datasets_collection.update_one(
@@ -315,6 +323,37 @@ class SCLib_BackgroundService:
             }
         else:
             raise Exception(f"Dataset conversion failed with return code {process.returncode}: {stderr}")
+
+    def _is_converted_idx_arco(self, output_path: str) -> bool:
+        """Return True only when converted/<uuid>/visus.idx has (arco) > 0."""
+        idx_path = os.path.join(output_path, "visus.idx")
+        if not os.path.isfile(idx_path):
+            print(f"❌ Missing converted idx: {idx_path}")
+            return False
+        try:
+            with open(idx_path, "r", encoding="utf-8", errors="ignore") as f:
+                lines = f.readlines()
+        except Exception as e:
+            print(f"❌ Failed reading converted idx {idx_path}: {e}")
+            return False
+
+        for i, line in enumerate(lines):
+            s = (line or "").strip()
+            if s.lower().startswith("(arco)"):
+                rest = s[len("(arco)"):].strip()
+                m = re.search(r"(-?\d+)", rest)
+                if m:
+                    return int(m.group(1)) > 0
+                for j in range(i + 1, len(lines)):
+                    nxt = (lines[j] or "").strip()
+                    if not nxt:
+                        continue
+                    m2 = re.search(r"(-?\d+)", nxt)
+                    if m2:
+                        return int(m2.group(1)) > 0
+                    break
+                return False
+        return False
     
     def _handle_conversion_failure(self, dataset_uuid: str, error: Exception):
         """Handle conversion failure - update dataset status."""
