@@ -12,7 +12,8 @@ def find_largest_dataset(hdf5_file):
     def visit_datasets(name, node):
         nonlocal largest_dataset, largest_size
         if isinstance(node, h5py.Dataset):
-            size = np.product(node.shape)
+            # NumPy uses np.prod; np.product is not available in newer versions.
+            size = np.prod(node.shape)
             if size > largest_size:
                 largest_dataset = name
                 largest_size = size
