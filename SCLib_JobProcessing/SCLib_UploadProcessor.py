@@ -126,10 +126,15 @@ class SCLib_UploadProcessor:
         if progress:
             return progress
         
-        # If not in memory, look up dataset by job_id in visstoredatas
+        # If not in memory, look up dataset by job_id in visstoredatas.
+        # For multi-file uploads grouped under one dataset UUID, each file has its own
+        # upload job id; the top-level dataset `job_id` can be overwritten by later files.
+        # So we must also support nested files[].job_id lookup.
         try:
             with mongo_collection_by_type_context('visstoredatas') as collection:
                 dataset = collection.find_one({'job_id': job_id})
+                if not dataset:
+                    dataset = collection.find_one({'files.job_id': job_id})
                 if dataset:
                     # Convert dataset status to UploadProgress
                     status_str = dataset.get('status', 'unknown')
@@ -1359,6 +1364,15 @@ scope = drive
                     "created_at": job_config.created_at,
                     "updated_at": datetime.utcnow()
                 }
+                if job_id:
+                    dataset_doc["files"] = [{
+                        "source_path": job_config.source_path,
+                        "destination_path": job_config.destination_path,
+                        "source_type": job_config.source_type.value,
+                        "job_id": job_id,
+                        "total_size_bytes": job_config.total_size_bytes,
+                        "created_at": job_config.created_at
+                    }]
                 if dataset_dimensions:
                     dataset_doc["dimensions"] = dataset_dimensions
                 if preferred_dashboard:
@@ -1402,6 +1416,7 @@ scope = drive
                                     "source_path": job_config.source_path,
                                     "destination_path": job_config.destination_path,
                                     "source_type": job_config.source_type.value,
+                                    "job_id": job_id,
                                     "total_size_bytes": job_config.total_size_bytes,
                                     "created_at": job_config.created_at
                                 }
