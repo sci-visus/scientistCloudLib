@@ -136,8 +136,14 @@ class SCLib_UploadProcessor:
                 if not dataset:
                     dataset = collection.find_one({'files.job_id': job_id})
                 if dataset:
+                    matched_file = None
+                    for item in (dataset.get('files') or []):
+                        if str((item or {}).get('job_id') or '').strip() == str(job_id).strip():
+                            matched_file = item or {}
+                            break
+
                     # Convert dataset status to UploadProgress
-                    status_str = dataset.get('status', 'unknown')
+                    status_str = (matched_file or {}).get('status', dataset.get('status', 'unknown'))
                     status_map = {
                         'uploading': UploadStatus.UPLOADING,
                         'processing': UploadStatus.PROCESSING,
@@ -151,8 +157,8 @@ class SCLib_UploadProcessor:
                     upload_status = status_map.get(status_str, UploadStatus.QUEUED)
                     
                     # Calculate progress if we have size info
-                    total_bytes = dataset.get('total_size_bytes', 0) or 0
-                    bytes_uploaded = dataset.get('bytes_uploaded', 0) or 0
+                    total_bytes = (matched_file or {}).get('total_size_bytes', dataset.get('total_size_bytes', 0)) or 0
+                    bytes_uploaded = (matched_file or {}).get('bytes_uploaded', dataset.get('bytes_uploaded', 0)) or 0
                     progress_pct = (bytes_uploaded / total_bytes * 100) if total_bytes > 0 else 0.0
                     
                     # Handle datetime conversion from MongoDB
@@ -183,8 +189,8 @@ class SCLib_UploadProcessor:
                         speed_mbps=0.0,  # Not tracked in dataset
                         eta_seconds=0,  # Not tracked in dataset
                         last_updated=updated_at,
-                        error_message=dataset.get('error_message', ''),
-                        current_file=dataset.get('name', '')  # Use dataset name as current file
+                        error_message=(matched_file or {}).get('error_message', dataset.get('error_message', '')),
+                        current_file=(matched_file or {}).get('source_path', dataset.get('name', ''))
                     )
                     # Add created_at attribute for API compatibility (UploadProgress doesn't have it by default)
                     progress.created_at = created_at
@@ -302,13 +308,27 @@ class SCLib_UploadProcessor:
         try:
             dataset_uuid = dataset['uuid']
             source_type_str = dataset.get('source_type', '')
+            dataset_files = dataset.get('files') if isinstance(dataset.get('files'), list) else []
+            terminal_statuses = {"completed", "done", "failed", "cancelled", "canceled"}
+            pending_file = next(
+                (
+                    item for item in dataset_files
+                    if str((item or {}).get("status") or "queued").strip().lower() not in terminal_statuses
+                ),
+                None
+            )
             
             # Convert string source type to enum
             try:
-                source_type = UploadSourceType(source_type_str)
+                source_type = UploadSourceType(
+                    str((pending_file or {}).get('source_type') or source_type_str)
+                )
             except ValueError:
                 logger.error(f"Unknown source type: {source_type_str}")
                 return
+            
+            source_path_for_job = str((pending_file or {}).get('source_path') or dataset.get('source_path', ''))
+            destination_path_for_job = str((pending_file or {}).get('destination_path') or dataset.get('destination_path', ''))
             
             # Reconstruct source_config from dataset
             source_config = {}
@@ -357,7 +377,7 @@ class SCLib_UploadProcessor:
                 # Fallback to source_path only if we couldn't extract from google_drive_link
                 # But validate it's not a bad value like "view"
                 if not file_id:
-                    source_path = dataset.get('source_path', '')
+                    source_path = source_path_for_job
                     if source_path and source_path not in ['view', 'edit', 'open', 'folders', 'file', 'drive']:
                         file_id = source_path
                 
@@ -377,7 +397,7 @@ class SCLib_UploadProcessor:
             
             if source_type == UploadSourceType.GOOGLE_DRIVE:
                 job_config = create_google_drive_upload_job(
-                    file_id=source_config.get('file_id', dataset.get('source_path', '')),
+                    file_id=source_config.get('file_id', source_path_for_job),
                     dataset_uuid=dataset_uuid,
                     user_email=dataset.get('user') or dataset.get('user_id', ''),
                     dataset_name=dataset.get('name', ''),
@@ -391,19 +411,19 @@ class SCLib_UploadProcessor:
             elif source_type == UploadSourceType.LOCAL:
                 # For local uploads, source_path should be the file path
                 job_config = create_local_upload_job(
-                    file_path=dataset.get('source_path', ''),
+                    file_path=source_path_for_job,
                     dataset_uuid=dataset_uuid,
                     user_email=dataset.get('user') or dataset.get('user_id', ''),
                     dataset_name=dataset.get('name', ''),
                     sensor=sensor,
-                    original_source_path=dataset.get('source_path', ''),
+                    original_source_path=source_path_for_job,
                     convert=dataset.get('convert', True),
                     is_public=dataset.get('is_public', False),
                     folder=dataset.get('folder_uuid'),
                     team_uuid=dataset.get('team_uuid')
                 )
             elif source_type == UploadSourceType.S3:
-                source_path = dataset.get('source_path', '')
+                source_path = source_path_for_job
                 bucket_name = ''
                 object_key = ''
                 if isinstance(source_path, str) and source_path.startswith('s3://'):
@@ -451,7 +471,7 @@ class SCLib_UploadProcessor:
                     path_style=path_style,
                 )
             elif source_type == UploadSourceType.URL:
-                source_path = dataset.get('source_path', '')
+                source_path = source_path_for_job
                 if not source_path:
                     raise ValueError(f"Missing URL source_path for dataset {dataset_uuid}")
                 job_config = create_url_upload_job(
@@ -470,8 +490,14 @@ class SCLib_UploadProcessor:
                 logger.warning(f"Unsupported source type for status-based upload: {source_type}")
                 return
             
-            # Generate a job_id for in-memory tracking only (not stored in jobs collection)
-            job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
+            if destination_path_for_job:
+                job_config.destination_path = destination_path_for_job
+
+            # Reuse file job_id so files[].status gets updated and terminal gating can complete.
+            job_id = str((pending_file or {}).get('job_id') or "").strip()
+            if not job_id:
+                # Backward-compatible fallback for legacy records without files[].
+                job_id = f"upload_{int(time.time())}_{uuid.uuid4().hex[:8]}"
             
             # Add to job manager for in-memory tracking
             self.job_manager.create_upload_job(job_id, job_config)
