@@ -748,17 +748,30 @@ class SCLib_UploadProcessor:
             prefix,
             destination_dir,
         )
-        self._download_from_s3_aws_cli(
-            job_id=job_id,
-            bucket_name=bucket_name,
-            object_key=prefix,
-            dest_path=destination_dir,
-            access_key_id=access_key_id,
-            secret_access_key=secret_access_key,
-            endpoint_url=endpoint_url,
-            region_name=region_name,
-            path_style=path_style,
-        )
+        if self._is_tool_available("aws"):
+            self._download_from_s3_aws_cli(
+                job_id=job_id,
+                bucket_name=bucket_name,
+                object_key=prefix,
+                dest_path=destination_dir,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                endpoint_url=endpoint_url,
+                region_name=region_name,
+                path_style=path_style,
+            )
+        else:
+            logger.warning("AWS CLI not found; falling back to boto3 S3 download")
+            self._download_from_s3_boto3(
+                bucket_name=bucket_name,
+                object_key=prefix,
+                dest_path=destination_dir,
+                access_key_id=access_key_id,
+                secret_access_key=secret_access_key,
+                endpoint_url=endpoint_url,
+                region_name=region_name,
+                path_style=path_style,
+            )
     
     def _process_url_upload(self, job_id: str, job_config: UploadJobConfig):
         """Process URL-based upload by storing URL in database instead of downloading."""
@@ -1113,6 +1126,58 @@ class SCLib_UploadProcessor:
         # Get job config for progress tracking
         job_config = self.job_manager.get_job_config(job_id)
         self._run_command_with_progress(job_id, cmd, job_config, env=env)
+
+    def _download_from_s3_boto3(
+        self,
+        bucket_name: str,
+        object_key: str,
+        dest_path: str,
+        access_key_id: str,
+        secret_access_key: str,
+        endpoint_url: str = None,
+        region_name: str = "us-east-1",
+        path_style: bool = False,
+    ):
+        """Download S3 object/prefix via boto3 when AWS CLI is unavailable."""
+        try:
+            import boto3
+            from botocore.config import Config as BotoConfig
+        except Exception as e:
+            raise RuntimeError(f"S3 download fallback requires boto3: {e}") from e
+
+        key = (object_key or "").lstrip("/")
+        is_prefix = key == "" or key.endswith("/")
+        session = boto3.session.Session(
+            aws_access_key_id=access_key_id,
+            aws_secret_access_key=secret_access_key,
+            region_name=region_name or "us-east-1",
+        )
+        s3_client = session.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            config=BotoConfig(s3={"addressing_style": "path" if path_style else "auto"}),
+        )
+
+        if is_prefix:
+            paginator = s3_client.get_paginator("list_objects_v2")
+            downloaded = 0
+            for page in paginator.paginate(Bucket=bucket_name, Prefix=key):
+                for obj in page.get("Contents", []):
+                    s3_key = str(obj.get("Key") or "")
+                    if not s3_key or s3_key.endswith("/"):
+                        continue
+                    rel_key = s3_key[len(key):] if key and s3_key.startswith(key) else s3_key
+                    local_file = os.path.join(dest_path, rel_key)
+                    os.makedirs(os.path.dirname(local_file), exist_ok=True)
+                    s3_client.download_file(bucket_name, s3_key, local_file)
+                    downloaded += 1
+            logger.info("Downloaded %s objects from s3://%s/%s via boto3", downloaded, bucket_name, key)
+            return
+
+        local_file = os.path.join(dest_path, os.path.basename(key) or "downloaded_file")
+        os.makedirs(os.path.dirname(local_file), exist_ok=True)
+        s3_client.download_file(bucket_name, key, local_file)
+        logger.info("Downloaded object s3://%s/%s via boto3", bucket_name, key)
     
     def _download_with_wget(self, job_id: str, url: str, dest_path: str):
         """Download using wget."""
