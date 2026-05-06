@@ -173,6 +173,9 @@ def delete_upload_session(upload_id: str) -> None:
 
 def _serialize_session(upload_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
     payload = dict(session)
+    sensor = payload.get("sensor")
+    if hasattr(sensor, "value"):
+        payload["sensor"] = sensor.value
     payload["upload_id"] = upload_id
     payload["uploaded_chunks"] = sorted(list(payload.get("uploaded_chunks", set())))
     return payload

@@ -229,6 +229,9 @@ def delete_upload_session(upload_id: str) -> None:
 def _serialize_session(upload_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
     serializable = dict(session)
     serializable.pop("content", None)
+    sensor = serializable.get("sensor")
+    if hasattr(sensor, "value"):
+        serializable["sensor"] = sensor.value
     serializable["upload_id"] = upload_id
     serializable["uploaded_chunks"] = sorted(list(serializable.get("uploaded_chunks", set())))
     serializable["updated_at"] = datetime.now(timezone.utc)

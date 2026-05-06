@@ -806,13 +806,13 @@ class DatasetConverter:
             convert_script = self.script_dir.parent / "convert_netcdf_to_idx.py"
         
         if convert_script.exists():
-            for nc_file in nc_files:
-                logger.info(f"Converting {nc_file}")
-                subprocess.run(
-                    ["python3", str(convert_script), "", str(nc_file)],
-                    check=True,
-                    cwd=str(self.input_dir)
-                )
+            # The converter expects one argument: directory containing .nc files.
+            logger.info(f"Converting NetCDF directory: {self.input_dir}")
+            subprocess.run(
+                ["python3", str(convert_script), str(self.input_dir)],
+                check=True,
+                cwd=str(self.input_dir)
+            )
             
             # Copy visus* files to output
             for item in self.input_dir.glob("visus*"):
