@@ -230,21 +230,26 @@ class SCLib_BackgroundService:
                 conversion_params=conversion_params
             )
 
-            # Hard verification gate: IDX conversions are only "done" when converted visus.idx is ARCO.
+            converted_arco_idx_path = None
+            # Hard verification gate: IDX conversions are only "done" when a converted IDX is ARCO.
             if str(sensor or "").strip().upper() == "IDX":
-                if not self._is_converted_idx_arco(output_path):
+                converted_arco_idx_path = self._find_converted_arco_idx(output_path)
+                if not converted_arco_idx_path:
                     raise Exception(
-                        f"Converted IDX is not ARCO at {os.path.join(output_path, 'visus.idx')}"
+                        f"Converted IDX is not ARCO under {output_path}"
                     )
             
             # Mark as completed
+            done_update = {
+                'status': 'done',
+                'updated_at': utc_now(),
+                'completed_at': utc_now()
+            }
+            if converted_arco_idx_path:
+                done_update['converted_idx_path'] = converted_arco_idx_path
             datasets_collection.update_one(
                 {'uuid': dataset_uuid},
-                {'$set': {
-                    'status': 'done',
-                    'updated_at': utc_now(),
-                    'completed_at': utc_now()
-                }}
+                {'$set': done_update}
             )
             
             print(f"✅ Dataset {dataset_uuid} conversion completed successfully")
@@ -324,18 +329,14 @@ class SCLib_BackgroundService:
         else:
             raise Exception(f"Dataset conversion failed with return code {process.returncode}: {stderr}")
 
-    def _is_converted_idx_arco(self, output_path: str) -> bool:
-        """Return True only when converted/<uuid>/visus.idx has (arco) > 0."""
-        idx_path = os.path.join(output_path, "visus.idx")
-        if not os.path.isfile(idx_path):
-            print(f"❌ Missing converted idx: {idx_path}")
-            return False
+    def _extract_arco_value(self, idx_path: str) -> int:
+        """Extract (arco) numeric value from an idx file."""
         try:
             with open(idx_path, "r", encoding="utf-8", errors="ignore") as f:
                 lines = f.readlines()
         except Exception as e:
             print(f"❌ Failed reading converted idx {idx_path}: {e}")
-            return False
+            return 0
 
         for i, line in enumerate(lines):
             s = (line or "").strip()
@@ -343,17 +344,46 @@ class SCLib_BackgroundService:
                 rest = s[len("(arco)"):].strip()
                 m = re.search(r"(-?\d+)", rest)
                 if m:
-                    return int(m.group(1)) > 0
+                    return int(m.group(1))
                 for j in range(i + 1, len(lines)):
                     nxt = (lines[j] or "").strip()
                     if not nxt:
                         continue
                     m2 = re.search(r"(-?\d+)", nxt)
                     if m2:
-                        return int(m2.group(1)) > 0
+                        return int(m2.group(1))
                     break
-                return False
-        return False
+                return 0
+        return 0
+
+    def _find_converted_arco_idx(self, output_path: str) -> Optional[str]:
+        """
+        Return absolute path of a converted idx with (arco) > 0.
+        Prefer canonical visus.idx when valid; otherwise fallback to any idx.
+        """
+        canonical = os.path.join(output_path, "visus.idx")
+        if os.path.isfile(canonical):
+            if self._extract_arco_value(canonical) > 0:
+                return canonical
+            print(f"❌ Converted visus.idx exists but is not ARCO: {canonical}")
+
+        try:
+            candidates = sorted(
+                [
+                    os.path.join(output_path, name)
+                    for name in os.listdir(output_path)
+                    if name.lower().endswith(".idx")
+                ]
+            )
+        except Exception:
+            candidates = []
+
+        for idx_path in candidates:
+            if os.path.isfile(idx_path) and self._extract_arco_value(idx_path) > 0:
+                return idx_path
+
+        print(f"❌ Missing ARCO converted idx under {output_path}")
+        return None
     
     def _handle_conversion_failure(self, dataset_uuid: str, error: Exception):
         """Handle conversion failure - update dataset status."""
