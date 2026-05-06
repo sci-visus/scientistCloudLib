@@ -23,6 +23,8 @@ import hashlib
 import threading
 import subprocess
 import shutil
+import signal
+import time
 
 try:
     from ..SCLib_JobProcessing.SCLib_Config import get_config, get_database_name, get_collection_name
@@ -1043,6 +1045,106 @@ def _get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dict[str, Any]]:
             if 'is_downloadable' not in dataset or dataset.get('is_downloadable') is None:
                 dataset['is_downloadable'] = 'only owner'
         return dataset
+
+
+def _terminate_pid_safely(pid: int, timeout_seconds: float = 5.0) -> bool:
+    """Best-effort PID termination: SIGTERM, then SIGKILL if needed."""
+    try:
+        os.kill(pid, 0)  # Probe process existence/permission.
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+
+    deadline = time.time() + max(0.5, timeout_seconds)
+    while time.time() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        time.sleep(0.2)
+
+    try:
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return True
+    except Exception:
+        return False
+
+    try:
+        os.kill(pid, 0)
+        return False
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+
+
+def _safe_cancel_dataset_processing(dataset_uuid: str, dataset: Dict[str, Any], processor: Any) -> Dict[str, Any]:
+    """
+    Cancel upload/conversion work related to a dataset before delete.
+    Returns a small diagnostics dict for logging.
+    """
+    cancelled_upload_jobs = []
+    failed_upload_cancels = []
+    conversion_pid_terminated = False
+    conversion_pid = None
+
+    # 1) Cancel known upload jobs.
+    upload_job_ids: List[str] = []
+    top_job_id = str(dataset.get("job_id") or "").strip()
+    if top_job_id:
+        upload_job_ids.append(top_job_id)
+    for entry in (dataset.get("files") or []):
+        jid = str((entry or {}).get("job_id") or "").strip()
+        if jid:
+            upload_job_ids.append(jid)
+    # Preserve order but deduplicate.
+    upload_job_ids = list(dict.fromkeys(upload_job_ids))
+
+    if processor:
+        for job_id in upload_job_ids:
+            try:
+                if processor.cancel_job(job_id):
+                    cancelled_upload_jobs.append(job_id)
+                else:
+                    failed_upload_cancels.append(job_id)
+            except Exception:
+                failed_upload_cancels.append(job_id)
+    else:
+        failed_upload_cancels.extend(upload_job_ids)
+
+    # 2) Cancel active conversion process if lock exists.
+    lock_file = Path(f"/tmp/sc_conversion_{dataset_uuid}.lock")
+    if lock_file.exists():
+        try:
+            raw_pid = lock_file.read_text(encoding="utf-8", errors="ignore").strip()
+            conversion_pid = int(raw_pid) if raw_pid else None
+        except Exception:
+            conversion_pid = None
+
+        if conversion_pid is not None:
+            conversion_pid_terminated = _terminate_pid_safely(conversion_pid, timeout_seconds=6.0)
+        try:
+            lock_file.unlink()
+        except Exception:
+            pass
+
+    return {
+        "cancelled_upload_jobs": cancelled_upload_jobs,
+        "failed_upload_cancels": failed_upload_cancels,
+        "conversion_pid": conversion_pid,
+        "conversion_pid_terminated": conversion_pid_terminated,
+    }
 
 
 def _strip_query_fragment(url: str) -> str:
@@ -2614,6 +2716,10 @@ async def delete_dataset(
         if dataset.get('user') != user_email and dataset.get('user_email') != user_email:
             raise HTTPException(status_code=403, detail="Only the dataset owner can delete it")
         
+        # Safe-delete: cancel related upload/conversion work first.
+        cancel_diag = _safe_cancel_dataset_processing(dataset_uuid, dataset, processor)
+        logger.info("Safe-delete cancel diagnostics for %s: %s", dataset_uuid, cancel_diag)
+
         # Delete dataset from database
         with mongo_collection_by_type_context('visstoredatas') as collection:
             result = collection.delete_one({"uuid": dataset_uuid})
