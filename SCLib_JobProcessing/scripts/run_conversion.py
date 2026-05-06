@@ -350,6 +350,23 @@ class DatasetConverter:
                             os.chmod(file, 0o644)
                 break
 
+        # Fallback: for flat IDX datasets (e.g. filename_template ./%04x.bin) there may be
+        # no idx+directory pair above, but we still need canonical visus.idx for ARCO conversion.
+        visus_idx_fallback = self.output_dir / "visus.idx"
+        if not visus_idx_fallback.exists():
+            top_level_idx_candidates = [
+                p for p in self.output_dir.glob("*.idx")
+                if p.is_file() and p.name != "visus.idx"
+            ]
+            if top_level_idx_candidates:
+                src_idx = top_level_idx_candidates[0]
+                try:
+                    visus_idx_fallback.symlink_to(src_idx.name)
+                    logger.info(f"Created fallback symlink: {visus_idx_fallback} -> {src_idx.name}")
+                except Exception:
+                    shutil.copy2(src_idx, visus_idx_fallback)
+                    logger.info(f"Created fallback copy: {visus_idx_fallback} from {src_idx.name}")
+
         # Ensure visus.idx exists and convert to ARCO if needed.
         self._convert_idx_to_arco_if_needed()
 
