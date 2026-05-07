@@ -337,7 +337,6 @@ class SCLib_UploadProcessor:
                 "upload_lease_expires_at": lease_until,
                 "upload_claimed_at": now,
                 "upload_heartbeat_at": now,
-                "updated_at": now,
             }
         }
         return collection.find_one_and_update(
@@ -355,7 +354,6 @@ class SCLib_UploadProcessor:
                 "$set": {
                     "upload_heartbeat_at": now,
                     "upload_lease_expires_at": now + timedelta(seconds=self.UPLOAD_LEASE_SECONDS),
-                    "updated_at": now,
                 }
             },
         )
@@ -1996,7 +1994,12 @@ scope = drive
         return None
 
     def _latest_known_file_update(self, dataset: Dict[str, Any]) -> Optional[datetime]:
-        latest = self._parse_datetime(dataset.get("updated_at") or dataset.get("date_updated"))
+        latest = None
+        upload_manifest = dataset.get("upload_manifest") if isinstance(dataset.get("upload_manifest"), dict) else {}
+        for key in ("updated_at", "created_at"):
+            ts = self._parse_datetime(upload_manifest.get(key))
+            if ts and (latest is None or ts > latest):
+                latest = ts
         for item in dataset.get("files") or []:
             if not isinstance(item, dict):
                 continue
