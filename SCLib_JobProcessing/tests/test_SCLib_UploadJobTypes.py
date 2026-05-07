@@ -135,7 +135,7 @@ class TestUploadJobConfig(unittest.TestCase):
         )
         
         # Test defaults
-        self.assertTrue(config.convert)
+        self.assertFalse(config.convert)
         self.assertFalse(config.is_public)
         self.assertIsNone(config.folder)
         self.assertIsNone(config.team_uuid)
@@ -543,8 +543,8 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
         self.assertEqual(config.source_config['access_key_id'], "AKIA...")
         self.assertEqual(config.source_config['secret_access_key'], "secret...")
     
-    def test_idx_sensor_forces_convert_true(self):
-        """IDX datasets always enter the conversion pipeline (e.g. ARCO), ignoring convert=false."""
+    def test_idx_sensor_honors_convert_false(self):
+        """IDX datasets honor the user-requested conversion flag."""
         config = create_s3_upload_job(
             bucket_name="bucket",
             object_key="prefix/",
@@ -556,7 +556,7 @@ class TestUploadJobCreationFunctions(unittest.TestCase):
             is_public=False,
         )
         self.assertEqual(config.sensor, SensorType.IDX)
-        self.assertTrue(config.convert)
+        self.assertFalse(config.convert)
     
     def test_create_url_upload_job(self):
         """Test creating URL upload job."""

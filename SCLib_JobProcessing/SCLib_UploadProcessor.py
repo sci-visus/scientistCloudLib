@@ -390,7 +390,7 @@ class SCLib_UploadProcessor:
             if dataset_files and pending_file is None:
                 # All known file jobs are terminal; nothing left for upload worker to execute.
                 # Avoid generating synthetic retry jobs that can duplicate processing.
-                self._mark_interrupted_local_idx_upload_if_expired(dataset)
+                self._mark_interrupted_local_upload_if_expired(dataset)
                 logger.debug(
                     "Dataset %s has no non-terminal file jobs; skipping upload-worker processing",
                     dataset_uuid,
@@ -481,7 +481,7 @@ class SCLib_UploadProcessor:
                     user_email=dataset.get('user') or dataset.get('user_id', ''),
                     dataset_name=dataset.get('name', ''),
                     sensor=sensor,
-                    convert=dataset.get('convert', True),
+                    convert=dataset.get('convert', False),
                     is_public=dataset.get('is_public', False),
                     folder=dataset.get('folder_uuid'),
                     team_uuid=dataset.get('team_uuid'),
@@ -496,7 +496,7 @@ class SCLib_UploadProcessor:
                     dataset_name=dataset.get('name', ''),
                     sensor=sensor,
                     original_source_path=source_path_for_job,
-                    convert=dataset.get('convert', True),
+                    convert=dataset.get('convert', False),
                     is_public=dataset.get('is_public', False),
                     folder=dataset.get('folder_uuid'),
                     team_uuid=dataset.get('team_uuid')
@@ -540,7 +540,7 @@ class SCLib_UploadProcessor:
                     sensor=sensor,
                     access_key_id=access_key_id or None,
                     secret_access_key=secret_access_key or None,
-                    convert=dataset.get('convert', True),
+                    convert=dataset.get('convert', False),
                     is_public=dataset.get('is_public', False),
                     is_downloadable=dataset.get('is_downloadable', 'only owner'),
                     folder=dataset.get('folder_uuid'),
@@ -1561,6 +1561,7 @@ scope = drive
                 metadata = job_config.metadata if isinstance(job_config.metadata, dict) else {}
                 dataset_dimensions = str(metadata.get("dimensions") or "").strip()
                 preferred_dashboard_raw = str(metadata.get("preferred_dashboard") or "").strip()
+                expected_files = metadata.get("expected_files") if isinstance(metadata.get("expected_files"), list) else []
                 preferred_dashboard = self.DASHBOARD_ID_NORMALIZATION.get(
                     preferred_dashboard_raw.lower(),
                     preferred_dashboard_raw,
@@ -1603,6 +1604,13 @@ scope = drive
                     dataset_doc["dimensions"] = dataset_dimensions
                 if preferred_dashboard:
                     dataset_doc["preferred_dashboard"] = preferred_dashboard
+                if expected_files:
+                    dataset_doc["upload_manifest"] = {
+                        "expected_files": expected_files,
+                        "created_at": datetime.utcnow(),
+                        "source": "browser",
+                    }
+                    dataset_doc["expected_files"] = expected_files
 
                 # Persist S3 connection details for stable server-side resolved-idx generation.
                 if job_config.source_type.value == "s3":
@@ -1659,6 +1667,11 @@ scope = drive
                         update_data["$set"]["dimensions"] = dataset_dimensions
                     if preferred_dashboard:
                         update_data["$set"]["preferred_dashboard"] = preferred_dashboard
+                    if expected_files:
+                        update_data["$set"]["upload_manifest.expected_files"] = expected_files
+                        update_data["$set"]["upload_manifest.source"] = "browser"
+                        update_data["$set"]["upload_manifest.updated_at"] = datetime.utcnow()
+                        update_data["$set"]["expected_files"] = expected_files
                     
                     # Store job_id for status lookups
                     if job_id:
@@ -1873,19 +1886,20 @@ scope = drive
                         # For multi-file datasets, do not queue conversion until all file jobs are terminal.
                         all_terminal, non_terminal = self._file_jobs_terminal_state(dataset_uuid, collection)
                         if all_terminal:
-                            is_idx_sensor = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper() == SensorType.IDX.value
-                            if is_idx_sensor and not self._idx_materialized_for_conversion(dataset_uuid):
+                            manifest_complete, missing_manifest = self._manifest_files_present(dataset_uuid, collection)
+                            if not manifest_complete:
                                 update_data["status"] = "uploading"
                                 update_data["canonical_state"] = "uploading"
                                 update_data["data_conversion_needed"] = False
                                 update_data["status_message"] = (
-                                    "Waiting for the rest of the local IDX upload. "
+                                    "Waiting for the rest of the selected local files to reach the server. "
                                     "If you navigated away before the files finished sending, this dataset will be marked interrupted."
                                 )
                                 update_data["error_message"] = update_data["status_message"]
                                 logger.warning(
-                                    "Dataset %s IDX conversion deferred: missing .idx/.bin materialization in upload directory",
+                                    "Dataset %s conversion deferred: missing expected files in upload directory: %s",
                                     dataset_uuid,
+                                    missing_manifest,
                                 )
                                 collection.update_one(
                                     {"uuid": dataset_uuid},
@@ -1913,13 +1927,28 @@ scope = drive
                             )
                     else:
                         # No conversion needed, mark as done
-                        update_data["status"] = "done"  # Match existing schema
-                        update_data["canonical_state"] = "ready"
-                        update_data["completed_at"] = datetime.utcnow()
-                        if is_remote_link:
-                            logger.info(f"Remote-link dataset registered (no conversion): {dataset_uuid}")
+                        manifest_complete, missing_manifest = self._manifest_files_present(dataset_uuid, collection)
+                        if manifest_complete:
+                            update_data["status"] = "done"  # Match existing schema
+                            update_data["canonical_state"] = "ready"
+                            update_data["completed_at"] = datetime.utcnow()
+                            if is_remote_link:
+                                logger.info(f"Remote-link dataset registered (no conversion): {dataset_uuid}")
+                            else:
+                                logger.info(f"Upload completed, no conversion needed for dataset: {dataset_uuid}")
                         else:
-                            logger.info(f"Upload completed, no conversion needed for dataset: {dataset_uuid}")
+                            update_data["status"] = "uploading"
+                            update_data["canonical_state"] = "uploading"
+                            update_data["status_message"] = (
+                                "Waiting for the rest of the selected local files to reach the server. "
+                                "If you navigated away before the files finished sending, this dataset will be marked interrupted."
+                            )
+                            update_data["error_message"] = update_data["status_message"]
+                            logger.warning(
+                                "Dataset %s upload not complete: missing expected files in upload directory: %s",
+                                dataset_uuid,
+                                missing_manifest,
+                            )
                 elif status == "failed":
                     update_data["error_message"] = error_message
                 
@@ -1976,25 +2005,62 @@ scope = drive
                 latest = ts
         return latest
 
-    def _mark_interrupted_local_idx_upload_if_expired(self, dataset: Dict[str, Any]) -> bool:
+    def _manifest_files_present(self, dataset_uuid: str, collection) -> tuple[bool, List[str]]:
+        """Return whether every expected local upload file is present under upload/<uuid>/."""
+        try:
+            dataset = collection.find_one(
+                {"uuid": dataset_uuid},
+                {"upload_manifest.expected_files": 1, "expected_files": 1},
+            ) or {}
+            manifest = ((dataset.get("upload_manifest") or {}).get("expected_files") or dataset.get("expected_files") or [])
+            if not isinstance(manifest, list) or not manifest:
+                return True, []
+
+            upload_dir = Path(os.getenv("JOB_IN_DATA_DIR", "/mnt/visus_datasets/upload")) / dataset_uuid
+            missing: List[str] = []
+            for item in manifest:
+                if not isinstance(item, dict):
+                    continue
+                relative_path = str(item.get("relative_path") or item.get("path") or item.get("name") or "").strip().lstrip("/")
+                if not relative_path:
+                    continue
+                candidate = (upload_dir / relative_path).resolve()
+                try:
+                    candidate.relative_to(upload_dir.resolve())
+                except ValueError:
+                    missing.append(relative_path)
+                    continue
+                expected_size = int(item.get("size") or 0)
+                if not candidate.is_file():
+                    missing.append(relative_path)
+                elif expected_size > 0 and candidate.stat().st_size != expected_size:
+                    missing.append(relative_path)
+            return len(missing) == 0, missing
+        except Exception as e:
+            logger.error("Error checking upload manifest completeness for %s: %s", dataset_uuid, e)
+            return True, []
+
+    def _mark_interrupted_local_upload_if_expired(self, dataset: Dict[str, Any]) -> bool:
         """
         Local browser uploads cannot be retried server-side after navigation because the server
         does not have access to the user's File handles. If all known local file jobs are terminal
-        but an IDX dataset still lacks its .idx/.bin materialization after a grace period, mark it
-        as failed with a user-facing interrupted message instead of re-claiming it forever.
+        but a manifest says selected files are still missing after a grace period, mark it as failed
+        with a user-facing interrupted message instead of re-claiming it forever.
         """
         try:
             dataset_uuid = str(dataset.get("uuid") or "").strip()
             if not dataset_uuid:
                 return False
 
-            sensor = str(dataset.get("sensor") or "").strip().upper()
             source_type = str(dataset.get("source_type") or "").strip().lower()
             files = dataset.get("files") if isinstance(dataset.get("files"), list) else []
 
-            if sensor != SensorType.IDX.value or source_type != UploadSourceType.LOCAL.value:
+            manifest = ((dataset.get("upload_manifest") or {}).get("expected_files") or dataset.get("expected_files") or [])
+            if source_type != UploadSourceType.LOCAL.value or not manifest:
                 return False
-            if not files or self._idx_materialized_for_conversion(dataset_uuid):
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                manifest_complete, missing = self._manifest_files_present(dataset_uuid, collection)
+            if not files or manifest_complete:
                 return False
 
             grace_seconds = max(30, self.LOCAL_UPLOAD_INTERRUPT_GRACE_SECONDS)
@@ -2003,7 +2069,7 @@ scope = drive
                 return False
 
             message = (
-                "Upload interrupted before all IDX files reached the server. "
+                "Upload interrupted before all selected files reached the server. "
                 "Only part of the selected local dataset was received, so ScientistCloud cannot retry it automatically. "
                 "Please delete this incomplete dataset and upload the folder again."
             )
@@ -2021,6 +2087,7 @@ scope = drive
                             "error_message": message,
                             "status_message": message,
                             "upload_interrupted": True,
+                            "missing_expected_files": missing,
                             "interrupted_at": datetime.utcnow(),
                             "updated_at": datetime.utcnow(),
                         },
@@ -2032,10 +2099,10 @@ scope = drive
                     },
                 )
             if result.modified_count:
-                logger.warning("Marked local IDX upload interrupted: %s", dataset_uuid)
+                logger.warning("Marked local browser upload interrupted: %s", dataset_uuid)
                 return True
         except Exception as e:
-            logger.error("Error marking interrupted local IDX upload: %s", e)
+            logger.error("Error marking interrupted local upload: %s", e)
         return False
 
     def _idx_materialized_for_conversion(self, dataset_uuid: str) -> bool:

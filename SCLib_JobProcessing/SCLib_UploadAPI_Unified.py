@@ -18,6 +18,7 @@ import shutil
 from datetime import datetime, timezone
 import asyncio
 import logging
+import json
 import aiofiles
 from pathlib import Path
 import math
@@ -92,7 +93,7 @@ class UploadRequest(BaseModel):
     user_email: EmailStr = Field(..., description="User email address")
     dataset_name: str = Field(..., min_length=1, max_length=255, description="Name of the dataset")
     sensor: SensorType = Field(..., description="Sensor type")
-    convert: bool = Field(True, description="Whether to convert the data")
+    convert: bool = Field(False, description="Whether to convert the data")
     is_public: bool = Field(False, description="Whether dataset is public")
     is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
@@ -136,7 +137,7 @@ class ChunkUploadRequest(BaseModel):
     user_email: EmailStr = Field(..., description="User email address")
     dataset_name: str = Field(..., min_length=1, max_length=255, description="Name of the dataset")
     sensor: SensorType = Field(..., description="Sensor type")
-    convert: bool = Field(True, description="Whether to convert the data")
+    convert: bool = Field(False, description="Whether to convert the data")
     is_public: bool = Field(False, description="Whether dataset is public")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
@@ -225,6 +226,37 @@ def delete_upload_session(upload_id: str) -> None:
     upload_sessions.pop(upload_id, None)
     db = get_mongo_database()
     db["upload_sessions"].delete_one({"upload_id": upload_id})
+
+def _parse_expected_files_manifest(expected_files: Optional[str]) -> List[Dict[str, Any]]:
+    """Parse and normalize the browser-selected expected-files manifest."""
+    if not expected_files:
+        return []
+    try:
+        parsed = json.loads(expected_files)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid expected_files manifest JSON: {e}")
+    if not isinstance(parsed, list):
+        raise HTTPException(status_code=400, detail="expected_files must be a JSON array")
+
+    normalized: List[Dict[str, Any]] = []
+    for item in parsed:
+        if not isinstance(item, dict):
+            continue
+        relative_path = str(item.get("relative_path") or item.get("path") or item.get("name") or "").strip().lstrip("/")
+        name = str(item.get("name") or os.path.basename(relative_path) or "").strip()
+        if not relative_path or not name:
+            continue
+        entry: Dict[str, Any] = {
+            "relative_path": relative_path,
+            "name": name,
+            "size": int(item.get("size") or 0),
+        }
+        if item.get("last_modified") is not None:
+            entry["last_modified"] = item.get("last_modified")
+        if item.get("type") is not None:
+            entry["type"] = str(item.get("type") or "")
+        normalized.append(entry)
+    return normalized
 
 def _serialize_session(upload_id: str, session: Dict[str, Any]) -> Dict[str, Any]:
     serializable = dict(session)
@@ -461,7 +493,7 @@ async def upload_file(
     user_email: EmailStr = Form(..., description="User email address"),
     dataset_name: str = Form(..., min_length=1, max_length=255, description="Name of the dataset"),
     sensor: SensorType = Form(..., description="Sensor type"),
-    convert: bool = Form(True, description="Whether to convert the data"),
+    convert: bool = Form(False, description="Whether to convert the data"),
     is_public: bool = Form(False, description="Whether dataset is public"),
     is_downloadable: str = Form("only owner", description="Download permission: 'only owner', 'only team', or 'public'"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name (UI organization metadata only, NOT for file system structure)"),
@@ -470,6 +502,7 @@ async def upload_file(
     tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
+    expected_files: Optional[str] = Form(None, description="JSON manifest of all files selected by the browser for this dataset"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -496,6 +529,8 @@ async def upload_file(
                 out.write(chunk)
                 file_size += len(chunk)
         
+        expected_files_manifest = _parse_expected_files_manifest(expected_files)
+
         # Determine upload type based on file size
         upload_type = determine_upload_type(file_size)
         
@@ -504,12 +539,12 @@ async def upload_file(
                 chunked_content = staged.read()
             return await _handle_chunked_upload(
                 chunked_content, file.filename, file_size, user_email, dataset_name,
-                sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor
+                sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, expected_files_manifest, background_tasks, processor
             )
         else:
             return await _handle_standard_upload(
                 b"", file.filename, user_email, dataset_name,
-                sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, background_tasks, processor,
+                sensor, convert, is_public, is_downloadable, folder, relative_path, team_uuid, tags, dataset_identifier, add_to_existing, expected_files_manifest, background_tasks, processor,
                 staged_file_path=staged_file,
                 staged_file_size=file_size,
             )
@@ -526,7 +561,7 @@ async def upload_file_by_path(
     user_email: EmailStr = Form(..., description="User email address"),
     dataset_name: str = Form(..., min_length=1, max_length=255, description="Name of the dataset"),
     sensor: SensorType = Form(..., description="Sensor type"),
-    convert: bool = Form(True, description="Whether to convert the data"),
+    convert: bool = Form(False, description="Whether to convert the data"),
     is_public: bool = Form(False, description="Whether dataset is public"),
     is_downloadable: str = Form("only owner", description="Download permission: 'only owner', 'only team', or 'public'"),
     folder: Optional[str] = Form(None, max_length=255, description="Optional folder name (UI organization metadata only, NOT for file system structure)"),
@@ -535,6 +570,7 @@ async def upload_file_by_path(
     tags: Optional[str] = Form(None, max_length=500, description="Optional tags for the dataset (comma-separated)"),
     dataset_identifier: Optional[str] = Form(None, description="Dataset identifier (UUID, name, slug, or numeric ID) for directory uploads or adding to existing dataset"),
     add_to_existing: bool = Form(False, description="Whether to add to existing dataset (requires dataset_identifier)"),
+    expected_files: Optional[str] = Form(None, description="JSON manifest of all files selected by the browser for this dataset"),
     processor: Any = Depends(get_processor)
 ):
     """
@@ -560,6 +596,8 @@ async def upload_file_by_path(
         # Use original_filename if provided (to preserve original names), otherwise use basename of file_path
         filename = original_filename if original_filename else os.path.basename(file_path)
         
+        expected_files_manifest = _parse_expected_files_manifest(expected_files)
+
         # Resolve dataset identifier to UUID if provided
         upload_uuid = None
         if dataset_identifier:
@@ -599,7 +637,8 @@ async def upload_file_by_path(
             convert=convert,
             is_public=is_public,
             folder=folder,  # Metadata only - for UI organization in the portal
-            team_uuid=team_uuid
+            team_uuid=team_uuid,
+            metadata={"expected_files": expected_files_manifest} if expected_files_manifest else {}
         )
         # Override destination_path to preserve directory structure
         job_config.destination_path = destination_path
@@ -635,7 +674,7 @@ async def upload_file_by_path(
 async def _handle_standard_upload(
     content: bytes, filename: str, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, is_downloadable: str, folder: Optional[str],
-    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any,
+    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, expected_files_manifest: Optional[List[Dict[str, Any]]], background_tasks: BackgroundTasks, processor: Any,
     staged_file_path: Optional[str] = None,
     staged_file_size: Optional[int] = None,
 ) -> UploadResponse:
@@ -699,7 +738,8 @@ async def _handle_standard_upload(
         is_downloadable=is_downloadable,
         folder=folder,  # Metadata only - for UI organization in the portal
         team_uuid=team_uuid,
-        tags=tags
+        tags=tags,
+        metadata={"expected_files": expected_files_manifest} if expected_files_manifest else {}
     )
     # Override destination_path to preserve directory structure
     job_config.destination_path = destination_path
@@ -730,7 +770,7 @@ async def _handle_standard_upload(
 async def _handle_chunked_upload(
     content: bytes, filename: str, file_size: int, user_email: str, dataset_name: str,
     sensor: SensorType, convert: bool, is_public: bool, is_downloadable: str, folder: Optional[str],
-    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, background_tasks: BackgroundTasks, processor: Any
+    relative_path: Optional[str], team_uuid: Optional[str], tags: Optional[str], dataset_identifier: Optional[str], add_to_existing: bool, expected_files_manifest: Optional[List[Dict[str, Any]]], background_tasks: BackgroundTasks, processor: Any
 ) -> UploadResponse:
     """Handle chunked upload for large files."""
     # Generate unique upload ID
@@ -774,6 +814,7 @@ async def _handle_chunked_upload(
         'relative_path': relative_path,  # For preserving directory structure
         'team_uuid': team_uuid,
         'tags': tags,
+        'expected_files': expected_files_manifest or [],
         'dataset_uuid': upload_uuid,  # Include dataset UUID for directory uploads
         'total_chunks': total_chunks,
         'chunk_size': CHUNK_SIZE,
@@ -806,7 +847,8 @@ async def _handle_chunked_upload(
         is_downloadable=is_downloadable,
         folder=folder,  # Metadata only - for UI organization
         team_uuid=team_uuid,
-        tags=tags
+        tags=tags,
+        metadata={"expected_files": expected_files_manifest} if expected_files_manifest else {}
     )
     job_config.destination_path = destination_path
     
@@ -892,7 +934,8 @@ async def _process_chunks(upload_id: str, content: bytes, processor: Any):
             is_public=session['is_public'],
             folder=session.get('folder'),  # Metadata only - for UI organization in the portal
             team_uuid=session['team_uuid'],
-            tags=session.get('tags')
+            tags=session.get('tags'),
+            metadata={"expected_files": session.get("expected_files") or []} if session.get("expected_files") else {}
         )
         # Override destination_path to preserve directory structure (though file is already there)
         job_config.destination_path = destination_path

@@ -73,7 +73,7 @@ class UploadJobConfig:
     user_email: str = ""  # User email
     dataset_name: str = ""  # Name of dataset
     sensor: SensorType = SensorType.OTHER  # Sensor type
-    convert: bool = True  # Whether to convert the data
+    convert: bool = False  # Whether to convert the data
     is_public: bool = False  # Whether dataset is public
     is_downloadable: str = "only owner"  # Download permission: "only owner", "only team", "public"
     
@@ -259,12 +259,7 @@ def get_tool_config(source_type: UploadSourceType) -> Dict[str, Any]:
 
 
 def effective_convert_for_sensor(sensor: SensorType, convert: bool) -> bool:
-    """
-    IDX datasets always use the conversion pipeline (materialize when remote, ARCO when needed).
-    Client/UI cannot disable conversion for IDX without changing sensor type.
-    """
-    if sensor == SensorType.IDX:
-        return True
+    """Return the user-requested conversion flag without sensor-specific overrides."""
     return bool(convert)
 
 
@@ -277,7 +272,7 @@ def create_upload_job_config(
     dataset_name: str,
     sensor: SensorType,
     original_source_path: Optional[str] = None,
-    convert: bool = True,
+    convert: bool = False,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
@@ -311,7 +306,7 @@ def create_local_upload_job(
     dataset_name: str,
     sensor: SensorType,
     original_source_path: Optional[str] = None,
-    convert: bool = True,
+    convert: bool = False,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
@@ -352,7 +347,7 @@ def create_google_drive_upload_job(
     dataset_name: str,
     sensor: SensorType,
     service_account_file: Optional[str] = None,
-    convert: bool = True,
+    convert: bool = False,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
@@ -403,7 +398,7 @@ def create_s3_upload_job(
     sensor: SensorType,
     access_key_id: Optional[str] = None,
     secret_access_key: Optional[str] = None,
-    convert: bool = True,
+    convert: bool = False,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
@@ -456,7 +451,7 @@ def create_url_upload_job(
     user_email: str,
     dataset_name: str,
     sensor: SensorType,
-    convert: bool = True,
+    convert: bool = False,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
