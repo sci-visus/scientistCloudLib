@@ -75,6 +75,16 @@ from .SCData_process_zarr import (
     ProcessZarr,
 )
 
+from .SCDash_dataset_resolver import (
+    find_dataset_files,
+    get_local_dataset_roots,
+    is_remote_dataset_identifier,
+    resolve_local_dataset_file,
+    resolve_local_idx_file,
+    resolve_local_nexus_and_mmap,
+    resolve_local_nexus_file,
+)
+
 # Undo/Redo components (don't depend on bokeh, so import separately)
 from .SCDashUI_undo_redo import (
     StateHistory,
@@ -180,6 +190,14 @@ __all__ = [
     "ProcessNexus",
     "Process4dNexus",
     "ProcessZarr",
+    # Dataset resolution
+    "find_dataset_files",
+    "get_local_dataset_roots",
+    "is_remote_dataset_identifier",
+    "resolve_local_dataset_file",
+    "resolve_local_idx_file",
+    "resolve_local_nexus_and_mmap",
+    "resolve_local_nexus_file",
     # Undo/Redo (core functionality, doesn't depend on bokeh)
     "StateHistory",
     "PlotStateHistory",
