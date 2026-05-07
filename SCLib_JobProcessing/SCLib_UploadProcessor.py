@@ -1870,6 +1870,7 @@ scope = drive
                     "canonical_state": self.CANONICAL_STATE_MAP.get(str(status).strip().lower(), "queued"),
                     "updated_at": datetime.utcnow()
                 }
+                unset_data = {}
                 
                 if status == "completed":
                     # Check if conversion is needed
@@ -1910,6 +1911,9 @@ scope = drive
                             update_data["status"] = "conversion queued"
                             update_data["canonical_state"] = "conversion_queued"
                             update_data["data_conversion_needed"] = True
+                            update_data["status_message"] = "Upload complete. Dataset conversion has been queued."
+                            unset_data["error_message"] = ""
+                            unset_data["missing_expected_files"] = ""
                             logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
 
                             # Automatically create conversion job in the queue
@@ -1930,6 +1934,9 @@ scope = drive
                             update_data["status"] = "done"  # Match existing schema
                             update_data["canonical_state"] = "ready"
                             update_data["completed_at"] = datetime.utcnow()
+                            unset_data["status_message"] = ""
+                            unset_data["error_message"] = ""
+                            unset_data["missing_expected_files"] = ""
                             if is_remote_link:
                                 logger.info(f"Remote-link dataset registered (no conversion): {dataset_uuid}")
                             else:
@@ -1950,10 +1957,11 @@ scope = drive
                 elif status == "failed":
                     update_data["error_message"] = error_message
                 
-                collection.update_one(
-                    {"uuid": dataset_uuid},
-                    {"$set": update_data}
-                )
+                update_doc = {"$set": update_data}
+                if unset_data:
+                    update_doc["$unset"] = unset_data
+
+                collection.update_one({"uuid": dataset_uuid}, update_doc)
                 logger.info(f"Updated dataset status: {dataset_uuid} -> {update_data.get('status', status)}")
 
         except Exception as e:
