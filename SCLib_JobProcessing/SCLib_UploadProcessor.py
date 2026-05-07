@@ -64,6 +64,7 @@ class SCLib_UploadProcessor:
     }
     UPLOAD_LEASE_SECONDS = int(os.getenv("SC_UPLOAD_LEASE_SECONDS", "120"))
     HEARTBEAT_SECONDS = int(os.getenv("SC_UPLOAD_HEARTBEAT_SECONDS", "10"))
+    LOCAL_UPLOAD_INTERRUPT_GRACE_SECONDS = int(os.getenv("SC_LOCAL_UPLOAD_INTERRUPT_GRACE_SECONDS", "300"))
     CANONICAL_STATE_MAP = {
         "queued": "queued",
         "initializing": "queued",
@@ -389,6 +390,7 @@ class SCLib_UploadProcessor:
             if dataset_files and pending_file is None:
                 # All known file jobs are terminal; nothing left for upload worker to execute.
                 # Avoid generating synthetic retry jobs that can duplicate processing.
+                self._mark_interrupted_local_idx_upload_if_expired(dataset)
                 logger.debug(
                     "Dataset %s has no non-terminal file jobs; skipping upload-worker processing",
                     dataset_uuid,
@@ -1874,10 +1876,13 @@ scope = drive
                             is_idx_sensor = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper() == SensorType.IDX.value
                             if is_idx_sensor and not self._idx_materialized_for_conversion(dataset_uuid):
                                 update_data["status"] = "uploading"
+                                update_data["canonical_state"] = "uploading"
                                 update_data["data_conversion_needed"] = False
-                                update_data["error_message"] = (
-                                    "IDX dataset is incomplete: waiting for both .idx and .bin files before conversion."
+                                update_data["status_message"] = (
+                                    "Waiting for the rest of the local IDX upload. "
+                                    "If you navigated away before the files finished sending, this dataset will be marked interrupted."
                                 )
+                                update_data["error_message"] = update_data["status_message"]
                                 logger.warning(
                                     "Dataset %s IDX conversion deferred: missing .idx/.bin materialization in upload directory",
                                     dataset_uuid,
@@ -1891,6 +1896,7 @@ scope = drive
 
                             # Set status to "conversion queued" instead of "done"
                             update_data["status"] = "conversion queued"
+                            update_data["canonical_state"] = "conversion_queued"
                             update_data["data_conversion_needed"] = True
                             logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
 
@@ -1898,6 +1904,7 @@ scope = drive
                             self._create_conversion_job(dataset_uuid, job_config, collection)
                         else:
                             update_data["status"] = "uploading"
+                            update_data["canonical_state"] = "uploading"
                             update_data["data_conversion_needed"] = False
                             logger.info(
                                 "Upload file finished for dataset=%s; waiting for remaining file jobs before conversion. non_terminal=%s",
@@ -1907,6 +1914,7 @@ scope = drive
                     else:
                         # No conversion needed, mark as done
                         update_data["status"] = "done"  # Match existing schema
+                        update_data["canonical_state"] = "ready"
                         update_data["completed_at"] = datetime.utcnow()
                         if is_remote_link:
                             logger.info(f"Remote-link dataset registered (no conversion): {dataset_uuid}")
@@ -1945,6 +1953,90 @@ scope = drive
         except Exception:
             # Fail-open to avoid deadlocking datasets in uploading forever.
             return True, 0
+
+    def _parse_datetime(self, value: Any) -> Optional[datetime]:
+        """Parse Mongo/Pydantic datetime values into naive UTC datetimes for comparisons."""
+        if isinstance(value, datetime):
+            return value.replace(tzinfo=None) if value.tzinfo else value
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+                return parsed.replace(tzinfo=None) if parsed.tzinfo else parsed
+            except Exception:
+                return None
+        return None
+
+    def _latest_known_file_update(self, dataset: Dict[str, Any]) -> Optional[datetime]:
+        latest = self._parse_datetime(dataset.get("updated_at") or dataset.get("date_updated"))
+        for item in dataset.get("files") or []:
+            if not isinstance(item, dict):
+                continue
+            ts = self._parse_datetime(item.get("updated_at") or item.get("created_at"))
+            if ts and (latest is None or ts > latest):
+                latest = ts
+        return latest
+
+    def _mark_interrupted_local_idx_upload_if_expired(self, dataset: Dict[str, Any]) -> bool:
+        """
+        Local browser uploads cannot be retried server-side after navigation because the server
+        does not have access to the user's File handles. If all known local file jobs are terminal
+        but an IDX dataset still lacks its .idx/.bin materialization after a grace period, mark it
+        as failed with a user-facing interrupted message instead of re-claiming it forever.
+        """
+        try:
+            dataset_uuid = str(dataset.get("uuid") or "").strip()
+            if not dataset_uuid:
+                return False
+
+            sensor = str(dataset.get("sensor") or "").strip().upper()
+            source_type = str(dataset.get("source_type") or "").strip().lower()
+            files = dataset.get("files") if isinstance(dataset.get("files"), list) else []
+
+            if sensor != SensorType.IDX.value or source_type != UploadSourceType.LOCAL.value:
+                return False
+            if not files or self._idx_materialized_for_conversion(dataset_uuid):
+                return False
+
+            grace_seconds = max(30, self.LOCAL_UPLOAD_INTERRUPT_GRACE_SECONDS)
+            latest_update = self._latest_known_file_update(dataset)
+            if latest_update and (datetime.utcnow() - latest_update).total_seconds() < grace_seconds:
+                return False
+
+            message = (
+                "Upload interrupted before all IDX files reached the server. "
+                "Only part of the selected local dataset was received, so ScientistCloud cannot retry it automatically. "
+                "Please delete this incomplete dataset and upload the folder again."
+            )
+
+            with mongo_collection_by_type_context('visstoredatas') as collection:
+                result = collection.update_one(
+                    {
+                        "uuid": dataset_uuid,
+                        "status": "uploading",
+                    },
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "canonical_state": "failed",
+                            "error_message": message,
+                            "status_message": message,
+                            "upload_interrupted": True,
+                            "interrupted_at": datetime.utcnow(),
+                            "updated_at": datetime.utcnow(),
+                        },
+                        "$unset": {
+                            "upload_lease_owner": "",
+                            "upload_lease_expires_at": "",
+                            "upload_claimed_at": "",
+                        },
+                    },
+                )
+            if result.modified_count:
+                logger.warning("Marked local IDX upload interrupted: %s", dataset_uuid)
+                return True
+        except Exception as e:
+            logger.error("Error marking interrupted local IDX upload: %s", e)
+        return False
 
     def _idx_materialized_for_conversion(self, dataset_uuid: str) -> bool:
         """
