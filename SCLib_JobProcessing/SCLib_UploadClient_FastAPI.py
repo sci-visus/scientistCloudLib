@@ -7,7 +7,7 @@ Modern client for interacting with the FastAPI-based ScientistCloud Upload API.
 import requests
 import json
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 from pathlib import Path
 import aiohttp
 import asyncio
