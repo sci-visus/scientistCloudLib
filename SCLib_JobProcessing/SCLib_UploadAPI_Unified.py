@@ -149,6 +149,7 @@ class UploadResponse(BaseModel):
     message: str = Field(..., description="Status message")
     estimated_duration: Optional[int] = Field(None, description="Estimated duration in seconds")
     upload_type: str = Field(..., description="Type of upload (standard or chunked)")
+    dataset_uuid: Optional[str] = Field(None, description="Dataset UUID associated with this upload")
 
 class ChunkUploadResponse(BaseModel):
     """Response for chunked upload initiation."""
@@ -351,6 +352,7 @@ async def initiate_upload(
 
         # Generate unique job ID
         job_id = f"upload_{int(datetime.now().timestamp())}_{uuid.uuid4().hex[:8]}"
+        dataset_uuid = str(uuid.uuid4())
         
         # Create upload job based on source type
         if request.source_type == UploadSourceType.GOOGLE_DRIVE:
@@ -412,7 +414,7 @@ async def initiate_upload(
             job_config = create_google_drive_upload_job(
                 file_id=file_id,
                 service_account_file=source_config.get('service_account_file'),
-                dataset_uuid=str(uuid.uuid4()),
+                dataset_uuid=dataset_uuid,
                 user_email=request.user_email,
                 dataset_name=request.dataset_name,
                 sensor=request.sensor,
@@ -432,7 +434,7 @@ async def initiate_upload(
                 object_key=request.source_config.get('object_key', ''),
                 access_key_id=request.source_config.get('access_key_id'),
                 secret_access_key=request.source_config.get('secret_access_key'),
-                dataset_uuid=str(uuid.uuid4()),
+                dataset_uuid=dataset_uuid,
                 user_email=request.user_email,
                 dataset_name=request.dataset_name,
                 sensor=request.sensor,
@@ -451,7 +453,7 @@ async def initiate_upload(
         elif request.source_type == UploadSourceType.URL:
             job_config = create_url_upload_job(
                 url=request.source_config['url'],
-                dataset_uuid=str(uuid.uuid4()),
+                dataset_uuid=dataset_uuid,
                 user_email=request.user_email,
                 dataset_name=request.dataset_name,
                 sensor=request.sensor,
@@ -482,7 +484,8 @@ async def initiate_upload(
             status="queued",
             message=f"Upload job initiated for {request.source_type}",
             estimated_duration=estimated_duration,
-            upload_type=upload_type
+            upload_type=upload_type,
+            dataset_uuid=dataset_uuid
         )
         
     except Exception as e:
