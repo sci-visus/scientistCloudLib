@@ -9,7 +9,7 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTa
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, Field, validator
-from typing import Dict, Any, Optional, List, BinaryIO
+from typing import Dict, Any, Optional, List, BinaryIO, Union
 import uuid
 import os
 import tempfile
@@ -98,7 +98,7 @@ class UploadRequest(BaseModel):
     is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
     team_uuid: Optional[str] = Field(None, description="Optional team UUID")
-    tags: Optional[str] = Field(None, max_length=500, description="Optional tags for the dataset (comma-separated)")
+    tags: Optional[Union[str, List[str]]] = Field(None, description="Optional tags for the dataset (comma-separated string or list)")
     dimensions: Optional[str] = Field(None, max_length=255, description="Optional dataset dimensions")
     preferred_dashboard: Optional[str] = Field(None, max_length=255, description="Optional preferred dashboard")
 
@@ -339,7 +339,10 @@ async def initiate_upload(
     For cloud sources, this creates a standard job. For local files, use the /upload endpoint.
     """
     try:
-        tags = [tag.strip() for tag in (request.tags or "").split(",") if tag.strip()]
+        if isinstance(request.tags, list):
+            tags = [str(tag).strip() for tag in request.tags if str(tag).strip()]
+        else:
+            tags = [tag.strip() for tag in (request.tags or "").split(",") if tag.strip()]
         metadata = {}
         if request.dimensions is not None:
             metadata["dimensions"] = str(request.dimensions).strip()
