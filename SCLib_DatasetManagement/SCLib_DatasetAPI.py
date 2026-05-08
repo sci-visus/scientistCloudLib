@@ -2805,6 +2805,66 @@ async def trigger_conversion(
         
         if not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
+
+        source_type = str(dataset.get("source_type") or "").strip().lower()
+        source_path = str(dataset.get("source_path") or "").strip()
+        sensor = str(dataset.get("sensor") or "").strip().upper()
+        if source_type == "s3" and sensor == "IDX" and source_path.startswith("s3://"):
+            upload_root = os.getenv("JOB_IN_DATA_DIR", "/mnt/visus_datasets/upload")
+            upload_dir = os.path.join(upload_root, dataset_uuid)
+            has_local_idx = False
+            if os.path.isdir(upload_dir):
+                for _, _, filenames in os.walk(upload_dir):
+                    if any(name.lower().endswith(".idx") for name in filenames):
+                        has_local_idx = True
+                        break
+
+            if not has_local_idx:
+                access_key = str(dataset.get("s3_access_key_id") or "").strip()
+                secret_key = str(dataset.get("s3_secret_access_key") or "").strip()
+                if not access_key or not secret_key:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=(
+                            "This S3 dataset is linked-only and its files are not staged locally. "
+                            "Conversion needs saved S3 credentials so ScientistCloud can download the IDX "
+                            "prefix before converting it. Reconnect the S3 dataset with conversion enabled, "
+                            "or upload the dataset files first."
+                        )
+                    )
+
+                set_data = {
+                    "status": "uploading",
+                    "canonical_state": "uploading",
+                    "convert": True,
+                    "data_conversion_needed": True,
+                    "status_message": "Downloading linked S3 IDX files before conversion.",
+                    "updated_at": datetime.utcnow()
+                }
+                if isinstance(dataset.get("files"), list) and dataset.get("files"):
+                    set_data["files.$[].status"] = "queued"
+                    set_data["files.$[].error_message"] = ""
+                    set_data["files.$[].updated_at"] = datetime.utcnow()
+
+                with mongo_collection_by_type_context('visstoredatas') as collection:
+                    collection.update_one(
+                        {"uuid": dataset_uuid},
+                        {
+                            "$set": set_data,
+                            "$unset": {
+                                "error_message": "",
+                                "conversion_last_error": ""
+                            }
+                        }
+                    )
+
+                logger.info(f"Queued S3 materialization before conversion for dataset: {identifier} ({dataset_uuid})")
+                return {
+                    "success": True,
+                    "message": "S3 dataset download queued before conversion",
+                    "status": "uploading",
+                    "dataset_uuid": dataset_uuid
+                }
         
         # Update dataset status to trigger conversion
         # Set status to "conversion queued" so the background service picks it up

@@ -222,6 +222,11 @@ class SCLib_BackgroundService:
             
             input_path = os.path.join(input_dir, dataset_uuid)
             output_path = os.path.join(output_dir, dataset_uuid)
+
+            if self._s3_idx_needs_materialization(dataset, input_path):
+                if self._reroute_s3_idx_materialization(datasets_collection, dataset, input_path):
+                    print(f"↩️ Dataset {dataset_uuid} is linked S3 IDX; queued S3 download before conversion")
+                    return
             
             # Check if input directory exists - if not, mark as failed and skip
             if not os.path.exists(input_path):
@@ -284,6 +289,82 @@ class SCLib_BackgroundService:
             self._handle_conversion_failure(dataset_uuid, e)
         finally:
             self._release_conversion_lease(dataset_uuid)
+
+    def _find_local_idx(self, path: str) -> Optional[str]:
+        """Return the first local .idx descriptor under a directory, if present."""
+        if not path or not os.path.isdir(path):
+            return None
+        for root, _, filenames in os.walk(path):
+            for filename in filenames:
+                if filename.lower().endswith(".idx"):
+                    return os.path.join(root, filename)
+        return None
+
+    def _s3_idx_needs_materialization(self, dataset: Dict[str, Any], input_path: str) -> bool:
+        """S3 linked-only IDX datasets must be downloaded before local conversion."""
+        source_type = str(dataset.get("source_type") or "").strip().lower()
+        sensor = str(dataset.get("sensor") or "").strip().upper()
+        source_path = str(dataset.get("source_path") or "").strip()
+        if source_type != "s3" or sensor != "IDX" or not source_path.startswith("s3://"):
+            return False
+        return self._find_local_idx(input_path) is None
+
+    def _reroute_s3_idx_materialization(self, datasets_collection, dataset: Dict[str, Any], input_path: str) -> bool:
+        """Move linked S3 IDX datasets back to upload processing so files are staged first."""
+        dataset_uuid = dataset.get("uuid")
+        access_key = str(dataset.get("s3_access_key_id") or "").strip()
+        secret_key = str(dataset.get("s3_secret_access_key") or "").strip()
+        if not access_key or not secret_key:
+            message = (
+                "This S3 dataset is linked-only and its files are not staged locally. "
+                "Conversion needs saved S3 credentials so ScientistCloud can download the IDX "
+                "prefix before converting it. Reconnect the S3 dataset with conversion enabled, "
+                "or upload the dataset files first."
+            )
+            datasets_collection.update_one(
+                {"uuid": dataset_uuid},
+                {
+                    "$set": {
+                        "status": "conversion failed",
+                        "canonical_state": "failed",
+                        "conversion_last_error": message,
+                        "error_message": message,
+                        "status_message": message,
+                        "updated_at": utc_now(),
+                    },
+                    "$unset": {
+                        "conversion_lease_owner": "",
+                        "conversion_lease_expires_at": "",
+                    },
+                },
+            )
+            print(f"❌ Cannot materialize linked S3 dataset {dataset_uuid}: missing saved S3 credentials")
+            return True
+
+        set_data = {
+            "status": "uploading",
+            "canonical_state": "uploading",
+            "convert": True,
+            "data_conversion_needed": True,
+            "status_message": f"Downloading linked S3 IDX files into {input_path} before conversion.",
+            "updated_at": utc_now(),
+        }
+        if isinstance(dataset.get("files"), list) and dataset.get("files"):
+            set_data["files.$[].status"] = "queued"
+            set_data["files.$[].error_message"] = ""
+            set_data["files.$[].updated_at"] = utc_now()
+
+        update_doc = {
+            "$set": set_data,
+            "$unset": {
+                "error_message": "",
+                "conversion_last_error": "",
+                "conversion_lease_owner": "",
+                "conversion_lease_expires_at": "",
+            },
+        }
+        datasets_collection.update_one({"uuid": dataset_uuid}, update_doc)
+        return True
     
     def _get_config(self):
         """Get configuration."""
