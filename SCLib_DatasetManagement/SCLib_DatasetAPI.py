@@ -88,6 +88,13 @@ except ImportError:
 # Get logger
 logger = logging.getLogger(__name__)
 
+
+def _openvisus_resolved_idx_writes_disabled() -> bool:
+    """When true, openvisus-resolved-idx never creates or regenerates files (testing / pure-remote loads)."""
+    v = str(os.getenv("SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX", "")).strip().lower()
+    return v in ("1", "true", "yes", "on")
+
+
 try:
     from ..SCLib_JobProcessing.SCLib_MongoConnection import mongo_database_context
 except ImportError:
@@ -2137,6 +2144,34 @@ async def create_openvisus_resolved_idx(
         output_name = (request.output_filename or "visus.idx").strip() or "visus.idx"
         resolved_idx_path = target_dir / output_name
         marker_path = target_dir / f".{output_name}.generating"
+
+        # Global kill switch: blocks OpenVisusSlice / DarkMatter / other dashboards from materializing idx.
+        if _openvisus_resolved_idx_writes_disabled():
+            if resolved_idx_path.exists():
+                logger.info(
+                    "OpenVisus resolved idx reuse only (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX): %s",
+                    resolved_idx_path,
+                )
+                return {
+                    "success": True,
+                    "status": "ready",
+                    "reused": True,
+                    "dataset_uuid": target_uuid,
+                    "source_s3_uri": s3_uri,
+                    "resolved_idx_path": str(resolved_idx_path),
+                    "resolved_idx_http_url": _resolved_idx_http_url(
+                        dataset_uuid=target_uuid,
+                        file_name=output_name,
+                    ),
+                    "converted_dir": str(target_dir),
+                }
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "OpenVisus resolved-idx writes are disabled (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1) "
+                    f"and no file exists at {resolved_idx_path}"
+                ),
+            )
 
         # Fast path: if resolved idx already exists and is valid, reuse it without requiring credentials.
         # This supports dashboard consumers that should not manage credential-bearing generation requests.
