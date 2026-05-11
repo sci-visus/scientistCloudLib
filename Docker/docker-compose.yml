@@ -85,6 +85,9 @@ services:
     networks:
       - docker_visstore_web
     environment:
+      # When set to 1/true, POST openvisus-resolved-idx does not write idx files (testing / pure-remote).
+      # Must be listed here so compose passes it through (values come from Docker/.env or --env-file).
+      SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX: ${SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX:-}
       # Database connection
       MONGO_URL: ${MONGO_URL}
       DB_NAME: ${DB_NAME}
