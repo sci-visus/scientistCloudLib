@@ -202,6 +202,10 @@ class S3ResolvedIdxRequest(BaseModel):
     output_filename: str = Field("visus.idx", description="Output idx filename in converted directory")
     force_refresh: bool = Field(False, description="Regenerate resolved idx even if it already exists")
     background: bool = Field(True, description="Generate resolved idx in background and return pending status")
+    filename_template_mode: str = Field(
+        "proxy",
+        description="Resolved filename_template mode: proxy, s3, or https"
+    )
 
 
 def _boolish(value: Any) -> bool:
@@ -785,6 +789,7 @@ def _build_and_store_resolved_idx(
     secret_access_key: str,
     target_dir: Path,
     output_name: str,
+    filename_template_mode: str = "proxy",
 ) -> Dict[str, Any]:
     import boto3
     from botocore.client import Config as BotoConfig
@@ -833,29 +838,48 @@ def _build_and_store_resolved_idx(
         key_prefix = filename_template_key[:wildcard_idx]
     else:
         key_prefix = filename_template_key.rsplit("/", 1)[0] + "/" if "/" in filename_template_key else ""
-    token_ttl_seconds = int(os.getenv("S3_OBJECT_PROXY_TOKEN_TTL_SECONDS", "604800"))
-    proxy_token = _create_object_proxy_token(
-        bucket=bucket,
-        key_prefix=key_prefix,
-        endpoint_url=endpoint_url,
-        region_name=region_name,
-        path_style=path_style,
-        access_key_id=access_key_id,
-        secret_access_key=secret_access_key,
-        expires_in_seconds=token_ttl_seconds,
-    )
-    # IMPORTANT: do not put OpenVisus printf tokens (`%04x`, etc.) in a *query*
-    # parameter. URL parsers treat `%..` as percent-encoded bytes before FastAPI
-    # sees `key`, which corrupts the pattern. Do not "URL-encode %" into `%25`
-    # inside the idx file either — OpenVisus printf expansion does not decode
-    # `%25` back to `%`. Use a path-based URL so `%04x` remains literal in the
-    # stored template and only undergoes normal URL percent-decoding once.
-    full_template = (
-        f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
-        f"/{proxy_token}/{filename_template_key}"
-    )
+    template_mode = (filename_template_mode or "proxy").strip().lower()
+    if template_mode == "s3":
+        full_template = f"s3://{bucket}/{filename_template_key}"
+    elif template_mode == "https":
+        endpoint = (endpoint_url or "").rstrip("/")
+        if not endpoint:
+            raise ValueError("https filename_template mode requires endpoint_url")
+        if path_style:
+            full_template = f"{endpoint}/{bucket}/{filename_template_key}"
+        else:
+            parsed_endpoint = urlparse(endpoint)
+            if not parsed_endpoint.scheme or not parsed_endpoint.netloc:
+                raise ValueError(f"Invalid endpoint_url for virtual-host HTTPS template: {endpoint_url}")
+            full_template = (
+                f"{parsed_endpoint.scheme}://{bucket}.{parsed_endpoint.netloc}"
+                f"{parsed_endpoint.path.rstrip('/')}/{filename_template_key}"
+            )
+    else:
+        token_ttl_seconds = int(os.getenv("S3_OBJECT_PROXY_TOKEN_TTL_SECONDS", "604800"))
+        proxy_token = _create_object_proxy_token(
+            bucket=bucket,
+            key_prefix=key_prefix,
+            endpoint_url=endpoint_url,
+            region_name=region_name,
+            path_style=path_style,
+            access_key_id=access_key_id,
+            secret_access_key=secret_access_key,
+            expires_in_seconds=token_ttl_seconds,
+        )
+        # IMPORTANT: do not put OpenVisus printf tokens (`%04x`, etc.) in a *query*
+        # parameter. URL parsers treat `%..` as percent-encoded bytes before FastAPI
+        # sees `key`, which corrupts the pattern. Do not "URL-encode %" into `%25`
+        # inside the idx file either — OpenVisus printf expansion does not decode
+        # `%25` back to `%`. Use a path-based URL so `%04x` remains literal in the
+        # stored template and only undergoes normal URL percent-decoding once.
+        full_template = (
+            f"{_proxy_base_url()}/api/v1/datasets/s3/object-proxy"
+            f"/{proxy_token}/{filename_template_key}"
+        )
     logger.info(
-        "Resolved idx template mapping: source_template=%s mapped_key_pattern=%s proxy_prefix=%s",
+        "Resolved idx template mapping: mode=%s source_template=%s mapped_key_pattern=%s prefix=%s",
+        template_mode,
         existing_template,
         filename_template_key,
         key_prefix,
@@ -2183,6 +2207,7 @@ async def create_openvisus_resolved_idx(
                     secret_access_key=secret_access_key,
                     target_dir=target_dir,
                     output_name=output_name,
+                    filename_template_mode=request.filename_template_mode,
                 )
                 logger.info(
                     "OpenVisus resolved idx created: dataset_uuid=%s path=%s key=%s",
@@ -2225,6 +2250,7 @@ async def create_openvisus_resolved_idx(
             secret_access_key=secret_access_key,
             target_dir=target_dir,
             output_name=output_name,
+            filename_template_mode=request.filename_template_mode,
         )
 
         if request.cache_credentials and user_email and cache_key and owner_email and owner_email == user_email:
