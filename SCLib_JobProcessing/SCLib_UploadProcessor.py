@@ -761,12 +761,14 @@ class SCLib_UploadProcessor:
         self._update_job_status(job_id, UploadStatus.UPLOADING)
 
         sensor_name = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper()
-        should_materialize_for_conversion = bool(
-            job_config.convert and sensor_name == SensorType.IDX.value
+        should_materialize = bool(job_config.convert) and sensor_name in (
+            SensorType.IDX.value,
+            SensorType.ORNL_CHESS_STRAIN.value,
         )
-        if not should_materialize_for_conversion:
+        if not should_materialize:
             logger.info(
-                "Skipping S3 download to %s (sensor=%s convert=%s; need IDX + convert=true for local mirror)",
+                "Skipping S3 download to %s (sensor=%s convert=%s; enable "
+                "'Download dataset from S3…' for IDX or ORNL CHESS strain JSON to mirror files locally)",
                 job_config.destination_path,
                 sensor_name,
                 getattr(job_config, "convert", None),
@@ -782,29 +784,40 @@ class SCLib_UploadProcessor:
 
         if not access_key_id or not secret_access_key:
             raise ValueError(
-                "S3 IDX conversion requires access_key_id and secret_access_key to download source dataset"
+                "S3 materialization requires access_key_id and secret_access_key to download the source dataset"
             )
 
-        # Download dataset into upload/<uuid>/ so the background conversion pipeline can run.
-        # If object_key points to an idx file, fetch the parent prefix recursively (idx + bins + sidecars).
+        # Download into upload/<uuid>/ for conversion (IDX) or local JSON mirror (ORNL strain).
         key = str(object_key or "").lstrip("/")
-        if key.lower().endswith(".idx"):
-            prefix = key.rsplit("/", 1)[0] + "/" if "/" in key else ""
-        elif key and not key.endswith("/"):
-            prefix = key + "/"
+        if sensor_name == SensorType.IDX.value:
+            if key.lower().endswith(".idx"):
+                prefix = key.rsplit("/", 1)[0] + "/" if "/" in key else ""
+            elif key and not key.endswith("/"):
+                prefix = key + "/"
+            else:
+                prefix = key
         else:
-            prefix = key
+            # ORNL_CHESS_STRAIN: single .json object, or folder prefix (recursive).
+            if key.endswith("/"):
+                prefix = key
+            elif key.lower().endswith(".json"):
+                prefix = key
+            elif key:
+                prefix = key.rstrip("/") + "/"
+            else:
+                prefix = ""
 
         destination_dir = str(job_config.destination_path or "").strip()
         if not destination_dir:
-            raise ValueError("Missing destination_path for S3 IDX materialization")
+            raise ValueError("Missing destination_path for S3 materialization")
         os.makedirs(destination_dir, exist_ok=True)
 
         logger.info(
-            "Downloading S3 IDX dataset for background conversion: bucket=%s prefix=%s dest=%s",
+            "Downloading S3 dataset for local mirror: bucket=%s key_or_prefix=%s dest=%s sensor=%s",
             bucket_name,
             prefix,
             destination_dir,
+            sensor_name,
         )
         if self._is_tool_available("aws"):
             self._download_from_s3_aws_cli(
@@ -830,7 +843,12 @@ class SCLib_UploadProcessor:
                 region_name=region_name,
                 path_style=path_style,
             )
-    
+        try:
+            dest = Path(destination_dir)
+            job_config.total_size_bytes = sum(p.stat().st_size for p in dest.rglob("*") if p.is_file())
+        except Exception:
+            logger.debug("Could not compute total_size_bytes after S3 download", exc_info=True)
+
     def _process_url_upload(self, job_id: str, job_config: UploadJobConfig):
         """Process URL-based upload by storing URL in database instead of downloading."""
         url = job_config.source_config.get("url")
