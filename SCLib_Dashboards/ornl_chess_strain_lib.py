@@ -6,6 +6,7 @@ and Bokeh heatmaps. Lives under ``scientistCloudLib/SCLib_Dashboards`` (listed i
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import re
@@ -15,6 +16,8 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, Union
 import numpy as np
 
 Number = Union[int, float]
+
+_LOG = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Configuration (edit here or override via StrainDashboardPaths)
@@ -82,25 +85,123 @@ class StrainFieldGrids:
 # ---------------------------------------------------------------------------
 
 
+def _looks_like_http_url(value: str) -> bool:
+    v = (value or "").strip().lower()
+    return v.startswith("http://") or v.startswith("https://")
+
+
 def load_json_from_local_path(path: str) -> Dict[str, Any]:
+    if _looks_like_http_url(path):
+        return load_json_from_url(path)
     with open(path, "r", encoding="utf-8") as fh:
         return json.load(fh)
 
 
+def _parse_gateway_url_with_query_keys(url: str) -> Optional[Dict[str, str]]:
+    """
+    Detect ScientistCloud-style gateway URLs:
+    https://<host>/<bucket>/<object_key>?access_key=...&secret_key=...
+    (Ceph/RGW and similar often reject unsigned GET; use SigV4 via boto3.)
+    """
+    from urllib.parse import parse_qs, urlparse
+
+    u = (url or "").strip()
+    p = urlparse(u)
+    if p.scheme not in ("http", "https") or not p.netloc:
+        return None
+    qs = parse_qs(p.query or "")
+    ak = (qs.get("access_key") or qs.get("AWSAccessKeyId") or [""])[0].strip()
+    sk = (qs.get("secret_key") or qs.get("AWSSecretKey") or [""])[0].strip()
+    if not ak or not sk:
+        return None
+    segments = [x for x in (p.path or "").split("/") if x]
+    if len(segments) < 2:
+        return None
+    bucket, key = segments[0], "/".join(segments[1:])
+    if not key:
+        return None
+    region = (qs.get("region") or ["us-east-1"])[0].strip() or "us-east-1"
+    return {
+        "endpoint_url": f"{p.scheme}://{p.netloc}",
+        "bucket": bucket,
+        "key": key,
+        "access_key_id": ak,
+        "secret_access_key": sk,
+        "region_name": region,
+    }
+
+
+def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
+    import io
+
+    import boto3
+    from botocore.config import Config as BotoConfig
+
+    session = boto3.session.Session(
+        aws_access_key_id=cfg["access_key_id"],
+        aws_secret_access_key=cfg["secret_access_key"],
+        region_name=cfg.get("region_name") or "us-east-1",
+    )
+    client = session.client(
+        "s3",
+        endpoint_url=cfg["endpoint_url"],
+        config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
+    )
+    buf = io.BytesIO()
+    client.download_fileobj(cfg["bucket"], cfg["key"], buf)
+    buf.seek(0)
+    return json.loads(buf.read().decode("utf-8"))
+
+
 def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
-    """Load JSON from a full http(s) URL (public object URL, CloudFront, presigned S3 URL, etc.)."""
+    """Load JSON from http(s): plain GET, or boto3 SigV4 when URL carries access_key/secret_key (gateway style)."""
     from urllib.error import HTTPError, URLError
     from urllib.request import Request, urlopen
 
     u = (url or "").strip()
     if not u.lower().startswith(("http://", "https://")):
         raise ValueError("JSON URL must start with http:// or https://")
-    req = Request(u, headers={"User-Agent": "ScientistCloud-ORNL_CHESS_strain/1.0"})
+
+    s3_cfg = _parse_gateway_url_with_query_keys(u)
+    if s3_cfg:
+        try:
+            return _load_json_via_s3_query_client(s3_cfg)
+        except ImportError as ie:
+            raise FileNotFoundError(
+                "This JSON URL needs boto3 (S3-compatible signed download). "
+                "Install boto3 in the dashboard image or use a presigned GET URL."
+            ) from ie
+        except Exception as ex:
+            _LOG.debug("S3 client load failed, trying HTTP GET: %s", ex, exc_info=True)
+
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 ScientistCloud-ORNL-strain"
+        ),
+        "Accept": "application/json, text/plain, */*",
+    }
+    req = Request(u, headers=headers)
     try:
         with urlopen(req, timeout=timeout_s) as resp:
             raw = resp.read()
     except HTTPError as e:
-        raise FileNotFoundError(f"HTTP {e.code} loading JSON URL: {u}") from e
+        err_body = ""
+        try:
+            err_body = (e.read() or b"").decode("utf-8", errors="replace")[:800]
+        except Exception:
+            pass
+        if s3_cfg and e.code in (401, 403):
+            try:
+                return _load_json_via_s3_query_client(s3_cfg)
+            except Exception as e2:
+                raise FileNotFoundError(
+                    f"HTTP {e.code} for JSON URL; signed S3 retry failed ({e2}). "
+                    f"Response: {err_body or '(empty)'}"
+                ) from e2
+        raise FileNotFoundError(
+            f"HTTP {e.code} loading JSON URL: {u}. Response: {err_body or '(empty)'}"
+        ) from e
     except URLError as e:
         raise FileNotFoundError(f"Network error loading JSON URL: {e.reason}") from e
     return json.loads(raw.decode("utf-8"))
@@ -108,14 +209,19 @@ def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
 
 def load_strain_json(paths: StrainDashboardPaths) -> Dict[str, Any]:
     """
-    Load document: prefer explicit local path, else full http(s) URL when set.
+    Load document: prefer ``local_json_path`` (file path or http(s) URL), else ``json_url``.
     """
-    if paths.local_json_path:
-        return load_json_from_local_path(paths.local_json_path)
-    if paths.json_url:
-        return load_json_from_url(paths.json_url)
+    loc = (paths.local_json_path or "").strip()
+    if loc and _looks_like_http_url(loc):
+        return load_json_from_url(loc)
+    if loc:
+        return load_json_from_local_path(loc)
+    jurl = (paths.json_url or "").strip()
+    if jurl:
+        return load_json_from_url(jurl)
     raise FileNotFoundError(
-        "Set ORNL_STRAIN_JSON_PATH for local JSON, or ORNL_STRAIN_JSON_URL to a full https://… URL."
+        "Set ORNL_STRAIN_JSON_PATH for a local file path, or ORNL_STRAIN_JSON_URL / "
+        "strain_json_url for a full https://… link."
     )
 
 
