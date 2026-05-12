@@ -42,6 +42,7 @@ class SensorType(Enum):
     NETCDF = "NETCDF"
     HDF5 = "HDF5"
     NEXUS_4D = "4D_NEXUS"
+    ORNL_CHESS_STRAIN = "ORNL_CHESS_STRAIN"
     RGB = "RGB"
     MAPIR = "MAPIR"
     OTHER = "OTHER"

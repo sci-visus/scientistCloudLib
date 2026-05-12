@@ -71,7 +71,7 @@ class TestSensorType(unittest.TestCase):
         """Test that all expected sensor types are defined."""
         expected_sensors = [
             'IDX', 'TIFF', 'TIFF RGB', 'NETCDF', 'HDF5',
-            '4D_NEXUS', 'RGB', 'MAPIR', 'OTHER'
+            '4D_NEXUS', 'ORNL_CHESS_STRAIN', 'RGB', 'MAPIR', 'OTHER'
         ]
         actual_sensors = [sensor.value for sensor in SensorType]
         
@@ -86,6 +86,7 @@ class TestSensorType(unittest.TestCase):
         self.assertEqual(SensorType.NETCDF.value, 'NETCDF')
         self.assertEqual(SensorType.HDF5.value, 'HDF5')
         self.assertEqual(SensorType.NEXUS_4D.value, '4D_NEXUS')
+        self.assertEqual(SensorType.ORNL_CHESS_STRAIN.value, 'ORNL_CHESS_STRAIN')
         self.assertEqual(SensorType.RGB.value, 'RGB')
         self.assertEqual(SensorType.MAPIR.value, 'MAPIR')
         self.assertEqual(SensorType.OTHER.value, 'OTHER')

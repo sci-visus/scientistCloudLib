@@ -126,6 +126,8 @@ class DatasetConverter:
                 logger.info("4D NEXUS conversion completed successfully (no-op)")
                 logger.info("=" * 80)
                 # No-op: files remain in input directory, no copying or conversion
+            elif self.sensor_type == "ORNL_CHESS_STRAIN":
+                logger.info("ORNL_CHESS_STRAIN: no conversion — JSON is consumed in place (S3 or upload dir).")
             elif self.sensor_type == "HDF5":
                 self._convert_hdf5()
             elif self.sensor_type == "NETCDF":
@@ -136,12 +138,12 @@ class DatasetConverter:
             # Fix permissions
             self._fix_permissions(self.input_dir)
             # For 4D_NEXUS, output_dir may be empty (no conversion), but still ensure it exists
-            if self.sensor_type not in ("4D_NEXUS", "NEXUS"):
+            if self.sensor_type not in ("4D_NEXUS", "NEXUS", "ORNL_CHESS_STRAIN"):
                 # Only fix permissions on output_dir if we actually converted files there
                 self._fix_permissions(self.output_dir)
                 safe_chmod(self.output_dir, 0o777)
             else:
-                # For 4D_NEXUS, just ensure output_dir exists (may be checked by other processes)
+                # For 4D_NEXUS / ORNL strain, just ensure output_dir exists (may be checked by other processes)
                 self.output_dir.mkdir(parents=True, exist_ok=True)
                 safe_chmod(self.output_dir, 0o777)
             
@@ -160,7 +162,7 @@ class DatasetConverter:
 
     def _validate_output_contract(self) -> None:
         """Basic integrity gate before reporting conversion success."""
-        if self.sensor_type in ("4D_NEXUS", "NEXUS"):
+        if self.sensor_type in ("4D_NEXUS", "NEXUS", "ORNL_CHESS_STRAIN"):
             return
         if not self.output_dir.exists():
             raise ConversionError(f"Output directory missing: {self.output_dir}")

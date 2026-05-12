@@ -63,7 +63,7 @@ class TestSCLib_UploadAPI_FastAPI(unittest.TestCase):
         
         # Check sensor types
         self.assertIn('sensor_types', data)
-        expected_sensors = ['IDX', 'TIFF', 'TIFF RGB', 'NETCDF', 'HDF5', '4D_NEXUS', 'RGB', 'MAPIR', 'OTHER']
+        expected_sensors = ['IDX', 'TIFF', 'TIFF RGB', 'NETCDF', 'HDF5', '4D_NEXUS', 'ORNL_CHESS_STRAIN', 'RGB', 'MAPIR', 'OTHER']
         for expected_sensor in expected_sensors:
             self.assertIn(expected_sensor, data['sensor_types'])
         
