@@ -366,9 +366,16 @@ def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
     ``HeadObject`` first, which many Ceph/RGW bucket policies omit while still
     allowing ``GetObject`` — that mismatch surfaces as 403 AccessDenied.
 
-    Tries **path**-style addressing first, then **virtual**-hosted style: some gateways
-    reject one signing layout with ``InvalidAccessKeyId`` / ``SignatureDoesNotMatch``.
+    Uses **path-style** ``https://endpoint/bucket/key`` requests, which match URLs like
+    ``https://us-east-1.gw.example.com/scientistcloud/.../file.json`` and the gateway TLS cert.
+
+    **Virtual-hosted** fallback (``bucket.endpoint``) is only attempted for ``*.amazonaws.com``
+    endpoints: on custom RGW hosts, virtual style changes the hostname (e.g.
+    ``scientistcloud.us-east-1.gw...``) so the certificate no longer matches
+    ``us-east-1.gw...`` and TLS fails.
     """
+    from urllib.parse import urlparse
+
     import boto3
     from botocore.config import Config as BotoConfig
     from botocore.exceptions import ClientError
@@ -380,38 +387,39 @@ def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
         aws_session_token=token,
         region_name=(cfg.get("region_name") or "us-east-1").strip() or "us-east-1",
     )
-    last_err: Optional[Exception] = None
-    for addressing in ("path", "virtual"):
-        try:
-            client = session.client(
-                "s3",
-                endpoint_url=cfg["endpoint_url"],
-                config=BotoConfig(
-                    signature_version="s3v4",
-                    s3={"addressing_style": addressing},
-                ),
-            )
-            resp = client.get_object(Bucket=cfg["bucket"], Key=cfg["key"])
-            raw = resp["Body"].read()
-            return json.loads(raw.decode("utf-8"))
-        except ClientError as e:
-            last_err = e
-            if addressing != "path":
-                raise
-            code = (e.response or {}).get("Error", {}).get("Code", "") or ""
-            if code in (
-                "InvalidAccessKeyId",
-                "SignatureDoesNotMatch",
-                "InvalidRequest",
-                "AuthorizationHeaderMalformed",
-                "AccessDenied",
-            ):
-                _LOG.debug("S3 get_object path-style failed (%s); retrying virtual-hosted", code)
-                continue
+
+    def _get(style: str) -> Dict[str, Any]:
+        client = session.client(
+            "s3",
+            endpoint_url=cfg["endpoint_url"],
+            config=BotoConfig(
+                signature_version="s3v4",
+                s3={"addressing_style": style},
+            ),
+        )
+        resp = client.get_object(Bucket=cfg["bucket"], Key=cfg["key"])
+        raw = resp["Body"].read()
+        return json.loads(raw.decode("utf-8"))
+
+    host = (urlparse(cfg.get("endpoint_url") or "").netloc or "").lower()
+    try_aws_virtual = "amazonaws.com" in host
+
+    try:
+        return _get("path")
+    except ClientError as e:
+        if not try_aws_virtual:
             raise
-    if last_err:
-        raise last_err
-    raise RuntimeError("S3 get_object: no attempt made")
+        code = (e.response or {}).get("Error", {}).get("Code", "") or ""
+        if code not in (
+            "InvalidAccessKeyId",
+            "SignatureDoesNotMatch",
+            "InvalidRequest",
+            "AuthorizationHeaderMalformed",
+            "AccessDenied",
+        ):
+            raise
+        _LOG.debug("S3 get_object path-style failed (%s); retrying virtual-hosted (AWS endpoint)", code)
+        return _get("virtual")
 
 
 def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
