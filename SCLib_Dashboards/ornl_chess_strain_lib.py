@@ -422,8 +422,44 @@ def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
         return _get("virtual")
 
 
-def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
-    """Load JSON from http(s): plain GET, or boto3 SigV4 when URL carries access_key/secret_key (gateway style)."""
+def _apply_s3_auth_override(cfg: Dict[str, str], ov: Optional[Dict[str, str]]) -> None:
+    """
+    Replace query-string credentials with values from Mongo (or another trusted source).
+
+    Portal iframe URLs can truncate ``secret_key=``; dataset docs store full
+    ``s3_access_key_id`` / ``s3_secret_access_key`` from upload.
+    """
+    if not ov:
+        return
+    ak = (ov.get("access_key_id") or "").strip()
+    sk = (ov.get("secret_access_key") or "").strip()
+    if ak and sk:
+        cfg["access_key_id"] = ak
+        cfg["secret_access_key"] = sk
+        _LOG.debug("S3 gateway load: using credential override (Mongo / server), not URL query string")
+    ep = (ov.get("endpoint_url") or "").strip()
+    if ep:
+        cfg["endpoint_url"] = ep.rstrip("/")
+    reg = (ov.get("region_name") or "").strip()
+    if reg:
+        cfg["region_name"] = reg
+    tok = (ov.get("aws_session_token") or "").strip()
+    if tok:
+        cfg["aws_session_token"] = tok
+
+
+def load_json_from_url(
+    url: str,
+    *,
+    timeout_s: float = 120.0,
+    s3_auth_override: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
+    """Load JSON from http(s): plain GET, or boto3 SigV4 when URL carries access_key/secret_key (gateway style).
+
+    ``s3_auth_override``: optional ``access_key_id``, ``secret_access_key``, and optionally
+    ``endpoint_url``, ``region_name``, ``aws_session_token`` — used when the URL query
+    credentials are missing or invalid (e.g. truncated in an iframe).
+    """
     from urllib.error import HTTPError, URLError
     from urllib.request import Request, urlopen
 
@@ -433,6 +469,7 @@ def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
 
     s3_cfg = _parse_gateway_url_with_query_keys(u)
     if s3_cfg:
+        _apply_s3_auth_override(s3_cfg, s3_auth_override)
         try:
             return _load_json_via_s3_query_client(s3_cfg)
         except ImportError as ie:
@@ -462,6 +499,7 @@ def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
             pass
         if s3_cfg and e.code in (401, 403):
             try:
+                _apply_s3_auth_override(s3_cfg, s3_auth_override)
                 return _load_json_via_s3_query_client(s3_cfg)
             except Exception as e2:
                 raise FileNotFoundError(
@@ -476,18 +514,26 @@ def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
     return json.loads(raw.decode("utf-8"))
 
 
-def load_strain_json(paths: StrainDashboardPaths) -> Dict[str, Any]:
+def load_strain_json(
+    paths: StrainDashboardPaths,
+    *,
+    mongo_s3_auth: Optional[Dict[str, str]] = None,
+) -> Dict[str, Any]:
     """
     Load document: prefer ``local_json_path`` (file path or http(s) URL), else ``json_url``.
+
+    ``mongo_s3_auth``: when loading a gateway HTTPS URL, optional credentials from the
+    dataset Mongo document (``s3_access_key_id`` / ``s3_secret_access_key``) override
+    fragile query-string keys in the URL.
     """
     loc = (paths.local_json_path or "").strip()
     if loc and _looks_like_http_url(loc):
-        return load_json_from_url(loc)
+        return load_json_from_url(loc, s3_auth_override=mongo_s3_auth)
     if loc:
         return load_json_from_local_path(loc)
     jurl = (paths.json_url or "").strip()
     if jurl:
-        return load_json_from_url(jurl)
+        return load_json_from_url(jurl, s3_auth_override=mongo_s3_auth)
     raise FileNotFoundError(
         "Set ORNL_STRAIN_JSON_PATH for a local file path, or ORNL_STRAIN_JSON_URL / "
         "strain_json_url for a full https://… link."
