@@ -2,6 +2,32 @@
 ORNL / CHESS strain-field helpers: JSON parsing, header discovery, grid construction,
 and Bokeh heatmaps. Lives under ``scientistCloudLib/SCLib_Dashboards`` (listed in
 ``ORNL_CHESS_strain.json`` ``shared_utilities``) so Docker and local runs match other dashboard utils.
+
+**Where JSON is loaded from (deployment order)**
+
+1. **ScientistCloud data portal** (default when ``base_dir`` / ``save_dir`` live under
+   ``/mnt/visus_datasets``, e.g. upload + converted trees):
+
+   - ``upload`` — first ``*.json`` under dataset ``base_dir`` (prefers ``reduced_data.json``)
+   - ``converted`` — same under ``save_dir``
+   - ``query_path`` / ``query_url`` — Bokeh URL args (portal may append gateway HTTPS)
+   - ``env_path`` / ``env_url`` — ``ORNL_STRAIN_JSON_PATH`` / ``ORNL_STRAIN_JSON_URL``
+
+2. **Command line / local / CHESS checkout** (default when not on that mount): use
+   **environment and URL args first**, then server dirs:
+
+   - ``env_path``, ``env_url``, ``query_path``, ``query_url``, ``upload``, ``converted``
+
+**Override without code changes**
+
+- ``ORNL_STRAIN_RESOLVE_MODE`` — ``auto`` (default), ``portal`` (always server-first),
+  ``cli`` (always env-first). Aliases: ``server`` / ``scientistcloud`` for portal;
+  ``local`` / ``cmd`` for cli.
+
+- ``ORNL_STRAIN_SOURCE_ORDER`` — explicit comma-separated tokens (overrides mode), e.g.
+  ``env_path,env_url,upload,converted,query_url`` for a CHESS server that only sets env vars.
+
+  Valid tokens: ``upload``, ``converted``, ``query_path``, ``query_url``, ``env_path``, ``env_url``.
 """
 from __future__ import annotations
 
@@ -49,6 +75,159 @@ class StrainDashboardPaths:
             local_json_path=os.environ.get("ORNL_STRAIN_JSON_PATH", "").strip(),
             json_url=os.environ.get("ORNL_STRAIN_JSON_URL", "").strip(),
         )
+
+
+# ---------------------------------------------------------------------------
+# JSON location resolution (portal vs CLI vs custom order)
+# ---------------------------------------------------------------------------
+
+_STRAIN_ORDER_PORTAL: Tuple[str, ...] = (
+    "upload",
+    "converted",
+    "query_path",
+    "query_url",
+    "env_path",
+    "env_url",
+)
+_STRAIN_ORDER_CLI: Tuple[str, ...] = (
+    "env_path",
+    "env_url",
+    "query_path",
+    "query_url",
+    "upload",
+    "converted",
+)
+_STRAIN_ORDER_TOKENS = frozenset(_STRAIN_ORDER_PORTAL)
+
+
+def is_scientistcloud_portal_data_mount_context(base_dir: str, save_dir: str) -> bool:
+    """True when dataset dirs look like ScientistCloud portal upload/converted mounts."""
+    root = "/mnt/visus_datasets"
+    bd = (base_dir or "").strip()
+    sd = (save_dir or "").strip()
+    return bd.startswith(root) or sd.startswith(root)
+
+
+def find_strain_json_under_dataset_dir(directory: str) -> str:
+    """
+    Pick a strain JSON file under ``directory`` (upload or converted tree for one UUID).
+
+    Prefers ``reduced_data.json``; otherwise the first ``*.json`` (sorted by name).
+    """
+    d = (directory or "").strip()
+    if not d or not os.path.isdir(d):
+        return ""
+    preferred = os.path.join(d, "reduced_data.json")
+    if os.path.isfile(preferred):
+        return preferred
+    try:
+        names = sorted(os.listdir(d))
+    except OSError:
+        return ""
+    for name in names:
+        if not name.lower().endswith(".json"):
+            continue
+        full = os.path.join(d, name)
+        if os.path.isfile(full):
+            return full
+    return ""
+
+
+def _strain_effective_source_order(base_dir: str, save_dir: str) -> Tuple[str, ...]:
+    custom = (os.environ.get("ORNL_STRAIN_SOURCE_ORDER") or "").strip()
+    if custom:
+        parts = tuple(
+            x.strip().lower()
+            for x in custom.split(",")
+            if x.strip() and x.strip().lower() in _STRAIN_ORDER_TOKENS
+        )
+        if parts:
+            unknown = [
+                x.strip().lower()
+                for x in custom.split(",")
+                if x.strip() and x.strip().lower() not in _STRAIN_ORDER_TOKENS
+            ]
+            if unknown:
+                _LOG.warning("ORNL_STRAIN_SOURCE_ORDER: ignoring unknown tokens: %s", unknown)
+            return parts
+        _LOG.warning("ORNL_STRAIN_SOURCE_ORDER set but no valid tokens; falling back to mode/auto")
+
+    mode = (os.environ.get("ORNL_STRAIN_RESOLVE_MODE") or "auto").strip().lower()
+    if mode in ("portal", "server", "scientistcloud", "data_portal"):
+        return _STRAIN_ORDER_PORTAL
+    if mode in ("cli", "local", "command_line", "cmd", "dev"):
+        return _STRAIN_ORDER_CLI
+    if mode not in ("auto", ""):
+        _LOG.warning("Unknown ORNL_STRAIN_RESOLVE_MODE=%r; using auto", mode)
+    if is_scientistcloud_portal_data_mount_context(base_dir, save_dir):
+        return _STRAIN_ORDER_PORTAL
+    return _STRAIN_ORDER_CLI
+
+
+def strain_resolve_order_summary(base_dir: str = "", save_dir: str = "") -> str:
+    """One-line description of the active resolution order (for UI / logs)."""
+    order = _strain_effective_source_order(base_dir, save_dir)
+    return " → ".join(order)
+
+
+def resolve_strain_paths_for_session(
+    *,
+    base_dir: str = "",
+    save_dir: str = "",
+    query_strain_json_path: str = "",
+    query_strain_json_url: str = "",
+    env: Optional[StrainDashboardPaths] = None,
+) -> StrainDashboardPaths:
+    """
+    Build ``StrainDashboardPaths`` using the configured source order.
+
+    When a file is chosen from ``upload`` or ``converted``, ``json_url`` is still set to the
+    first available of ``query_strain_json_url`` / ``env.json_url`` when present (for display /
+    provenance); ``load_strain_json`` reads the file first.
+    """
+    env = env or StrainDashboardPaths.from_environ()
+    order = _strain_effective_source_order(base_dir, save_dir)
+    q_path = (query_strain_json_path or "").strip()
+    q_url = (query_strain_json_url or "").strip()
+    env_path = (env.local_json_path or "").strip()
+    env_url = (env.json_url or "").strip()
+    bd = (base_dir or "").strip()
+    sd = (save_dir or "").strip()
+
+    def display_url() -> str:
+        return q_url or env_url
+
+    for token in order:
+        if token == "upload":
+            p = find_strain_json_under_dataset_dir(bd)
+            if p:
+                return StrainDashboardPaths(local_json_path=p, json_url=display_url())
+        elif token == "converted":
+            p = find_strain_json_under_dataset_dir(sd)
+            if p:
+                return StrainDashboardPaths(local_json_path=p, json_url=display_url())
+        elif token == "query_path":
+            if not q_path:
+                continue
+            if _looks_like_http_url(q_path):
+                return StrainDashboardPaths(local_json_path="", json_url=q_path)
+            if os.path.isfile(q_path):
+                return StrainDashboardPaths(local_json_path=q_path, json_url=display_url())
+        elif token == "query_url":
+            if q_url:
+                return StrainDashboardPaths(local_json_path="", json_url=q_url)
+        elif token == "env_path":
+            if not env_path:
+                continue
+            if _looks_like_http_url(env_path):
+                return StrainDashboardPaths(local_json_path="", json_url=env_path)
+            if os.path.isfile(env_path):
+                return StrainDashboardPaths(local_json_path=env_path, json_url=display_url())
+        elif token == "env_url":
+            if env_url:
+                return StrainDashboardPaths(local_json_path="", json_url=env_url)
+
+    return StrainDashboardPaths(local_json_path="", json_url="")
 
 
 @dataclass
