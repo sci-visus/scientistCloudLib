@@ -132,8 +132,13 @@ def _parse_gateway_url_with_query_keys(url: str) -> Optional[Dict[str, str]]:
 
 
 def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
-    import io
+    """
+    Signed download for gateway URLs (?access_key=…&secret_key=…).
 
+    Use ``get_object`` instead of ``download_fileobj``: the latter issues
+    ``HeadObject`` first, which many Ceph/RGW bucket policies omit while still
+    allowing ``GetObject`` — that mismatch surfaces as 403 AccessDenied.
+    """
     import boto3
     from botocore.config import Config as BotoConfig
 
@@ -147,10 +152,9 @@ def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
         endpoint_url=cfg["endpoint_url"],
         config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
     )
-    buf = io.BytesIO()
-    client.download_fileobj(cfg["bucket"], cfg["key"], buf)
-    buf.seek(0)
-    return json.loads(buf.read().decode("utf-8"))
+    resp = client.get_object(Bucket=cfg["bucket"], Key=cfg["key"])
+    raw = resp["Body"].read()
+    return json.loads(raw.decode("utf-8"))
 
 
 def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
