@@ -316,8 +316,19 @@ def _parse_gateway_url_with_query_keys(url: str) -> Optional[Dict[str, str]]:
     if p.scheme not in ("http", "https") or not p.netloc:
         return None
     qs = _parse_qsl_preserve_plus(p.query or "")
-    ak = (qs.get("access_key") or qs.get("AWSAccessKeyId") or "").strip()
-    sk = (qs.get("secret_key") or qs.get("AWSSecretKey") or "").strip()
+    ak = (
+        qs.get("access_key")
+        or qs.get("AWSAccessKeyId")
+        or qs.get("AccessKeyId")
+        or ""
+    ).strip()
+    sk = (
+        qs.get("secret_key")
+        or qs.get("AWSSecretKey")
+        or qs.get("SecretAccessKey")
+        or qs.get("SecretKey")
+        or ""
+    ).strip()
     if not ak or not sk:
         return None
     segments = [unquote(x) for x in (p.path or "").split("/") if x]
@@ -327,7 +338,14 @@ def _parse_gateway_url_with_query_keys(url: str) -> Optional[Dict[str, str]]:
     if not key:
         return None
     region = (qs.get("region") or "us-east-1").strip() or "us-east-1"
-    return {
+    session_tok = (
+        qs.get("session_token")
+        or qs.get("SessionToken")
+        or qs.get("security_token")
+        or qs.get("X-Amz-Security-Token")
+        or ""
+    ).strip()
+    out: Dict[str, str] = {
         "endpoint_url": f"{p.scheme}://{p.netloc}",
         "bucket": bucket,
         "key": key,
@@ -335,6 +353,9 @@ def _parse_gateway_url_with_query_keys(url: str) -> Optional[Dict[str, str]]:
         "secret_access_key": sk,
         "region_name": region,
     }
+    if session_tok:
+        out["aws_session_token"] = session_tok
+    return out
 
 
 def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
@@ -344,23 +365,53 @@ def _load_json_via_s3_query_client(cfg: Dict[str, str]) -> Dict[str, Any]:
     Use ``get_object`` instead of ``download_fileobj``: the latter issues
     ``HeadObject`` first, which many Ceph/RGW bucket policies omit while still
     allowing ``GetObject`` — that mismatch surfaces as 403 AccessDenied.
+
+    Tries **path**-style addressing first, then **virtual**-hosted style: some gateways
+    reject one signing layout with ``InvalidAccessKeyId`` / ``SignatureDoesNotMatch``.
     """
     import boto3
     from botocore.config import Config as BotoConfig
+    from botocore.exceptions import ClientError
 
+    token = (cfg.get("aws_session_token") or "").strip() or None
     session = boto3.session.Session(
-        aws_access_key_id=cfg["access_key_id"],
-        aws_secret_access_key=cfg["secret_access_key"],
-        region_name=cfg.get("region_name") or "us-east-1",
+        aws_access_key_id=cfg["access_key_id"].strip(),
+        aws_secret_access_key=cfg["secret_access_key"].strip(),
+        aws_session_token=token,
+        region_name=(cfg.get("region_name") or "us-east-1").strip() or "us-east-1",
     )
-    client = session.client(
-        "s3",
-        endpoint_url=cfg["endpoint_url"],
-        config=BotoConfig(signature_version="s3v4", s3={"addressing_style": "path"}),
-    )
-    resp = client.get_object(Bucket=cfg["bucket"], Key=cfg["key"])
-    raw = resp["Body"].read()
-    return json.loads(raw.decode("utf-8"))
+    last_err: Optional[Exception] = None
+    for addressing in ("path", "virtual"):
+        try:
+            client = session.client(
+                "s3",
+                endpoint_url=cfg["endpoint_url"],
+                config=BotoConfig(
+                    signature_version="s3v4",
+                    s3={"addressing_style": addressing},
+                ),
+            )
+            resp = client.get_object(Bucket=cfg["bucket"], Key=cfg["key"])
+            raw = resp["Body"].read()
+            return json.loads(raw.decode("utf-8"))
+        except ClientError as e:
+            last_err = e
+            if addressing != "path":
+                raise
+            code = (e.response or {}).get("Error", {}).get("Code", "") or ""
+            if code in (
+                "InvalidAccessKeyId",
+                "SignatureDoesNotMatch",
+                "InvalidRequest",
+                "AuthorizationHeaderMalformed",
+                "AccessDenied",
+            ):
+                _LOG.debug("S3 get_object path-style failed (%s); retrying virtual-hosted", code)
+                continue
+            raise
+    if last_err:
+        raise last_err
+    raise RuntimeError("S3 get_object: no attempt made")
 
 
 def load_json_from_url(url: str, *, timeout_s: float = 120.0) -> Dict[str, Any]:
