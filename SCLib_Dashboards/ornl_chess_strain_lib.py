@@ -276,30 +276,57 @@ def load_json_from_local_path(path: str) -> Dict[str, Any]:
         return json.load(fh)
 
 
+def _parse_qsl_preserve_plus(query: str) -> Dict[str, str]:
+    """
+    Parse ``application/x-www-form-urlencoded`` query string for gateway URLs.
+
+    ``urllib.parse.parse_qs`` / ``parse_qsl`` treat ``+`` as a space in values. S3/RGW
+    credentials often contain literal ``+``; that corruption yields InvalidAccessKeyId.
+    We split on ``&`` / ``=`` and use ``unquote`` on values (``unquote`` does *not* map ``+`` → space).
+    """
+    from urllib.parse import unquote
+
+    out: Dict[str, str] = {}
+    if not query:
+        return out
+    for part in query.split("&"):
+        if not part:
+            continue
+        if "=" in part:
+            k, v = part.split("=", 1)
+        else:
+            k, v = part, ""
+        k = unquote(k.replace("+", " "), errors="replace").strip()
+        v = unquote(v, errors="replace")
+        if k:
+            out[k] = v
+    return out
+
+
 def _parse_gateway_url_with_query_keys(url: str) -> Optional[Dict[str, str]]:
     """
     Detect ScientistCloud-style gateway URLs:
     https://<host>/<bucket>/<object_key>?access_key=...&secret_key=...
     (Ceph/RGW and similar often reject unsigned GET; use SigV4 via boto3.)
     """
-    from urllib.parse import parse_qs, urlparse
+    from urllib.parse import unquote, urlparse
 
     u = (url or "").strip()
     p = urlparse(u)
     if p.scheme not in ("http", "https") or not p.netloc:
         return None
-    qs = parse_qs(p.query or "")
-    ak = (qs.get("access_key") or qs.get("AWSAccessKeyId") or [""])[0].strip()
-    sk = (qs.get("secret_key") or qs.get("AWSSecretKey") or [""])[0].strip()
+    qs = _parse_qsl_preserve_plus(p.query or "")
+    ak = (qs.get("access_key") or qs.get("AWSAccessKeyId") or "").strip()
+    sk = (qs.get("secret_key") or qs.get("AWSSecretKey") or "").strip()
     if not ak or not sk:
         return None
-    segments = [x for x in (p.path or "").split("/") if x]
+    segments = [unquote(x) for x in (p.path or "").split("/") if x]
     if len(segments) < 2:
         return None
     bucket, key = segments[0], "/".join(segments[1:])
     if not key:
         return None
-    region = (qs.get("region") or ["us-east-1"])[0].strip() or "us-east-1"
+    region = (qs.get("region") or "us-east-1").strip() or "us-east-1"
     return {
         "endpoint_url": f"{p.scheme}://{p.netloc}",
         "bucket": bucket,
