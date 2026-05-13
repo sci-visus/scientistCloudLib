@@ -200,41 +200,48 @@ class SCLib_Config:
         # Check for SCLIB_MYTEST environment variable
         sclib_mytest = os.getenv('SCLIB_MYTEST')
         if sclib_mytest:
-            env_local_path = os.path.join(sclib_mytest, 'env.local')
-            if os.path.exists(env_local_path):
-                logger.info(f"Using environment file from SCLIB_MYTEST: {env_local_path}")
-                self._load_env_file(env_local_path)
-                return
+            # Prefer deployment env over env.local when both exist (e.g. SCLib_TryTest on a server).
+            for fname in ('env.scientistcloud', 'env.local'):
+                candidate = os.path.join(sclib_mytest, fname)
+                if os.path.exists(candidate):
+                    logger.info(f"Using environment file from SCLIB_MYTEST: {candidate}")
+                    self._load_env_file(candidate)
+                    return
         
         # Check for SCLIB_HOME environment variable
         sclib_home = os.getenv('SCLIB_HOME')
         if sclib_home:
-            # Look for env.local in SCLIB_HOME directory
-            env_local_path = os.path.join(sclib_home, 'env.local')
-            if os.path.exists(env_local_path):
-                logger.info(f"Using environment file from SCLIB_HOME: {env_local_path}")
-                self._load_env_file(env_local_path)
-                return
+            for fname in ('env.scientistcloud', 'env.local'):
+                env_path = os.path.join(sclib_home, fname)
+                if os.path.exists(env_path):
+                    logger.info(f"Using environment file from SCLIB_HOME: {env_path}")
+                    self._load_env_file(env_path)
+                    return
             
-            # Look for env.local in parent directory of SCLIB_HOME
-            parent_env_path = os.path.join(os.path.dirname(sclib_home), 'env.local')
-            if os.path.exists(parent_env_path):
-                logger.info(f"Using environment file from SCLIB_HOME parent: {parent_env_path}")
-                self._load_env_file(parent_env_path)
-                return
+            parent_dir = os.path.dirname(sclib_home)
+            for fname in ('env.scientistcloud', 'env.local'):
+                parent_env_path = os.path.join(parent_dir, fname)
+                if os.path.exists(parent_env_path):
+                    logger.info(f"Using environment file from SCLIB_HOME parent: {parent_env_path}")
+                    self._load_env_file(parent_env_path)
+                    return
         
         # Fallback to relative paths (no hardcoded absolute paths)
         possible_paths = [
+            './SCLib_TryTest/env.scientistcloud',
+            '../SCLib_TryTest/env.scientistcloud',
+            './env.scientistcloud',
+            '../env.scientistcloud',
+            './config/env.scientistcloud.com',
+            '../config/env.scientistcloud.com',
+            './config/env.all',
+            '../config/env.all',
             './env.local',
             '../env.local',
             './config/env.local',
             '../config/env.local',
             './SCLib_TryTest/env.local',
             '../SCLib_TryTest/env.local',
-            './config/env.scientistcloud.com',
-            './config/env.all',
-            '../config/env.scientistcloud.com',
-            '../config/env.all'
         ]
         
         for path in possible_paths:

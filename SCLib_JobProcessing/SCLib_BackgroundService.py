@@ -328,7 +328,7 @@ class SCLib_BackgroundService:
     ) -> bool:
         """
         For linked (non-copied) remote .idx datasets with stored S3 credentials, generate
-        visus.s3.idx via the internal FastAPI openvisus-resolved-idx endpoint and finish
+        visus.idx via the internal FastAPI openvisus-resolved-idx endpoint and finish
         conversion without staging files under upload/.
         Returns True if this path handled the conversion (success); False to fall through.
         Raises on failure when this path is applicable.
@@ -360,7 +360,7 @@ class SCLib_BackgroundService:
 
         resolved_path = (result.get("resolved_idx_path") or "").strip()
         if not resolved_path or not os.path.isfile(resolved_path):
-            candidate = os.path.join(output_path, "visus.s3.idx")
+            candidate = os.path.join(output_path, "visus.idx")
             resolved_path = candidate if os.path.isfile(candidate) else ""
 
         converted_arco_idx_path = self._find_converted_arco_idx(output_path)
@@ -396,7 +396,7 @@ class SCLib_BackgroundService:
         payload = {
             "dataset_identifier": dataset_uuid,
             "user_email": owner,
-            "output_filename": "visus.s3.idx",
+            "output_filename": "visus.idx",
             "filename_template_mode": mode,
             "force_refresh": False,
             "background": False,
