@@ -210,8 +210,8 @@ class S3ResolvedIdxRequest(BaseModel):
     force_refresh: bool = Field(False, description="Regenerate resolved idx even if it already exists")
     background: bool = Field(True, description="Generate resolved idx in background and return pending status")
     filename_template_mode: str = Field(
-        "proxy",
-        description="Resolved filename_template mode: proxy, s3, or https"
+        "s3",
+        description="Resolved filename_template mode: s3 (default), proxy, or https"
     )
 
 
@@ -796,7 +796,7 @@ def _build_and_store_resolved_idx(
     secret_access_key: str,
     target_dir: Path,
     output_name: str,
-    filename_template_mode: str = "proxy",
+    filename_template_mode: str = "s3",
 ) -> Dict[str, Any]:
     import boto3
     from botocore.client import Config as BotoConfig
@@ -845,7 +845,7 @@ def _build_and_store_resolved_idx(
         key_prefix = filename_template_key[:wildcard_idx]
     else:
         key_prefix = filename_template_key.rsplit("/", 1)[0] + "/" if "/" in filename_template_key else ""
-    template_mode = (filename_template_mode or "proxy").strip().lower()
+    template_mode = (filename_template_mode or "s3").strip().lower()
     if template_mode == "s3":
         full_template = f"s3://{bucket}/{filename_template_key}"
     elif template_mode == "https":
@@ -2239,8 +2239,9 @@ async def create_openvisus_resolved_idx(
             try:
                 existing_text = resolved_idx_path.read_text(encoding="utf-8", errors="ignore")
                 has_proxy_template = "/api/v1/datasets/s3/object-proxy" in existing_text
+                has_s3_template = "s3://" in existing_text and "%" in existing_text
                 existing_arco = _extract_arco_value(existing_text)
-                if has_proxy_template or existing_arco != 0:
+                if has_proxy_template or has_s3_template or existing_arco != 0:
                     return {
                         "success": True,
                         "status": "ready",
@@ -2255,7 +2256,7 @@ async def create_openvisus_resolved_idx(
                         "converted_dir": str(target_dir),
                     }
                 logger.info(
-                    "Existing resolved idx is stale (no object-proxy template); regenerating: %s",
+                    "Existing resolved idx is stale (no object-proxy or s3 template); regenerating: %s",
                     resolved_idx_path,
                 )
             except Exception as ex:
