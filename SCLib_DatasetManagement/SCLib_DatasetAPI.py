@@ -1078,6 +1078,66 @@ def _get_dataset_by_uuid(dataset_uuid: str) -> Optional[Dict[str, Any]]:
         return dataset
 
 
+def _resolve_dataset_data_size_gb(doc_dict: Any) -> float:
+    """
+    Best-effort dataset size in gigabytes for API/list responses.
+
+    Mongo documents historically used several fields and units:
+    - ``data_size`` / ``total_size``: typically numeric GB (portal convention)
+    - ``raw_size``, ``total_size_bytes``, ``file_size``, ``size_bytes``: byte counts
+    """
+    if not isinstance(doc_dict, dict):
+        return 0.0
+
+    meta = doc_dict.get("metadata")
+    if not isinstance(meta, dict):
+        meta = {}
+
+    def _positive_float(val: Any) -> Optional[float]:
+        try:
+            if val is None:
+                return None
+            f = float(val)
+            return f if f > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    # Prefer explicit GB fields when they are present and positive
+    for src in (doc_dict, meta):
+        for key in ("data_size", "total_size"):
+            g = _positive_float(src.get(key))
+            if g is not None:
+                return g
+
+    # Byte-sized fields (folder scans, upload jobs, etc.)
+    for src in (doc_dict, meta):
+        for key in ("raw_size", "total_size_bytes", "file_size", "size_bytes"):
+            b = _positive_float(src.get(key))
+            if b is not None:
+                return b / (1024.0 ** 3)
+
+    # Legacy human-readable strings on root document only
+    for key in ("data_size", "total_size"):
+        raw = doc_dict.get(key)
+        if isinstance(raw, str) and raw.strip():
+            size_str = raw.strip().upper()
+            match = re.match(r"^([\d.]+)\s*([KMGT]?B?)$", size_str)
+            if match:
+                number = float(match.group(1))
+                unit = match.group(2) or "B"
+                if unit in ["KB", "K"]:
+                    return number / (1024 * 1024)
+                if unit in ["MB", "M"]:
+                    return number / 1024
+                if unit in ["GB", "G"]:
+                    return number
+                if unit in ["TB", "T"]:
+                    return number * 1024
+                return number / (1024 * 1024 * 1024)
+
+    return 0.0
+
+
 def _terminate_pid_safely(pid: int, timeout_seconds: float = 5.0) -> bool:
     """Best-effort PID termination: SIGTERM, then SIGKILL if needed."""
     try:
@@ -1573,7 +1633,7 @@ async def get_user_datasets_organized(
             return {
                 'uuid': uuid,
                 'name': doc_dict.get('name', 'Unnamed Dataset'),
-                'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
+                'data_size': _resolve_dataset_data_size_gb(doc_dict),
                 'folder': resolved_folder,
                 'folder_uuid': resolved_folder,
                 'time': doc_dict.get('time') or doc_dict.get('date_imported'),
@@ -1656,7 +1716,7 @@ async def get_public_datasets(
                     'uuid': uuid,
                     'id': doc_dict.get('id'),
                     'name': doc_dict.get('name', 'Unnamed Dataset'),
-                    'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
+                    'data_size': _resolve_dataset_data_size_gb(doc_dict),
                     'folder': resolved_folder,
                     'folder_uuid': resolved_folder,
                     'time': doc_dict.get('time') or doc_dict.get('date_imported'),
@@ -1802,7 +1862,7 @@ async def get_public_dataset(
             'uuid': uuid,
             'id': doc_dict.get('id'),
             'name': doc_dict.get('name', 'Unnamed Dataset'),
-            'data_size': doc_dict.get('data_size') or doc_dict.get('total_size', 0),
+            'data_size': _resolve_dataset_data_size_gb(doc_dict),
             'folder': resolved_folder,
             'folder_uuid': resolved_folder,
             'time': doc_dict.get('time') or doc_dict.get('date_imported'),
