@@ -9,6 +9,8 @@ import time
 import json
 import subprocess
 import traceback
+import urllib.error
+import urllib.request
 import psutil
 import re
 from datetime import datetime, timedelta, timezone
@@ -223,6 +225,11 @@ class SCLib_BackgroundService:
             input_path = os.path.join(input_dir, dataset_uuid)
             output_path = os.path.join(output_dir, dataset_uuid)
 
+            if self._try_openvisus_resolved_idx_for_linked_remote_idx(
+                dataset, dataset_uuid, input_path, output_path, datasets_collection
+            ):
+                return
+
             if self._s3_idx_needs_materialization(dataset, input_path):
                 if self._reroute_s3_idx_materialization(datasets_collection, dataset, input_path):
                     print(f"↩️ Dataset {dataset_uuid} is linked S3 IDX; queued S3 download before conversion")
@@ -299,6 +306,132 @@ class SCLib_BackgroundService:
                 if filename.lower().endswith(".idx"):
                     return os.path.join(root, filename)
         return None
+
+    def _remote_idx_descriptor_link(self, dataset: Dict[str, Any]) -> str:
+        """Return a non-empty remote URI only when it points at an .idx object (query stripped for suffix check)."""
+        for key in ("google_drive_link", "source_path"):
+            raw = str(dataset.get(key) or "").strip()
+            if not raw:
+                continue
+            path_only = raw.split("?", 1)[0].strip().lower()
+            if path_only.endswith(".idx"):
+                return raw.strip()
+        return ""
+
+    def _try_openvisus_resolved_idx_for_linked_remote_idx(
+        self,
+        dataset: Dict[str, Any],
+        dataset_uuid: str,
+        input_path: str,
+        output_path: str,
+        datasets_collection,
+    ) -> bool:
+        """
+        For linked (non-copied) remote .idx datasets with stored S3 credentials, generate
+        visus.s3.idx via the internal FastAPI openvisus-resolved-idx endpoint and finish
+        conversion without staging files under upload/.
+        Returns True if this path handled the conversion (success); False to fall through.
+        Raises on failure when this path is applicable.
+        """
+        sensor = str(dataset.get("sensor") or "").strip().upper()
+        if sensor != "IDX":
+            return False
+        remote = self._remote_idx_descriptor_link(dataset)
+        if not remote:
+            return False
+        if self._find_local_idx(input_path):
+            return False
+
+        print(
+            f"Linked remote IDX (no local copy): calling openvisus-resolved-idx for {dataset_uuid}"
+        )
+        result = self._call_internal_openvisus_resolved_idx(dataset_uuid, dataset)
+        if not result.get("success"):
+            detail = result.get("error") or result.get("body") or str(result)
+            raise Exception(f"openvisus-resolved-idx failed: {detail}")
+
+        os.makedirs(output_path, exist_ok=True)
+        marker = os.path.join(output_path, "_SUCCESS.json")
+        with open(marker, "w", encoding="utf-8") as f:
+            json.dump(
+                {"method": "openvisus-resolved-idx", "dataset_uuid": dataset_uuid},
+                f,
+            )
+
+        resolved_path = (result.get("resolved_idx_path") or "").strip()
+        if not resolved_path or not os.path.isfile(resolved_path):
+            candidate = os.path.join(output_path, "visus.s3.idx")
+            resolved_path = candidate if os.path.isfile(candidate) else ""
+
+        converted_arco_idx_path = self._find_converted_arco_idx(output_path)
+        if not converted_arco_idx_path and resolved_path:
+            converted_arco_idx_path = resolved_path
+
+        if not converted_arco_idx_path:
+            raise Exception(
+                f"Resolved idx completed but no converted idx path found under {output_path}"
+            )
+
+        done_update = {
+            "status": "done",
+            "canonical_state": "ready",
+            "updated_at": utc_now(),
+            "completed_at": utc_now(),
+            "converted_idx_path": converted_arco_idx_path,
+        }
+        datasets_collection.update_one(
+            {"uuid": dataset_uuid},
+            {"$set": done_update, "$unset": {"conversion_lease_owner": "", "conversion_lease_expires_at": ""}},
+        )
+        print(f"✅ Linked remote IDX resolved: {converted_arco_idx_path}")
+        return True
+
+    def _call_internal_openvisus_resolved_idx(
+        self, dataset_uuid: str, dataset: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        base = os.environ.get("SCLIB_INTERNAL_API_URL", "http://sclib_fastapi:5001").rstrip("/")
+        url = f"{base}/api/v1/datasets/s3/openvisus-resolved-idx"
+        owner = str(dataset.get("user") or dataset.get("user_email") or "").strip()
+        mode = (os.environ.get("LINKED_IDX_RESOLVED_FILENAME_TEMPLATE_MODE") or "s3").strip() or "s3"
+        payload = {
+            "dataset_identifier": dataset_uuid,
+            "user_email": owner,
+            "output_filename": "visus.s3.idx",
+            "filename_template_mode": mode,
+            "force_refresh": False,
+            "background": False,
+            "use_cached_credentials": True,
+        }
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        timeout = int(os.environ.get("LINKED_IDX_RESOLVED_IDX_HTTP_TIMEOUT_SECONDS", "7200"))
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                body = (resp.read() or b"").decode("utf-8", errors="replace")
+        except urllib.error.HTTPError as e:
+            err_body = (e.read() or b"").decode("utf-8", errors="replace")
+            return {"success": False, "status_code": e.code, "error": err_body or str(e)}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+        try:
+            parsed = json.loads(body) if body else {}
+        except json.JSONDecodeError:
+            return {"success": False, "error": f"Invalid JSON from openvisus-resolved-idx: {body[:500]}"}
+
+        if parsed.get("success") and (parsed.get("status") in (None, "ready") or parsed.get("resolved_idx_path")):
+            return {"success": True, **parsed}
+        if parsed.get("status") == "pending":
+            return {
+                "success": False,
+                "error": "openvisus-resolved-idx returned pending while background=false; check FastAPI deployment",
+            }
+        return {"success": False, "body": body[:2000]}
 
     def _s3_idx_needs_materialization(self, dataset: Dict[str, Any], input_path: str) -> bool:
         """S3 linked-only IDX datasets must be downloaded before local conversion."""

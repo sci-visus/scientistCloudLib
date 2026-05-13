@@ -1893,13 +1893,14 @@ scope = drive
                 if status == "completed":
                     # Check if conversion is needed
                     is_remote_link = bool(job_config and job_config.source_type in [UploadSourceType.S3, UploadSourceType.URL])
-                    is_s3_idx_conversion = bool(
+                    sensor_val = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper()
+                    is_linked_idx_conversion = bool(
                         job_config
-                        and job_config.source_type == UploadSourceType.S3
-                        and str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper() == SensorType.IDX.value
                         and job_config.convert
+                        and sensor_val == SensorType.IDX.value
+                        and job_config.source_type in (UploadSourceType.S3, UploadSourceType.URL)
                     )
-                    if job_config and job_config.convert and (not is_remote_link or is_s3_idx_conversion):
+                    if job_config and job_config.convert and (not is_remote_link or is_linked_idx_conversion):
                         # For multi-file datasets, do not queue conversion until all file jobs are terminal.
                         all_terminal, non_terminal = self._file_jobs_terminal_state(dataset_uuid, collection)
                         if all_terminal:
