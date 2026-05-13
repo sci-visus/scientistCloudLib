@@ -600,6 +600,48 @@ def _extract_arco_value(idx_text: str) -> int:
     return 0
 
 
+def _zero_arco_block_in_idx_text(idx_text: str) -> str:
+    """Set ``(arco)`` to 0 so OpenVisus uses ``(filename_template)`` for block URLs.
+
+    When ``(arco)`` is non-zero, OpenVisus often resolves tiles as companion paths
+    ``<idx_base>/visus/0/data/...`` relative to the idx URL, ignoring HTTP
+    ``filename_template`` rows — which breaks object-proxy + ``LoadDataset(https://.../visus.idx)``.
+    """
+    lines = (idx_text or "").splitlines()
+    if not lines:
+        tail = "\n" if not str(idx_text or "").endswith("\n") else ""
+        return (idx_text or "") + tail
+
+    changed = False
+    for i, line in enumerate(lines):
+        s = (line or "").strip()
+        if not s.lower().startswith("(arco)"):
+            continue
+        rest = s[len("(arco)") :].strip()
+        if rest:
+            new_line = re.sub(r"-?\d+", "0", line, count=1)
+            if new_line != line:
+                lines[i] = new_line
+                changed = True
+            break
+        for j in range(i + 1, len(lines)):
+            nxt_raw = lines[j]
+            nxt = (nxt_raw or "").strip()
+            if not nxt:
+                continue
+            m2 = re.search(r"-?\d+", nxt)
+            if m2:
+                lines[j] = nxt_raw[: m2.start()] + "0" + nxt_raw[m2.end() :]
+                changed = True
+            break
+        break
+
+    out = "\n".join(lines) + "\n"
+    if not changed:
+        return idx_text if idx_text.endswith("\n") else (idx_text or "") + "\n"
+    return out
+
+
 def _filename_template_to_s3_key_pattern(template: str, bucket: str, resolved_idx_key: str = "") -> str:
     raw = (template or "").strip()
     if not raw:
@@ -892,6 +934,19 @@ def _build_and_store_resolved_idx(
         key_prefix,
     )
     resolved_idx_text = _replace_filename_template(idx_text, full_template)
+    if (
+        template_mode in ("proxy", "https")
+        and not _boolish(os.getenv("SCLIB_RESOLVED_IDX_KEEP_ARCO", ""))
+        and _extract_arco_value(resolved_idx_text) != 0
+    ):
+        prev_arco = _extract_arco_value(resolved_idx_text)
+        resolved_idx_text = _zero_arco_block_in_idx_text(resolved_idx_text)
+        logger.info(
+            "Resolved idx: set (arco) to 0 for %s filename_template (was %s) so OpenVisus uses HTTP bin template",
+            template_mode,
+            prev_arco,
+        )
+
     # If the source idx is not ARCO (arco == 0), convert it into a cloud-friendly ARCO layout.
     # We convert using OpenVisus while pointing the src idx to the object-proxy URL template,
     # so blocks are fetched from the authorized proxy during conversion (no full local download).
