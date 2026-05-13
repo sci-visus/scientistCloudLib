@@ -210,8 +210,8 @@ class S3ResolvedIdxRequest(BaseModel):
     force_refresh: bool = Field(False, description="Regenerate resolved idx even if it already exists")
     background: bool = Field(True, description="Generate resolved idx in background and return pending status")
     filename_template_mode: str = Field(
-        "s3",
-        description="Resolved filename_template mode: s3 (default), proxy, or https"
+        "proxy",
+        description="Resolved filename_template mode: proxy (default, OpenVisus-friendly), s3, or https"
     )
 
 
@@ -796,7 +796,7 @@ def _build_and_store_resolved_idx(
     secret_access_key: str,
     target_dir: Path,
     output_name: str,
-    filename_template_mode: str = "s3",
+    filename_template_mode: str = "proxy",
 ) -> Dict[str, Any]:
     import boto3
     from botocore.client import Config as BotoConfig
@@ -845,7 +845,7 @@ def _build_and_store_resolved_idx(
         key_prefix = filename_template_key[:wildcard_idx]
     else:
         key_prefix = filename_template_key.rsplit("/", 1)[0] + "/" if "/" in filename_template_key else ""
-    template_mode = (filename_template_mode or "s3").strip().lower()
+    template_mode = (filename_template_mode or "proxy").strip().lower()
     if template_mode == "s3":
         full_template = f"s3://{bucket}/{filename_template_key}"
     elif template_mode == "https":

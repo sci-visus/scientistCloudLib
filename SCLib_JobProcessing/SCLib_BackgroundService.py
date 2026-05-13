@@ -392,7 +392,7 @@ class SCLib_BackgroundService:
         base = os.environ.get("SCLIB_INTERNAL_API_URL", "http://sclib_fastapi:5001").rstrip("/")
         url = f"{base}/api/v1/datasets/s3/openvisus-resolved-idx"
         owner = str(dataset.get("user") or dataset.get("user_email") or "").strip()
-        mode = (os.environ.get("LINKED_IDX_RESOLVED_FILENAME_TEMPLATE_MODE") or "s3").strip() or "s3"
+        mode = (os.environ.get("LINKED_IDX_RESOLVED_FILENAME_TEMPLATE_MODE") or "proxy").strip() or "proxy"
         payload = {
             "dataset_identifier": dataset_uuid,
             "user_email": owner,
