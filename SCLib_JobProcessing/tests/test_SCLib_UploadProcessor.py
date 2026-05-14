@@ -567,6 +567,46 @@ class TestSCLib_UploadProcessor(unittest.TestCase):
             # Verify database was updated
             mock_update_db.assert_called_once()
 
+    def test_remote_job_targets_idx_descriptor_s3(self):
+        """S3 jobs ending in .idx are linked descriptors."""
+        p = self.processor
+        cfg = UploadJobConfig(
+            source_type=UploadSourceType.S3,
+            source_path="s3://bkt/prefix/arco/foo.idx",
+            destination_path="/tmp/x",
+            dataset_uuid="u1",
+            user_email="a@b.c",
+            dataset_name="n",
+            sensor=SensorType.IDX,
+            source_config={"bucket_name": "bkt", "object_key": "prefix/arco/foo.idx"},
+        )
+        self.assertTrue(p._remote_job_targets_idx_descriptor(cfg))
+        cfg2 = UploadJobConfig(
+            source_type=UploadSourceType.S3,
+            source_path="s3://bkt/prefix/",
+            destination_path="/tmp/x",
+            dataset_uuid="u2",
+            user_email="a@b.c",
+            dataset_name="n",
+            sensor=SensorType.IDX,
+            source_config={"bucket_name": "bkt", "object_key": "prefix/"},
+        )
+        self.assertFalse(p._remote_job_targets_idx_descriptor(cfg2))
+
+    def test_remote_job_targets_idx_descriptor_url(self):
+        p = self.processor
+        cfg = UploadJobConfig(
+            source_type=UploadSourceType.URL,
+            source_path="https://gw.example/bucket/k.idx?a=1",
+            destination_path="/tmp/x",
+            dataset_uuid="u1",
+            user_email="a@b.c",
+            dataset_name="n",
+            sensor=SensorType.IDX,
+            source_config={"url": "https://gw.example/bucket/k.idx?a=1"},
+        )
+        self.assertTrue(p._remote_job_targets_idx_descriptor(cfg))
+
 
 # The TestSC_UploadProcessor class is already defined above
 

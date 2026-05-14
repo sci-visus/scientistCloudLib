@@ -766,12 +766,16 @@ class SCLib_UploadProcessor:
             SensorType.ORNL_CHESS_STRAIN.value,
         )
         if not should_materialize:
+            hint = ""
+            if sensor_name == SensorType.IDX.value and self._remote_job_targets_idx_descriptor(job_config):
+                hint = " Linked .idx will still queue background resolved-idx (no mirror)."
             logger.info(
-                "Skipping S3 download to %s (sensor=%s convert=%s; enable "
+                "Skipping S3 download to %s (sensor=%s convert=%s;%s enable "
                 "'Download dataset from S3…' for IDX or ORNL CHESS strain JSON to mirror files locally)",
                 job_config.destination_path,
                 sensor_name,
                 getattr(job_config, "convert", None),
+                hint,
             )
             return
 
@@ -1878,7 +1882,38 @@ scope = drive
         except Exception as e:
             logger.error(f"Error resolving dataset identifier '{identifier}': {e}")
             raise ValueError(f"Dataset not found: {identifier}")
-    
+
+    def _remote_job_targets_idx_descriptor(self, job_config: Optional[UploadJobConfig]) -> bool:
+        """True when an S3 or URL upload job points at a remote .idx object (linked descriptor)."""
+        if not job_config:
+            return False
+        if job_config.source_type == UploadSourceType.S3:
+            cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+            key = str(cfg.get("object_key") or "").strip().split("?", 1)[0].strip().lower()
+            if key.endswith(".idx"):
+                return True
+            sp = str(job_config.source_path or "").strip()
+            if sp.lower().startswith("s3://"):
+                try:
+                    without = sp[len("s3://"):]
+                    parts = without.split("/", 1)
+                    obj = parts[1] if len(parts) > 1 else ""
+                    return obj.split("?", 1)[0].strip().lower().endswith(".idx")
+                except Exception:
+                    return False
+            return False
+        if job_config.source_type == UploadSourceType.URL:
+            cfg = job_config.source_config if isinstance(job_config.source_config, dict) else {}
+            url = str(cfg.get("url") or job_config.source_path or "").strip()
+            if not url:
+                return False
+            try:
+                path = urlparse(url).path or ""
+                return path.split("?", 1)[0].strip().lower().endswith(".idx")
+            except Exception:
+                return False
+        return False
+
     def _update_dataset_status(self, dataset_uuid: str, status: str, error_message: str = "", job_config: Optional[UploadJobConfig] = None):
         """Update dataset status in visstoredatas collection."""
         try:
@@ -1894,13 +1929,23 @@ scope = drive
                     # Check if conversion is needed
                     is_remote_link = bool(job_config and job_config.source_type in [UploadSourceType.S3, UploadSourceType.URL])
                     sensor_val = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper()
-                    is_linked_idx_conversion = bool(
+                    is_linked_idx_remote_descriptor = bool(
                         job_config
-                        and job_config.convert
                         and sensor_val == SensorType.IDX.value
                         and job_config.source_type in (UploadSourceType.S3, UploadSourceType.URL)
+                        and self._remote_job_targets_idx_descriptor(job_config)
                     )
-                    if job_config and job_config.convert and (not is_remote_link or is_linked_idx_conversion):
+                    # job_config.convert = materialize S3/URL to upload/ when applicable, then convert.
+                    # Linked remote .idx with convert unchecked still needs background openvisus-resolved-idx
+                    # (visus.idx under converted/) without mirroring tiles to upload/.
+                    queue_for_conversion = bool(
+                        job_config
+                        and (
+                            (job_config.convert and (not is_remote_link or is_linked_idx_remote_descriptor))
+                            or (is_linked_idx_remote_descriptor and not job_config.convert)
+                        )
+                    )
+                    if queue_for_conversion:
                         # For multi-file datasets, do not queue conversion until all file jobs are terminal.
                         all_terminal, non_terminal = self._file_jobs_terminal_state(dataset_uuid, collection)
                         if all_terminal:
@@ -1930,7 +1975,13 @@ scope = drive
                             update_data["status"] = "conversion queued"
                             update_data["canonical_state"] = "conversion_queued"
                             update_data["data_conversion_needed"] = True
-                            update_data["status_message"] = "Upload complete. Dataset conversion has been queued."
+                            if is_linked_idx_remote_descriptor and not job_config.convert:
+                                update_data["status_message"] = (
+                                    "Linked remote .idx registered. "
+                                    "Background conversion will produce a resolved descriptor under converted/ (no S3 mirror)."
+                                )
+                            else:
+                                update_data["status_message"] = "Upload complete. Dataset conversion has been queued."
                             unset_data["error_message"] = ""
                             unset_data["missing_expected_files"] = ""
                             logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
@@ -1957,7 +2008,10 @@ scope = drive
                             unset_data["error_message"] = ""
                             unset_data["missing_expected_files"] = ""
                             if is_remote_link:
-                                logger.info(f"Remote-link dataset registered (no conversion): {dataset_uuid}")
+                                logger.info(
+                                    "Remote-link dataset registered (no conversion): %s",
+                                    dataset_uuid,
+                                )
                             else:
                                 logger.info(f"Upload completed, no conversion needed for dataset: {dataset_uuid}")
                         else:
