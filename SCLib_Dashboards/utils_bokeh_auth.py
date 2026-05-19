@@ -150,18 +150,50 @@ def get_auth_token_from_cookies(request=None, status_callback=None):
     return None
 
 def decode_jwt_token(token, secret_key):
-    """Decode and validate JWT token"""
+    """Decode and validate portal dashboard JWT (auth_token cookie)."""
+    env_aud = (os.getenv("AUTH0_AUDIENCE") or "").strip()
+    audiences = ["sclib-api"]
+    if env_aud and env_aud not in audiences:
+        audiences.append(env_aud)
+    # Legacy portal cookies minted with AUTH0_AUDIENCE as JWT aud (e.g. old deploy server URL)
+    legacy_aud = (os.getenv("DEPLOY_SERVER") or "").strip().rstrip("/")
+    if legacy_aud and legacy_aud not in audiences:
+        audiences.append(legacy_aud)
+
+    last_error = None
+    for aud in audiences:
+        try:
+            decoded = jwt.decode(
+                token,
+                secret_key,
+                algorithms=["HS256"],
+                audience=aud,
+                issuer="sclib-auth",
+            )
+            return decoded, None
+        except jwt.ExpiredSignatureError as e:
+            return None, f"JWT token expired: {e}"
+        except jwt.InvalidTokenError as e:
+            last_error = e
+
     try:
-        decoded = jwt.decode(token, secret_key, algorithms=["HS256"])
+        decoded = jwt.decode(
+            token,
+            secret_key,
+            algorithms=["HS256"],
+            options={"verify_aud": False, "verify_iss": False},
+        )
         return decoded, None
     except jwt.ExpiredSignatureError as e:
         return None, f"JWT token expired: {e}"
     except jwt.InvalidTokenError as e:
         return None, f"Invalid JWT token: {e}"
-    except KeyError as e:
-        return None, f"Missing 'user' field in JWT token: {e}"
     except Exception as e:
         return None, f"Authentication error: {e}"
+
+    if last_error:
+        return None, f"Invalid JWT token: {last_error}"
+    return None, "Invalid JWT token"
 
 def authenticate_user(uuid, request=None, status_callback=None):
     """
