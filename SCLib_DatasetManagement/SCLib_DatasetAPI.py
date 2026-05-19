@@ -1366,28 +1366,103 @@ def _get_dataset_by_remote_uri(
                 return doc
     return None
 
+def _email_candidates_for_access(user_email: str) -> list[str]:
+    """Normalized email list for owner/share/team lookups (matches by-user endpoint)."""
+    normalized = _safe_email(user_email)
+    candidates = [user_email]
+    if normalized and normalized not in candidates:
+        candidates.append(normalized)
+    return candidates
+
+
+def _profile_team_refs_for_user(email_candidates: list[str]) -> list[str]:
+    profile_team_refs: list[str] = []
+    try:
+        with mongo_collection_by_type_context('user_profile') as prof_coll:
+            prof = prof_coll.find_one({'email': {'$in': email_candidates}})
+            if prof:
+                for key in ('team_id', 'team_uuid'):
+                    val = prof.get(key)
+                    if val not in (None, '', []):
+                        profile_team_refs.append(str(val))
+    except Exception as ex:
+        logger.debug(f"user_profile team lookup skipped: {ex}")
+    return list(dict.fromkeys(profile_team_refs))
+
+
+def _teams_for_user_email(email_candidates: list[str]) -> tuple[list[str], list[str]]:
+    """Teams the user belongs to: (team uuids, team names)."""
+    with mongo_collection_by_type_context('teams') as teams_collection:
+        teams = list(teams_collection.find({
+            '$or': [
+                {'emails': {'$in': email_candidates}},
+                {'owner': {'$in': email_candidates}},
+            ]
+        }))
+    team_uuids = [str(t.get('uuid')) for t in teams if t.get('uuid')]
+    team_names = [str(t.get('team_name')) for t in teams if t.get('team_name')]
+    return team_uuids, team_names
+
+
 def _check_dataset_access(dataset: Dict[str, Any], user_email: str) -> bool:
-    """Check if user has access to dataset."""
-    if dataset.get('user') == user_email or dataset.get('user_email') == user_email:
+    """Check if user has access to dataset (aligned with GET /api/v1/datasets/by-user)."""
+    if not user_email or not dataset:
+        return False
+
+    email_candidates = _email_candidates_for_access(user_email)
+
+    owner_fields = (
+        dataset.get('user'),
+        dataset.get('user_email'),
+        dataset.get('user_id'),
+        dataset.get('owner'),
+    )
+    if any(o in email_candidates for o in owner_fields if o):
         return True
-    
-    # Check shared access
-    shared_with = dataset.get('shared_with', [])
-    if user_email in shared_with:
+
+    shared_with = dataset.get('shared_with') or []
+    if isinstance(shared_with, list) and any(s in email_candidates for s in shared_with):
         return True
-    
-    # Check team access
-    if dataset.get('team_uuid'):
-        # Get user's team from user_profile
-        with mongo_collection_by_type_context('user_profile') as user_collection:
-            user_profile = user_collection.find_one({"email": user_email})
-            if user_profile and user_profile.get('team_id') == dataset.get('team_uuid'):
+
+    dataset_uuid = dataset.get('uuid')
+    if dataset_uuid:
+        with mongo_collection_by_type_context('shared_user') as shared_collection:
+            if shared_collection.find_one({
+                'uuid': dataset_uuid,
+                '$or': [
+                    {'user': {'$in': email_candidates}},
+                    {'user_email': {'$in': email_candidates}},
+                ],
+            }):
                 return True
-    
-    # Check if public
+
+    team_uuids, team_names = _teams_for_user_email(email_candidates)
+    profile_team_refs = _profile_team_refs_for_user(email_candidates)
+    ds_team_uuid = dataset.get('team_uuid') or dataset.get('team_id')
+    ds_team_uuid_str = str(ds_team_uuid) if ds_team_uuid not in (None, '', []) else ''
+
+    if ds_team_uuid_str:
+        if ds_team_uuid_str in team_uuids or ds_team_uuid_str in profile_team_refs:
+            return True
+        if ds_team_uuid_str in team_names:
+            return True
+
+    if dataset_uuid and (team_uuids or team_names):
+        with mongo_collection_by_type_context('shared_team') as shared_team_collection:
+            match_conditions = []
+            if team_uuids:
+                match_conditions.append({'team_uuid': {'$in': team_uuids}})
+            if team_names:
+                match_conditions.append({'team': {'$in': team_names}})
+            if match_conditions and shared_team_collection.find_one({
+                'uuid': dataset_uuid,
+                '$or': match_conditions,
+            }):
+                return True
+
     if dataset.get('is_public', False):
         return True
-    
+
     return False
 
 def _calculate_dataset_size(dataset_uuid: str) -> Dict[str, Any]:
