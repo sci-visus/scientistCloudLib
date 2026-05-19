@@ -1465,6 +1465,93 @@ def _check_dataset_access(dataset: Dict[str, Any], user_email: str) -> bool:
 
     return False
 
+
+def _user_is_dataset_owner(dataset: Dict[str, Any], user_email: str) -> bool:
+    """True if user_email is the dataset owner."""
+    if not user_email or not dataset:
+        return False
+    email_candidates = _email_candidates_for_access(user_email)
+    owner_fields = (
+        dataset.get('user'),
+        dataset.get('user_email'),
+        dataset.get('user_id'),
+        dataset.get('owner'),
+    )
+    return any(o in email_candidates for o in owner_fields if o)
+
+
+def _dataset_shared_with_user_teams(
+    dataset_uuid: str,
+    team_uuids: list,
+    team_names: list,
+) -> bool:
+    """True if dataset is in shared_team for any of the user's teams."""
+    if not dataset_uuid or not (team_uuids or team_names):
+        return False
+    with mongo_collection_by_type_context('shared_team') as shared_team_collection:
+        match_conditions = []
+        if team_uuids:
+            match_conditions.append({'team_uuid': {'$in': team_uuids}})
+        if team_names:
+            match_conditions.append({'team': {'$in': team_names}})
+        if match_conditions and shared_team_collection.find_one({
+            'uuid': dataset_uuid,
+            '$or': match_conditions,
+        }):
+            return True
+    return False
+
+
+def _user_in_dataset_team(dataset: Dict[str, Any], user_email: str) -> bool:
+    """True if user belongs to the dataset's team or a team it was shared with."""
+    email_candidates = _email_candidates_for_access(user_email)
+    team_uuids, team_names = _teams_for_user_email(email_candidates)
+    profile_team_refs = _profile_team_refs_for_user(email_candidates)
+    user_team_refs = set(team_uuids + team_names + profile_team_refs)
+
+    ds_team_uuid = dataset.get('team_uuid') or dataset.get('team_id')
+    ds_team_name = dataset.get('team_name')
+    for val in (ds_team_uuid, ds_team_name):
+        if val not in (None, '', []):
+            sval = str(val)
+            if sval in user_team_refs:
+                return True
+            # Legacy: team_uuid field sometimes stores team name
+            if sval in team_names:
+                return True
+
+    dataset_uuid = dataset.get('uuid')
+    if dataset_uuid:
+        return _dataset_shared_with_user_teams(dataset_uuid, team_uuids, team_names)
+    return False
+
+
+def _user_can_download_dataset(dataset: Dict[str, Any], user_email: str) -> bool:
+    """Download permission (separate from view/access)."""
+    if not user_email or not dataset:
+        return False
+    if _user_is_dataset_owner(dataset, user_email):
+        return True
+    is_downloadable = (dataset.get('is_downloadable') or 'only owner').strip()
+    if is_downloadable == 'public':
+        return True
+    if is_downloadable == 'only owner':
+        return False
+    if is_downloadable == 'only team':
+        return _user_in_dataset_team(dataset, user_email)
+    return False
+
+
+def _enrich_dataset_for_user(dataset: Dict[str, Any], user_email: Optional[str]) -> Dict[str, Any]:
+    """Add is_owner and can_download for portal UI and clients."""
+    if not user_email:
+        return dataset
+    enriched = dict(dataset)
+    enriched['is_owner'] = _user_is_dataset_owner(dataset, user_email)
+    enriched['can_download'] = _user_can_download_dataset(dataset, user_email)
+    return enriched
+
+
 def _calculate_dataset_size(dataset_uuid: str) -> Dict[str, Any]:
     """Calculate dataset size information."""
     # Get dataset directory from config
@@ -2840,6 +2927,9 @@ async def get_dataset(
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
         
+        if user_email:
+            dataset = _enrich_dataset_for_user(dataset, user_email)
+        
         return {
             "success": True,
             "identifier": identifier,
@@ -2879,6 +2969,9 @@ async def update_dataset(
         
         if not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
+        
+        if not _user_is_dataset_owner(dataset, user_email):
+            raise HTTPException(status_code=403, detail="Only the dataset owner can update it")
         
         # Prepare update data
         update_data = {
@@ -3351,6 +3444,8 @@ async def list_dataset_files(
         # Check access if user_email provided
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
+        if user_email and not _user_can_download_dataset(dataset, user_email):
+            raise HTTPException(status_code=403, detail="Download not permitted for this dataset")
         
         # Get directory paths from config
         config = get_config()
@@ -3423,6 +3518,8 @@ async def get_file_content(
         # Check access if user_email provided
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
+        if user_email and not _user_can_download_dataset(dataset, user_email):
+            raise HTTPException(status_code=403, detail="Download not permitted for this dataset")
         
         # Validate directory
         if directory not in ['upload', 'converted']:
@@ -3552,6 +3649,8 @@ async def serve_file(
         # Check access if user_email provided
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
+        if user_email and not _user_can_download_dataset(dataset, user_email):
+            raise HTTPException(status_code=403, detail="Download not permitted for this dataset")
         
         # Validate directory
         if directory not in ['upload', 'converted']:

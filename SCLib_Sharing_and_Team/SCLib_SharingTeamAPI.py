@@ -558,6 +558,15 @@ async def share_dataset_with_team(
                 detail=f"Team name mismatch: expected {team.get('team_name')}, got {request.team_name}"
             )
         
+        team_uuid_val = team.get("uuid")
+        share_payload = {
+            "team_uuid": team_uuid_val,
+            "team_name": request.team_name,
+            "is_downloadable": "only team",
+        }
+        
+        google_link = request.google_drive_link or dataset.get('google_drive_link', '')
+        
         # Check if already shared
         with mongo_collection_by_type_context('shared_team') as collection:
             existing = collection.find_one({
@@ -565,39 +574,41 @@ async def share_dataset_with_team(
                 "team": request.team_name
             })
             
-            if existing:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Dataset already shared with team {request.team_name}"
-                )
-            
-            # Create sharing document
-            share_doc = {
-                "uuid": request.dataset_uuid,
-                "team": request.team_name,  # Store team name (string)
-                "team_uuid": team.get("uuid"),  # Store team UUID
-                "google_drive_link": request.google_drive_link or dataset.get('google_drive_link', '')
-            }
-            
-            collection.insert_one(share_doc)
+            if not existing:
+                collection.insert_one({
+                    "uuid": request.dataset_uuid,
+                    "team": request.team_name,
+                    "team_uuid": team_uuid_val,
+                    "google_drive_link": google_link,
+                })
         
-        # Also update dataset's team_uuid field (this stores the team name, not UUID)
+        already_shared = existing is not None
+        
+        # Link dataset to team (UUID) and allow team downloads
         with mongo_collection_by_type_context('visstoredatas') as collection:
             collection.update_one(
                 {"uuid": request.dataset_uuid},
-                {"$set": {"team_uuid": request.team_name}}
+                {"$set": share_payload}
             )
         
-        logger.info(f"Shared dataset {request.dataset_uuid} with team {request.team_name} by {owner_email}")
+        logger.info(
+            "Shared dataset %s with team %s by %s (already_shared=%s)",
+            request.dataset_uuid, request.team_name, owner_email, already_shared,
+        )
         
         return {
             "success": True,
-            "message": f"Dataset shared with team {request.team_name}",
+            "message": (
+                f"Dataset already shared with team {request.team_name}; download permissions updated"
+                if already_shared
+                else f"Dataset shared with team {request.team_name}"
+            ),
             "share": {
                 "dataset_uuid": request.dataset_uuid,
                 "team_name": request.team_name,
-                "team_uuid": team.get("uuid"),
-                "google_drive_link": share_doc["google_drive_link"]
+                "team_uuid": team_uuid_val,
+                "google_drive_link": google_link,
+                "is_downloadable": "only team",
             }
         }
         
