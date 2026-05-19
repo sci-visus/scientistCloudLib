@@ -578,6 +578,23 @@ def load_json_from_url(
                 "Install boto3 in the dashboard image or use a presigned GET URL."
             ) from ie
         except Exception as ex:
+            try:
+                from botocore.exceptions import ClientError
+
+                if isinstance(ex, ClientError):
+                    err = (ex.response or {}).get("Error") or {}
+                    code = err.get("Code", "ClientError")
+                    msg = err.get("Message", str(ex))
+                    raise FileNotFoundError(
+                        f"S3 gateway download failed ({code}): {msg}. "
+                        f"Object: s3://{s3_cfg.get('bucket', '')}/{s3_cfg.get('key', '')} "
+                        f"via {s3_cfg.get('endpoint_url', '')}. "
+                        "Unsigned curl/browser GET often returns 403 on this gateway; the dashboard "
+                        "uses SigV4. If this persists, verify the dataset S3 access/secret keys in the "
+                        "portal and that the object exists."
+                    ) from ex
+            except ImportError:
+                pass
             _LOG.debug("S3 client load failed, trying HTTP GET: %s", ex, exc_info=True)
 
     headers = {
