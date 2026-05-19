@@ -269,6 +269,106 @@ def _looks_like_http_url(value: str) -> bool:
     return v.startswith("http://") or v.startswith("https://")
 
 
+def _credential_is_placeholder(value: str) -> bool:
+    v = (value or "").strip()
+    if not v:
+        return True
+    if v == "...":
+        return True
+    return bool(re.fullmatch(r"\.+", v))
+
+
+def pick_strain_json_link_from_dataset_doc(doc: Mapping[str, Any]) -> str:
+    """First remote/local JSON link on a portal dataset document (matches SC_Web PHP)."""
+    for field in ("viewer_url", "download_url", "google_drive_link", "source_path"):
+        u = str(doc.get(field) or "").strip()
+        if not u:
+            continue
+        low = u.lower()
+        if (
+            low.endswith(".json")
+            or ".json?" in low
+            or low.startswith("s3://")
+            or low.startswith("http://")
+            or low.startswith("https://")
+        ):
+            return u
+    return ""
+
+
+def apply_gateway_credentials_to_url(url: str, access_key: str, secret_key: str) -> str:
+    """Inject or replace gateway query credentials on an https URL."""
+    from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+    url = (url or "").strip()
+    access_key = (access_key or "").strip()
+    secret_key = (secret_key or "").strip()
+    if not url or not access_key or not secret_key:
+        return url
+    if not _looks_like_http_url(url):
+        return url
+
+    parts = urlparse(url)
+    query = dict(parse_qsl(parts.query or "", keep_blank_values=True))
+    for key in list(query.keys()):
+        if key in ("access_key", "access_key_id", "secret_key", "secret_access_key"):
+            if _credential_is_placeholder(str(query[key])):
+                del query[key]
+    query["access_key"] = access_key
+    query["secret_key"] = secret_key
+    new_query = urlencode(query)
+    return urlunparse(
+        (parts.scheme, parts.netloc, parts.path, parts.params, new_query, parts.fragment)
+    )
+
+
+def resolve_strain_json_remote_link_from_dataset(doc: Mapping[str, Any]) -> str:
+    """Remote strain JSON URL with real gateway credentials when stored on the dataset."""
+    link = pick_strain_json_link_from_dataset_doc(doc)
+    if not link:
+        return ""
+    ak = str(doc.get("s3_access_key_id") or doc.get("accesskey") or "").strip()
+    sk = str(doc.get("s3_secret_access_key") or doc.get("secretkey") or "").strip()
+    if _credential_is_placeholder(ak):
+        ak = ""
+    if _credential_is_placeholder(sk):
+        sk = ""
+    if ak and sk and _looks_like_http_url(link):
+        return apply_gateway_credentials_to_url(link, ak, sk)
+    return link
+
+
+def enrich_strain_paths_from_dataset_doc(
+    paths: StrainDashboardPaths,
+    doc: Optional[Mapping[str, Any]],
+    *,
+    base_dir: str = "",
+    save_dir: str = "",
+) -> StrainDashboardPaths:
+    """
+    When URL args and env did not resolve JSON, use the Mongo dataset record
+    (same fields as portal dashboard share links).
+    """
+    if (paths.local_json_path or "").strip() or (paths.json_url or "").strip():
+        return paths
+    bd = (base_dir or "").strip()
+    sd = (save_dir or "").strip()
+    mirror = find_strain_json_under_dataset_dir(bd) or find_strain_json_under_dataset_dir(sd)
+    if mirror:
+        return StrainDashboardPaths(local_json_path=mirror, json_url="")
+    if not doc:
+        return paths
+    link = resolve_strain_json_remote_link_from_dataset(doc)
+    if not link:
+        return paths
+    if _looks_like_http_url(link):
+        return StrainDashboardPaths(local_json_path="", json_url=link)
+    if os.path.isfile(link):
+        return StrainDashboardPaths(local_json_path=link, json_url="")
+    # s3:// and other schemes: pass as URL for downstream loaders
+    return StrainDashboardPaths(local_json_path="", json_url=link)
+
+
 def load_json_from_local_path(path: str) -> Dict[str, Any]:
     if _looks_like_http_url(path):
         return load_json_from_url(path)
