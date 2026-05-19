@@ -269,7 +269,15 @@ def authenticate_user(uuid, request=None, status_callback=None):
         
         add_status(f"🔍 DEBUG: JWT decoded successfully")
         add_status(f"🔍 DEBUG: decoded payload: {decoded}")
-        user_email = decoded['user']
+        user_email = decoded.get('user') or decoded.get('email')
+        if not user_email:
+            add_status("❌ JWT missing user/email claim")
+            return {
+                'is_authorized': False,
+                'user_email': None,
+                'access_type': 'error',
+                'error': "Missing 'user' or 'email' field in JWT token"
+            }
         add_status(f"🔍 DEBUG: extracted user_email: {user_email}")
         add_status(f"✅ Authenticated user: {user_email}")
         
