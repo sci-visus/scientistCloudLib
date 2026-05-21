@@ -669,6 +669,81 @@ def _filename_template_to_s3_key_pattern(template: str, bucket: str, resolved_id
     return raw.lstrip("/")
 
 
+def _s3_object_exists(s3, bucket: str, key: str) -> bool:
+    key = (key or "").lstrip("/")
+    if not bucket or not key:
+        return False
+    try:
+        s3.head_object(Bucket=bucket, Key=key)
+        return True
+    except Exception:
+        return False
+
+
+def _infer_arco_filename_template_key(
+    s3,
+    bucket: str,
+    key_stem: str,
+    idx_text: str,
+) -> str:
+    """
+    Infer ``(filename_template)`` S3 key pattern for ARCO datasets.
+
+    Nexus-style physics idx (under ``.../arco/<stem>/``) stores blocks at
+    ``<stem>/0/data/0000/0000/0000/0000.bin``. Climate-style layouts often use
+    ``<stem>/0000/0000/0000/0000.bin`` (see nex-gddp-cmip6). The old fallback
+    ``{key_stem}/%04x.bin`` misses the ``0/data/0000/0000/0000/`` segment and
+    makes object-proxy return empty reads in Dark Matter / OpenVisus.
+    """
+    stem = (key_stem or "").strip().rstrip("/")
+    if not stem:
+        return ""
+
+    candidates: List[Tuple[str, str]] = [
+        (f"{stem}/0/data/0000/0000/0000/%04x.bin", f"{stem}/0/data/0000/0000/0000/0000.bin"),
+        (f"{stem}/0000/0000/0000/%04x.bin", f"{stem}/0000/0000/0000/0000.bin"),
+        (f"{stem}/0/data/0000/%04x.bin", f"{stem}/0/data/0000/0000.bin"),
+        (f"{stem}/0/%04x.bin", f"{stem}/0/0000.bin"),
+        (f"{stem}/%04x.bin", f"{stem}/0000.bin"),
+    ]
+    for pattern, probe_key in candidates:
+        if _s3_object_exists(s3, bucket, probe_key):
+            logger.info(
+                "Inferred ARCO filename_template_key: probe_key=%s pattern=%s",
+                probe_key,
+                pattern,
+            )
+            return pattern
+
+    if "/arco/" in stem.lower() or _extract_arco_value(idx_text) != 0:
+        default = f"{stem}/0/data/0000/0000/0000/%04x.bin"
+        logger.info(
+            "ARCO filename_template_key default (no probe hit): %s",
+            default,
+        )
+        return default
+
+    return f"{stem}/%04x.bin"
+
+
+def _resolved_idx_needs_regeneration(existing_text: str) -> bool:
+    """True when a cached resolved idx is missing remote templates or has a known-bad ARCO proxy path."""
+    tpl = _extract_filename_template(existing_text)
+    if not tpl or "%" not in tpl:
+        return True
+    has_remote = (
+        "/api/v1/datasets/s3/object-proxy" in tpl
+        or (tpl.startswith("s3://") and "%" in tpl)
+        or tpl.startswith(("http://", "https://"))
+    )
+    if not has_remote:
+        return True
+    # Stale: proxy points at .../arco/<name>/%04x.bin but bins live under .../0/data/0000/0000/0000/
+    if "/arco/" in tpl and "0/data/" not in tpl:
+        return True
+    return False
+
+
 def _proxy_base_url() -> str:
     # Prefer publicly reachable URLs for idx templates consumed by dashboards.
     # Internal host is only a final fallback for local/container-only scenarios.
@@ -877,10 +952,23 @@ def _build_and_store_resolved_idx(
         resolved_idx_key=resolved_key,
     )
     if not filename_template_key or "%" not in filename_template_key:
-        # Fallback only when original idx has no usable template pattern.
-        # Do not probe specific indices like 0000 here; OpenVisus decides which
-        # concrete block files to request from the printf template at runtime.
-        filename_template_key = f"{key_stem}/%04x.bin"
+        filename_template_key = _infer_arco_filename_template_key(
+            s3, bucket, key_stem, idx_text
+        )
+    elif (
+        "/arco/" in (key_stem or "").lower()
+        and "0/data/" not in filename_template_key
+        and filename_template_key.endswith("%04x.bin")
+    ):
+        # Mapped relative template often becomes {stem}/%04x.bin — wrong for Nexus ARCO layout.
+        inferred = _infer_arco_filename_template_key(s3, bucket, key_stem, idx_text)
+        if inferred and "0/data/" in inferred:
+            logger.info(
+                "Replacing short ARCO template %s with inferred %s",
+                filename_template_key,
+                inferred,
+            )
+            filename_template_key = inferred
 
     wildcard_idx = filename_template_key.find("%")
     if wildcard_idx >= 0:
@@ -2455,10 +2543,7 @@ async def create_openvisus_resolved_idx(
         if resolved_idx_path.exists() and not request.force_refresh:
             try:
                 existing_text = resolved_idx_path.read_text(encoding="utf-8", errors="ignore")
-                has_proxy_template = "/api/v1/datasets/s3/object-proxy" in existing_text
-                has_s3_template = "s3://" in existing_text and "%" in existing_text
-                existing_arco = _extract_arco_value(existing_text)
-                if has_proxy_template or has_s3_template or existing_arco != 0:
+                if not _resolved_idx_needs_regeneration(existing_text):
                     return {
                         "success": True,
                         "status": "ready",
@@ -2473,7 +2558,7 @@ async def create_openvisus_resolved_idx(
                         "converted_dir": str(target_dir),
                     }
                 logger.info(
-                    "Existing resolved idx is stale (no object-proxy or s3 template); regenerating: %s",
+                    "Existing resolved idx is stale (bad/missing remote template); regenerating: %s",
                     resolved_idx_path,
                 )
             except Exception as ex:
