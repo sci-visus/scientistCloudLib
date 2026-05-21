@@ -177,7 +177,18 @@ def resolve_openvisus_load_target(
     load_url: Optional[str] = None
     display_uuid = portal_uuid
 
-    if _server_is_remote(server):
+    # 1) Upload + convert (or upload with .idx): materialized on server wins over google_drive_link.
+    # 2) Link-only (S3/HTTPS, no local idx): remote from Mongo / portal uuid.
+    # 3) Upload without idx yet: mod_visus fallback or uuid.
+    local_idx = resolve_local_idx_file(
+        portal_uuid,
+        converted_dir=save_dir,
+        upload_dir=base_dir,
+    )
+    if local_idx:
+        load_url = local_idx
+        _log(f"[SCLib][OpenVisus] prefer local idx (over server={server}): {load_url}")
+    elif _server_is_remote(server) or is_remote_dataset_identifier(portal_uuid):
         load_url = portal_uuid
         if collection is not None and portal_uuid and "http" not in portal_uuid:
             _log(f"[SCLib][OpenVisus] Mongo lookup uuid={portal_uuid}")
@@ -194,7 +205,7 @@ def resolve_openvisus_load_target(
                     load_url = portal_uuid
         elif portal_uuid and "http" in portal_uuid:
             load_url = portal_uuid
-        _log(f"[SCLib][OpenVisus] server=true load_url={load_url}")
+        _log(f"[SCLib][OpenVisus] link-only remote load_url={load_url}")
     else:
         if is_remote_dataset_identifier(name):
             if collection is not None and portal_uuid and not is_remote_dataset_identifier(portal_uuid):
@@ -211,21 +222,13 @@ def resolve_openvisus_load_target(
             else:
                 load_url = portal_uuid if is_remote_dataset_identifier(portal_uuid) else name
         if load_url is None:
-            local_idx = resolve_local_idx_file(
-                portal_uuid,
-                converted_dir=save_dir,
-                upload_dir=base_dir,
-            )
-            if local_idx:
-                load_url = local_idx
-                _log(f"[SCLib][OpenVisus] local idx: {load_url}")
-            elif deploy_server and "localhost" in deploy_server:
+            if deploy_server and "localhost" in (deploy_server or ""):
                 load_url = f"http://host.docker.internal/mod_visus?dataset={portal_uuid}"
             elif deploy_server:
                 load_url = f"{deploy_server.rstrip('/')}/mod_visus?dataset={portal_uuid}"
             else:
                 load_url = portal_uuid
-                _log(f"[SCLib][OpenVisus] no local idx; using uuid as last resort")
+                _log("[SCLib][OpenVisus] no local idx; using uuid as last resort")
 
     load_url = str(load_url or portal_uuid).strip()
     return OpenVisusLoadTarget(
