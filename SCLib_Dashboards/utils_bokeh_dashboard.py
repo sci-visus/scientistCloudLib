@@ -31,11 +31,11 @@ def initialize_dashboard(request=None, status_callback=None):
         print(message)
     
     try:
-        # Check if running with URL arguments - if no args, we're in local mode
         has_args = request and request.arguments and len(request.arguments) > 0
-        
-        if not has_args:
-            # Local development - skip all the complex setup
+        local_dev = os.getenv('SC_DASHBOARD_LOCAL_DEV', '').lower() in ('1', 'true', 'yes')
+
+        if local_dev and not has_args:
+            # Explicit local dev only (SC_DASHBOARD_LOCAL_DEV=1) — never infer from missing URL args
             add_status("🏠 Running in local mode - skipping auth and MongoDB")
             
             # Set up local parameters directly
@@ -69,7 +69,19 @@ def initialize_dashboard(request=None, status_callback=None):
                 'dataset_path': None,
                 'error': None
             }
-        
+
+        if not has_args:
+            error_msg = "Missing required URL parameters (uuid, server, name)"
+            add_status(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'auth_result': None,
+                'mongodb': None,
+                'params': {},
+                'dataset_path': None,
+                'error': error_msg
+            }
+
         else:
             from utils_bokeh_auth import authenticate_user
             from utils_bokeh_mongodb import connect_to_mongodb, cleanup_mongodb

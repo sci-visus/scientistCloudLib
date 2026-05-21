@@ -85,6 +85,18 @@ from .SCDash_dataset_resolver import (
     resolve_local_nexus_file,
 )
 
+from .SCDash_openvisus_load import (
+    OpenVisusLoadTarget,
+    http_object_url_to_s3_uri,
+    is_http_remote,
+    is_s3_uri,
+    normalize_remote_openvisus_url,
+    openvisus_set_dataset,
+    prefer_direct_remote_openvisus,
+    resolve_openvisus_load_target,
+    resolve_openvisus_resolved_idx_via_api,
+)
+
 # Undo/Redo components (don't depend on bokeh, so import separately)
 from .SCDashUI_undo_redo import (
     StateHistory,
@@ -198,6 +210,16 @@ __all__ = [
     "resolve_local_idx_file",
     "resolve_local_nexus_and_mmap",
     "resolve_local_nexus_file",
+    # OpenVisus load resolution (shared across Bokeh dashboards)
+    "OpenVisusLoadTarget",
+    "resolve_openvisus_load_target",
+    "openvisus_set_dataset",
+    "prefer_direct_remote_openvisus",
+    "normalize_remote_openvisus_url",
+    "is_s3_uri",
+    "is_http_remote",
+    "http_object_url_to_s3_uri",
+    "resolve_openvisus_resolved_idx_via_api",
     # Undo/Redo (core functionality, doesn't depend on bokeh)
     "StateHistory",
     "PlotStateHistory",
