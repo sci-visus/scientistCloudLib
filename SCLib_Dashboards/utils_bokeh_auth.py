@@ -82,6 +82,38 @@ def get_cookie_from_request(cookie_name, request=None, status_callback=None):
     
     return None
 
+def get_portal_user_email_from_headers(request=None, status_callback=None):
+    """Email passed by nginx after portal auth_request (when auth_token cookie is missing)."""
+    def add_status(message):
+        if status_callback:
+            status_callback(message)
+        print(message)
+
+    if request is None:
+        return None
+    try:
+        headers = getattr(request, "headers", None)
+        if not headers:
+            return None
+        for key in ("X-SC-User-Email", "X-Sc-User-Email", "x-sc-user-email"):
+            val = None
+            if hasattr(headers, "get"):
+                val = headers.get(key)
+            if val is None and hasattr(headers, "__getitem__"):
+                try:
+                    val = headers[key]
+                except (KeyError, TypeError):
+                    pass
+            if val:
+                email = str(val).strip()
+                if email and "@" in email:
+                    add_status(f"✅ Portal user from header: {email}")
+                    return email
+    except Exception as e:
+        add_status(f"❌ Error reading portal user header: {e}")
+    return None
+
+
 def get_auth0_session_cookie(request=None, status_callback=None):
     """Get Auth0 session cookie - tries multiple possible cookie names"""
     def add_status(message):
@@ -266,26 +298,47 @@ def authenticate_user(uuid, request=None, status_callback=None):
             add_status(f"🔍 DEBUG: auth_token preview: {auth_token[:50]}...")
         
         if not auth_token:
-            # Check if we have Auth0 session cookies (which indicate authentication)
+            portal_email = get_portal_user_email_from_headers(request, status_callback)
+            if portal_email:
+                is_authorized, access_type, message = check_dataset_access(
+                    collection, collection1, team_collection, shared_team_collection,
+                    uuid, portal_email,
+                )
+                if is_authorized:
+                    add_status(f"✅ {message}")
+                    return {
+                        'is_authorized': True,
+                        'user_email': portal_email,
+                        'access_type': access_type,
+                        'message': message,
+                        'error': None,
+                    }
+                add_status(f"❌ {message}")
+                return {
+                    'is_authorized': False,
+                    'user_email': portal_email,
+                    'access_type': access_type,
+                    'message': message,
+                    'error': message,
+                }
+
             auth0_cookie = get_auth0_session_cookie(request, status_callback)
             if auth0_cookie:
                 add_status("✅ Found Auth0 session - treating as authenticated")
-                # For now, treat Auth0 session as authenticated but without user email
-                # In a real implementation, you'd need to decode the Auth0 session
                 return {
                     'is_authorized': True,
-                    'user_email': 'auth0_session_user',  # Placeholder
+                    'user_email': 'auth0_session_user',
                     'access_type': 'auth0_session',
                     'error': None
                 }
-            else:
-                add_status("❌ No auth token or session found")
-                return {
-                    'is_authorized': False,
-                    'user_email': None,
-                    'access_type': 'none',
-                    'error': 'No auth token or session found'
-                }
+
+            add_status("❌ No auth token or session found")
+            return {
+                'is_authorized': False,
+                'user_email': None,
+                'access_type': 'none',
+                'error': 'No auth token or session found'
+            }
         
         # Decode JWT token
         add_status(f"🔍 DEBUG: Attempting to decode JWT token...")
