@@ -13,13 +13,91 @@ import logging
 import math
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel, EmailStr, Field
 
+try:
+    from .SCLib_MongoConnection import mongo_collection_by_type_context
+    from .SCLib_UploadJobTypes import SensorType
+except ImportError:
+    from SCLib_MongoConnection import mongo_collection_by_type_context
+    from SCLib_UploadJobTypes import SensorType
+
 logger = logging.getLogger(__name__)
+
+
+def _coerce_sensor_type(raw: Any) -> SensorType:
+    if isinstance(raw, SensorType):
+        return raw
+    text = str(raw or "").strip()
+    if not text:
+        return SensorType.OTHER
+    for sensor in SensorType:
+        if text == sensor.value or text.upper() == sensor.name:
+            return sensor
+    return SensorType.OTHER
+
+
+def _parse_tags(raw: Any) -> List[str]:
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return [str(t).strip() for t in raw if str(t).strip()]
+    return [t.strip() for t in str(raw).split(",") if t.strip()]
+
+
+def _mark_browser_chunked_in_progress(dataset_uuid: str, file_size: int) -> None:
+    now = datetime.now(timezone.utc)
+    with mongo_collection_by_type_context("visstoredatas") as collection:
+        collection.update_one(
+            {"uuid": dataset_uuid},
+            {
+                "$set": {
+                    "browser_chunked_in_progress": True,
+                    "total_size_bytes": file_size,
+                    "updated_at": now,
+                }
+            },
+        )
+
+
+def _release_browser_chunked_upload(
+    dataset_uuid: str,
+    job_id: Optional[str],
+    final_path: str,
+    file_size: int,
+) -> None:
+    now = datetime.now(timezone.utc)
+    with mongo_collection_by_type_context("visstoredatas") as collection:
+        collection.update_one(
+            {"uuid": dataset_uuid},
+            {
+                "$set": {
+                    "source_path": final_path,
+                    "destination_path": final_path,
+                    "status": "uploading",
+                    "total_size_bytes": file_size,
+                    "updated_at": now,
+                },
+                "$unset": {"browser_chunked_in_progress": ""},
+            },
+        )
+        if job_id:
+            collection.update_one(
+                {"uuid": dataset_uuid, "files.job_id": job_id},
+                {
+                    "$set": {
+                        "files.$.source_path": final_path,
+                        "files.$.destination_path": final_path,
+                        "files.$.status": "queued",
+                        "files.$.total_size_bytes": file_size,
+                        "files.$.updated_at": now,
+                    }
+                },
+            )
 
 CHUNK_SIZE = 100 * 1024 * 1024  # 100MB
 SERVER_VERIFY_HASH = "server_verify"
@@ -135,30 +213,41 @@ def register_portal_large_upload_routes(
                 staging.seek(request.file_size - 1)
                 staging.write(b"\0")
 
+        sensor = _coerce_sensor_type(request.sensor)
+        tags = _parse_tags(request.tags)
+
+        # Register dataset immediately (final path) so it appears in the portal list.
+        # Worker is held until all chunks are received (browser_chunked_in_progress).
         job_config = create_local_upload_job(
-            file_path=staging_path,
+            file_path=final_path,
             dataset_uuid=upload_uuid,
             user_email=request.user_email,
             dataset_name=request.dataset_name,
-            sensor=request.sensor,
+            sensor=sensor,
             original_source_path=None,
             convert=request.convert,
             is_public=request.is_public,
             is_downloadable=request.is_downloadable,
             folder=request.folder,
             team_uuid=request.team_uuid,
-            tags=request.tags,
+            tags=tags,
             metadata={"expected_files": expected_manifest} if expected_manifest else {},
         )
         job_config.destination_path = final_path
+        job_config.total_size_bytes = request.file_size
 
         try:
             actual_job_id = upload_processor.submit_upload_job(job_config, job_id)
             session_data["job_id"] = actual_job_id
             create_upload_session(upload_id, session_data)
             job_id = actual_job_id
+            _mark_browser_chunked_in_progress(upload_uuid, request.file_size)
         except Exception as exc:
             logger.error("Failed to create MongoDB entry for large upload: %s", exc, exc_info=True)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not register dataset for upload: {exc}",
+            ) from exc
 
         logger.info(
             "Large upload initiated %s: %s chunks, %s bytes, dataset %s",
@@ -279,6 +368,24 @@ def register_portal_large_upload_routes(
         os.rename(staging_path, final_path)
 
         job_id = session.get("job_id")
+        dataset_uuid = session.get("dataset_uuid")
+        file_size = session.get("file_size") or 0
+        if dataset_uuid:
+            try:
+                _release_browser_chunked_upload(dataset_uuid, job_id, final_path, file_size)
+            except Exception as exc:
+                logger.error(
+                    "Failed to release chunked upload %s for dataset %s: %s",
+                    upload_id,
+                    dataset_uuid,
+                    exc,
+                    exc_info=True,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="File saved but dataset could not be queued for processing",
+                ) from exc
+
         logger.info("Large upload complete %s -> %s (job %s)", upload_id, final_path, job_id)
 
         delete_upload_session(upload_id)

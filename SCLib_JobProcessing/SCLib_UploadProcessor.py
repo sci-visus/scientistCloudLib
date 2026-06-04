@@ -326,6 +326,7 @@ class SCLib_UploadProcessor:
         lease_until = now + timedelta(seconds=self.UPLOAD_LEASE_SECONDS)
         query = {
             "status": "uploading",
+            "browser_chunked_in_progress": {"$ne": True},
             "$or": [
                 {"upload_lease_expires_at": {"$exists": False}},
                 {"upload_lease_expires_at": {"$lte": now}},
