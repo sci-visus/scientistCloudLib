@@ -125,7 +125,12 @@ def initialize_dashboard(request=None, status_callback=None):
             
             # Authenticate user
             add_status("🔐 Authenticating user...")
-            auth_result = authenticate_user(params['uuid'], request, status_callback)
+            auth_result = authenticate_user(
+                params['uuid'],
+                request,
+                status_callback,
+                auth_uuid=params.get('portal_uuid'),
+            )
             
             if not auth_result['is_authorized']:
                 error_msg = auth_result.get('error', 'User not authorized')

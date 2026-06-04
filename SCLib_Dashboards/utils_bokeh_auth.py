@@ -227,14 +227,32 @@ def decode_jwt_token(token, secret_key):
         return None, f"Invalid JWT token: {last_error}"
     return None, "Invalid JWT token"
 
-def authenticate_user(uuid, request=None, status_callback=None):
+def _resolve_access_uuid(uuid, auth_uuid=None, request=None):
+    """UUID used for access checks; may differ from viewer uuid (remote links)."""
+    if auth_uuid and str(auth_uuid).strip():
+        return str(auth_uuid).strip()
+    if request is not None:
+        try:
+            args = getattr(request, 'arguments', None) or {}
+            raw = args.get('portal_uuid', [b''])[0]
+            if raw:
+                decoded = raw.decode('utf-8') if isinstance(raw, bytes) else str(raw)
+                if decoded.strip():
+                    return decoded.strip()
+        except Exception:
+            pass
+    return uuid
+
+
+def authenticate_user(uuid, request=None, status_callback=None, auth_uuid=None):
     """
     Authenticate user and return authentication result
     
     Args:
-        uuid: Dataset UUID
+        uuid: Dataset UUID (viewer / data identifier)
         request: Bokeh request object (optional)
         status_callback: Function to call with status messages (optional)
+        auth_uuid: Portal MongoDB uuid for access checks when uuid is a remote link
     
     Returns:
         dict: {
@@ -248,6 +266,8 @@ def authenticate_user(uuid, request=None, status_callback=None):
         if status_callback:
             status_callback(message)
         print(message)
+
+    access_uuid = _resolve_access_uuid(uuid, auth_uuid, request)
     
     try:
         # Get secret key
@@ -277,7 +297,7 @@ def authenticate_user(uuid, request=None, status_callback=None):
         
         # Check if dataset is public
         is_authorized, access_type, message = check_dataset_access(
-            collection, collection1, team_collection, shared_team_collection, uuid, None, is_public=True
+            collection, collection1, team_collection, shared_team_collection, access_uuid, None, is_public=True
         )
         
         if is_authorized:
@@ -290,7 +310,7 @@ def authenticate_user(uuid, request=None, status_callback=None):
             }
         
         # Get auth token - try multiple cookie sources
-        add_status(f"🔍 Looking for auth token for dataset: {uuid}")
+        add_status(f"🔍 Looking for auth token for dataset: {access_uuid}")
         auth_token = get_auth_token_from_cookies(request, status_callback)
         add_status(f"🔍 DEBUG: auth_token extracted: {bool(auth_token)}")
         if auth_token:
@@ -302,7 +322,7 @@ def authenticate_user(uuid, request=None, status_callback=None):
             if portal_email:
                 is_authorized, access_type, message = check_dataset_access(
                     collection, collection1, team_collection, shared_team_collection,
-                    uuid, portal_email,
+                    access_uuid, portal_email,
                 )
                 if is_authorized:
                     add_status(f"✅ {message}")
@@ -368,7 +388,7 @@ def authenticate_user(uuid, request=None, status_callback=None):
         
         # Check dataset access
         is_authorized, access_type, message = check_dataset_access(
-            collection, collection1, team_collection, shared_team_collection, uuid, user_email
+            collection, collection1, team_collection, shared_team_collection, access_uuid, user_email
         )
         
         if is_authorized:

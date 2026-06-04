@@ -77,6 +77,7 @@ def parse_url_parameters(request=None, status_callback=None):
 
     params = {
         "uuid": None,
+        "portal_uuid": None,
         "server": None,
         "name": None,
         "base_dir": None,
@@ -97,8 +98,11 @@ def parse_url_parameters(request=None, status_callback=None):
             params["has_args"] = False
             return params
 
-        # Extract the three URL parameters
+        # Extract URL parameters
         params["uuid"] = args.get("uuid", [b""])[0].decode("utf-8")
+        portal_raw = args.get("portal_uuid", [b""])[0]
+        if portal_raw:
+            params["portal_uuid"] = portal_raw.decode("utf-8") if isinstance(portal_raw, bytes) else str(portal_raw)
         params["server"] = args.get("server", [b""])[0].decode("utf-8")
         params["name"] = args.get("name", [b""])[0].decode("utf-8")
 
@@ -109,9 +113,10 @@ def parse_url_parameters(request=None, status_callback=None):
         # Decode name (matches your implementation)
         params["name"] = unquote(params["name"])
 
-        # Set hardcoded values (matches your implementation)
-        params["base_dir"] = f'/mnt/visus_datasets/upload/{params["uuid"]}'
-        params["save_dir"] = f'/mnt/visus_datasets/converted/{params["uuid"]}'
+        # Disk paths always use portal MongoDB uuid (not remote link ids in ?uuid=)
+        storage_uuid = (params.get("portal_uuid") or params.get("uuid") or "").strip()
+        params["base_dir"] = f'/mnt/visus_datasets/upload/{storage_uuid}'
+        params["save_dir"] = f'/mnt/visus_datasets/converted/{storage_uuid}'
 
         # Determine if running with URL args - if we have URL args, we're in production mode
         params["has_args"] = True
