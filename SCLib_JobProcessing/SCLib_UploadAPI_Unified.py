@@ -51,7 +51,8 @@ logger = logging.getLogger(__name__)
 # Configuration constants
 LARGE_FILE_THRESHOLD = 100 * 1024 * 1024  # 100MB - use chunked upload for files larger than this
 CHUNK_SIZE = 100 * 1024 * 1024  # 100MB chunks
-MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024 * 1024  # 10TB max
+_DEFAULT_MAX_FILE_SIZE = 10 * 1024 * 1024 * 1024 * 1024  # 10TB
+MAX_FILE_SIZE = int(os.getenv("MAX_FILE_SIZE", str(_DEFAULT_MAX_FILE_SIZE)))
 # Use shared volume for chunked uploads so background service can access files
 # Fallback to /tmp if shared volume not available
 SHARED_TEMP_DIR = os.getenv('SHARED_TEMP_DIR', '/mnt/visus_datasets/tmp')
@@ -1330,6 +1331,25 @@ async def get_upload_limits():
         "supported_source_types": [source.value for source in UploadSourceType],
         "temp_directory": TEMP_DIR
     }
+
+# TB/PB-scale browser uploads: 100MB chunks, resumable, sparse file on disk
+try:
+    from .SCLib_PortalLargeUploadRoutes import register_portal_large_upload_routes
+except ImportError:
+    from SCLib_PortalLargeUploadRoutes import register_portal_large_upload_routes
+
+register_portal_large_upload_routes(
+    app,
+    upload_processor=upload_processor,
+    get_upload_session=get_upload_session,
+    create_upload_session=create_upload_session,
+    update_upload_session=update_upload_session,
+    delete_upload_session=delete_upload_session,
+    create_local_upload_job=create_local_upload_job,
+    temp_dir=TEMP_DIR,
+    max_file_size=MAX_FILE_SIZE,
+)
+logger.info("✅ Portal large upload routes registered at /api/upload/large/*")
 
 # Error handlers
 @app.exception_handler(404)

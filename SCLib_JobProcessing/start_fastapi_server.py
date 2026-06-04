@@ -200,7 +200,7 @@ def main():
             "access_log": True,
             "workers": args.workers if not args.reload else 1,
             "reload": args.reload,
-            "timeout_keep_alive": 300,  # 5 minutes for large uploads
+            "timeout_keep_alive": 3600,  # Large chunked uploads (100MB/chunk, TB-scale)
             # Do not set limit_max_requests (was 100): health checks + UI polling +
             # retries exhaust it quickly and uvicorn exits ("Maximum request limit exceeded").
             "limit_concurrency": 1000
