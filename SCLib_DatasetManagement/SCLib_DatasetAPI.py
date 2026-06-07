@@ -1615,7 +1615,7 @@ def _user_in_dataset_team(dataset: Dict[str, Any], user_email: str) -> bool:
 
 
 def _user_can_download_dataset(dataset: Dict[str, Any], user_email: str) -> bool:
-    """Download permission (separate from view/access)."""
+    """Bulk export/download permission (separate from portal view/browse access)."""
     if not user_email or not dataset:
         return False
     if _user_is_dataset_owner(dataset, user_email):
@@ -1636,6 +1636,7 @@ def _enrich_dataset_for_user(dataset: Dict[str, Any], user_email: Optional[str])
         return dataset
     enriched = dict(dataset)
     enriched['is_owner'] = _user_is_dataset_owner(dataset, user_email)
+    enriched['can_view_files'] = _check_dataset_access(dataset, user_email)
     enriched['can_download'] = _user_can_download_dataset(dataset, user_email)
     return enriched
 
@@ -3529,8 +3530,6 @@ async def list_dataset_files(
         # Check access if user_email provided
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
-        if user_email and not _user_can_download_dataset(dataset, user_email):
-            raise HTTPException(status_code=403, detail="Download not permitted for this dataset")
         
         # Get directory paths from config
         config = get_config()
@@ -3550,6 +3549,7 @@ async def list_dataset_files(
         return {
             "success": True,
             "dataset_uuid": dataset_uuid,
+            "can_download": _user_can_download_dataset(dataset, user_email) if user_email else False,
             "directories": {
                 "upload": {
                     "path": str(upload_path),
@@ -3603,8 +3603,6 @@ async def get_file_content(
         # Check access if user_email provided
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
-        if user_email and not _user_can_download_dataset(dataset, user_email):
-            raise HTTPException(status_code=403, detail="Download not permitted for this dataset")
         
         # Validate directory
         if directory not in ['upload', 'converted']:
@@ -3734,8 +3732,6 @@ async def serve_file(
         # Check access if user_email provided
         if user_email and not _check_dataset_access(dataset, user_email):
             raise HTTPException(status_code=403, detail="Access denied")
-        if user_email and not _user_can_download_dataset(dataset, user_email):
-            raise HTTPException(status_code=403, detail="Download not permitted for this dataset")
         
         # Validate directory
         if directory not in ['upload', 'converted']:
