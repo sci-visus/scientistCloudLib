@@ -2201,6 +2201,121 @@ async def get_public_dataset(
         logger.error(f"Failed to get public dataset: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+def _derive_inspector_root_prefix(object_key: str) -> str:
+    """Folder prefix for S3 inspector browsing from a dataset object key."""
+    key = (object_key or "").lstrip("/")
+    if key == "":
+        return ""
+    if "/" not in key:
+        leaf = key
+        if "." in leaf:
+            return ""
+        return f"{key}/"
+    leaf = key.split("/")[-1]
+    if "." in leaf:
+        parent = "/".join(key.split("/")[:-1])
+        return f"{parent}/" if parent else ""
+    return key if key.endswith("/") else f"{key}/"
+
+
+def _build_public_s3_inspector_session(dataset: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build S3 inspector session fields for a public dataset (server-side only).
+    Credentials are returned to trusted portal backends, never to browsers.
+    """
+    link = str(dataset.get("google_drive_link") or dataset.get("source_path") or "").strip()
+    if not link:
+        raise HTTPException(status_code=400, detail="Dataset has no remote storage link")
+
+    if link.startswith("s3://"):
+        s3_uri = link
+    elif link.startswith(("http://", "https://")):
+        s3_uri = _http_object_url_to_s3_uri(link)
+        if not s3_uri:
+            raise HTTPException(status_code=400, detail="Could not resolve HTTP link to S3 location")
+    else:
+        raise HTTPException(status_code=400, detail="Dataset link is not S3 or HTTP remote storage")
+
+    parsed = urlparse(s3_uri)
+    bucket = parsed.netloc.strip()
+    object_key = (parsed.path or "").lstrip("/")
+    if not bucket:
+        raise HTTPException(status_code=400, detail="Invalid S3 location: missing bucket")
+
+    root_prefix = _derive_inspector_root_prefix(object_key)
+
+    access_key_id = str(dataset.get("s3_access_key_id") or "").strip()
+    secret_access_key = str(dataset.get("s3_secret_access_key") or "")
+    endpoint_url = str(dataset.get("s3_endpoint_url") or "").strip()
+    region_name = str(dataset.get("s3_region_name") or "us-east-1").strip() or "us-east-1"
+    path_style = bool(dataset.get("s3_path_style", True))
+
+    if not access_key_id or not secret_access_key:
+        link_access, link_secret = _extract_s3_credentials_from_link(link)
+        access_key_id = access_key_id or link_access
+        secret_access_key = secret_access_key or link_secret
+
+    if not endpoint_url and link.startswith(("http://", "https://")):
+        parsed_http = urlparse(link)
+        if parsed_http.scheme and parsed_http.netloc:
+            endpoint_url = f"{parsed_http.scheme}://{parsed_http.netloc}"
+
+    if not endpoint_url:
+        endpoint_url = (
+            os.getenv("S3_ENDPOINT_URL", "").strip()
+            or os.getenv("S3_PUBLIC_ENDPOINT_URL", "").strip()
+        )
+
+    if not endpoint_url:
+        raise HTTPException(status_code=400, detail="Dataset is missing S3 endpoint configuration")
+    if not access_key_id or not secret_access_key:
+        raise HTTPException(
+            status_code=400,
+            detail="Dataset is missing S3 credentials required for public browsing",
+        )
+
+    return {
+        "dataset_uuid": str(dataset.get("uuid") or ""),
+        "dataset_name": str(dataset.get("name") or "Unnamed Dataset"),
+        "bucket": bucket,
+        "root_prefix": root_prefix,
+        "endpoint": endpoint_url.rstrip("/"),
+        "region": region_name,
+        "path_style": path_style,
+        "access_key": access_key_id,
+        "secret_key": secret_access_key,
+        "download_enabled": True,
+    }
+
+
+@app.get("/api/v1/datasets/public/{identifier}/s3-inspector-config")
+async def get_public_dataset_s3_inspector_config(identifier: str):
+    """
+    Server-side S3 inspector configuration for public datasets.
+    Intended for portal PHP backends on the same trusted network — not for browsers.
+    """
+    try:
+        dataset_uuid = _resolve_dataset_identifier(identifier)
+        dataset = _get_dataset_by_uuid(dataset_uuid)
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+
+        if not _boolish(dataset.get("is_public")):
+            raise HTTPException(status_code=403, detail="Dataset is not public")
+
+        session = _build_public_s3_inspector_session(dataset)
+        return {
+            "success": True,
+            "session": session,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to build public S3 inspector config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.post("/api/v1/datasets/s3/presign")
 async def presign_s3_dataset_url(
     request: S3PresignRequest,
