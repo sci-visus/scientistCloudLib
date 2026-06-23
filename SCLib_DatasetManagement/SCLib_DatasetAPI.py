@@ -2219,7 +2219,7 @@ def _derive_inspector_root_prefix(object_key: str) -> str:
     return key if key.endswith("/") else f"{key}/"
 
 
-def _build_public_s3_inspector_session(dataset: Dict[str, Any]) -> Dict[str, Any]:
+def _build_s3_inspector_session_from_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
     """
     Build S3 inspector session fields for a public dataset (server-side only).
     Credentials are returned to trusted portal backends, never to browsers.
@@ -2304,7 +2304,7 @@ async def get_public_dataset_s3_inspector_config(identifier: str):
         if not _boolish(dataset.get("is_public")):
             raise HTTPException(status_code=403, detail="Dataset is not public")
 
-        session = _build_public_s3_inspector_session(dataset)
+        session = _build_s3_inspector_session_from_dataset(dataset)
         return {
             "success": True,
             "session": session,
@@ -2314,6 +2314,42 @@ async def get_public_dataset_s3_inspector_config(identifier: str):
     except Exception as e:
         logger.error(f"Failed to build public S3 inspector config: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/v1/datasets/{identifier}/s3-inspector-config")
+async def get_dataset_s3_inspector_config(identifier: str, user_email: str = ""):
+    """
+    Server-side S3 inspector configuration for datasets the user can access.
+    Intended for authenticated portal PHP backends — not for browsers.
+    """
+    try:
+        email = _safe_email(user_email)
+        if not email:
+            raise HTTPException(status_code=400, detail="user_email is required")
+
+        dataset_uuid = _resolve_dataset_identifier(identifier)
+        dataset = _get_dataset_by_uuid(dataset_uuid)
+        if not dataset:
+            raise HTTPException(status_code=404, detail=f"Dataset not found: {identifier}")
+
+        is_public = _boolish(dataset.get("is_public"))
+        if not is_public and not _check_dataset_access(dataset, email):
+            raise HTTPException(status_code=403, detail="Access denied to this dataset")
+
+        session = _build_s3_inspector_session_from_dataset(dataset)
+        return {
+            "success": True,
+            "session": session,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to build dataset S3 inspector config: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Backwards-compatible alias
+_build_public_s3_inspector_session = _build_s3_inspector_session_from_dataset
 
 
 @app.post("/api/v1/datasets/s3/presign")
