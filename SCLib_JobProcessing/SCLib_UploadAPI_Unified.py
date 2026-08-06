@@ -95,6 +95,13 @@ class UploadRequest(BaseModel):
     dataset_name: str = Field(..., min_length=1, max_length=255, description="Name of the dataset")
     sensor: SensorType = Field(..., description="Sensor type")
     convert: bool = Field(False, description="Whether to convert the data")
+    download: Optional[bool] = Field(
+        None,
+        description=(
+            "For S3/URL: download/materialize source files to upload/<uuid>/. "
+            "Independent of convert. When omitted, defaults to convert (legacy)."
+        ),
+    )
     is_public: bool = Field(False, description="Whether dataset is public")
     is_downloadable: str = Field("only owner", description="Download permission: 'only owner', 'only team', or 'public'")
     folder: Optional[str] = Field(None, max_length=255, description="Optional folder name")
@@ -440,6 +447,7 @@ async def initiate_upload(
                 dataset_name=request.dataset_name,
                 sensor=request.sensor,
                 convert=request.convert,
+                download=request.download,
                 is_public=request.is_public,
                 is_downloadable=request.is_downloadable,
                 folder=request.folder,

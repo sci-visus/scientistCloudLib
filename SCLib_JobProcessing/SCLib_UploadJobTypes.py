@@ -75,6 +75,9 @@ class UploadJobConfig:
     dataset_name: str = ""  # Name of dataset
     sensor: SensorType = SensorType.OTHER  # Sensor type
     convert: bool = False  # Whether to convert the data
+    # For remote S3/URL: materialize source files under upload/<uuid>/. Independent of convert.
+    # Legacy clients that only set convert=True implied download=True for IDX/ORNL.
+    download: bool = False
     is_public: bool = False  # Whether dataset is public
     is_downloadable: str = "only owner"  # Download permission: "only owner", "only team", "public"
     
@@ -274,6 +277,7 @@ def create_upload_job_config(
     sensor: SensorType,
     original_source_path: Optional[str] = None,
     convert: bool = False,
+    download: Optional[bool] = None,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
@@ -281,6 +285,8 @@ def create_upload_job_config(
     **kwargs
 ) -> UploadJobConfig:
     """Create an upload job configuration with ScientistCloud parameters."""
+    # Legacy: convert=True implied materialize for S3 IDX/ORNL when download was omitted.
+    effective_download = bool(convert) if download is None else bool(download)
     return UploadJobConfig(
         source_type=source_type,
         source_path=source_path,
@@ -291,6 +297,7 @@ def create_upload_job_config(
         dataset_name=dataset_name,
         sensor=sensor,
         convert=effective_convert_for_sensor(sensor, convert),
+        download=effective_download,
         is_public=is_public,
         is_downloadable=is_downloadable,
         folder=folder,
@@ -400,6 +407,7 @@ def create_s3_upload_job(
     access_key_id: Optional[str] = None,
     secret_access_key: Optional[str] = None,
     convert: bool = False,
+    download: Optional[bool] = None,
     is_public: bool = False,
     is_downloadable: str = "only owner",
     folder: Optional[str] = None,
@@ -437,6 +445,7 @@ def create_s3_upload_job(
         sensor=sensor,
         original_source_path=None,
         convert=convert,
+        download=download,
         is_public=is_public,
         is_downloadable=is_downloadable,
         folder=folder,

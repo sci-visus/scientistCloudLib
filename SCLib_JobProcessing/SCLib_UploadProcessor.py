@@ -540,6 +540,7 @@ class SCLib_UploadProcessor:
                     access_key_id=access_key_id or None,
                     secret_access_key=secret_access_key or None,
                     convert=dataset.get('convert', False),
+                    download=dataset.get('download') if 'download' in dataset else None,
                     is_public=dataset.get('is_public', False),
                     is_downloadable=dataset.get('is_downloadable', 'only owner'),
                     folder=dataset.get('folder_uuid'),
@@ -762,19 +763,20 @@ class SCLib_UploadProcessor:
         self._update_job_status(job_id, UploadStatus.UPLOADING)
 
         sensor_name = str(getattr(job_config.sensor, "value", job_config.sensor) or "").strip().upper()
-        should_materialize = bool(job_config.convert) and sensor_name in (
+        # Materialize when download=True (preferred). Legacy jobs only had convert, which implied download.
+        should_materialize = bool(getattr(job_config, "download", False)) and sensor_name in (
             SensorType.IDX.value,
             SensorType.ORNL_CHESS_STRAIN.value,
         )
         if not should_materialize:
             hint = ""
             if sensor_name == SensorType.IDX.value and self._remote_job_targets_idx_descriptor(job_config):
-                hint = " Linked .idx will still queue background resolved-idx (no mirror)."
+                hint = " Linked .idx will still queue background resolved-idx (no mirror) unless download is enabled."
             logger.info(
-                "Skipping S3 download to %s (sensor=%s convert=%s;%s enable "
-                "'Download dataset from S3…' for IDX or ORNL CHESS strain JSON to mirror files locally)",
+                "Skipping S3 download to %s (sensor=%s download=%s convert=%s;%s)",
                 job_config.destination_path,
                 sensor_name,
+                getattr(job_config, "download", None),
                 getattr(job_config, "convert", None),
                 hint,
             )
@@ -1597,6 +1599,7 @@ scope = drive
                     "user_id": job_config.user_email,  # Also set user_id for compatibility with existing queries
                     "sensor": job_config.sensor.value,
                     "convert": job_config.convert,
+                    "download": bool(getattr(job_config, "download", False)),
                     "is_public": job_config.is_public,
                     "is_downloadable": job_config.is_downloadable,
                     "folder_uuid": job_config.folder,
@@ -1670,6 +1673,7 @@ scope = drive
                                 "destination_path": job_config.destination_path,
                                 "sensor": job_config.sensor.value,
                                 "convert": job_config.convert,
+                                "download": bool(getattr(job_config, "download", False)),
                                 "updated_at": datetime.utcnow()
                             },
                             "$push": {
@@ -1936,14 +1940,15 @@ scope = drive
                         and job_config.source_type in (UploadSourceType.S3, UploadSourceType.URL)
                         and self._remote_job_targets_idx_descriptor(job_config)
                     )
-                    # job_config.convert = materialize S3/URL to upload/ when applicable, then convert.
-                    # Linked remote .idx with convert unchecked still needs background openvisus-resolved-idx
+                    # download = materialize S3/URL to upload/; convert = queue conversion.
+                    # Linked remote .idx with neither still needs background openvisus-resolved-idx
                     # (visus.idx under converted/) without mirroring tiles to upload/.
+                    wants_download = bool(getattr(job_config, "download", False))
                     queue_for_conversion = bool(
                         job_config
                         and (
                             (job_config.convert and (not is_remote_link or is_linked_idx_remote_descriptor))
-                            or (is_linked_idx_remote_descriptor and not job_config.convert)
+                            or (is_linked_idx_remote_descriptor and not job_config.convert and not wants_download)
                         )
                     )
                     if queue_for_conversion:
@@ -1976,7 +1981,7 @@ scope = drive
                             update_data["status"] = "conversion queued"
                             update_data["canonical_state"] = "conversion_queued"
                             update_data["data_conversion_needed"] = True
-                            if is_linked_idx_remote_descriptor and not job_config.convert:
+                            if is_linked_idx_remote_descriptor and not job_config.convert and not wants_download:
                                 update_data["status_message"] = (
                                     "Linked remote .idx registered. "
                                     "Background conversion will produce a resolved descriptor under converted/ (no S3 mirror)."
@@ -2005,12 +2010,20 @@ scope = drive
                             update_data["status"] = "done"  # Match existing schema
                             update_data["canonical_state"] = "ready"
                             update_data["completed_at"] = datetime.utcnow()
-                            unset_data["status_message"] = ""
+                            if wants_download and is_linked_idx_remote_descriptor and not job_config.convert:
+                                update_data["status_message"] = (
+                                    "Downloaded from S3 to server. Conversion skipped (already IDX / convert unchecked)."
+                                )
+                                unset_data.pop("status_message", None)
+                            else:
+                                unset_data["status_message"] = ""
                             unset_data["error_message"] = ""
                             unset_data["missing_expected_files"] = ""
                             if is_remote_link:
                                 logger.info(
-                                    "Remote-link dataset registered (no conversion): %s",
+                                    "Remote-link dataset registered (download=%s convert=%s): %s",
+                                    wants_download,
+                                    bool(job_config.convert),
                                     dataset_uuid,
                                 )
                             else:
