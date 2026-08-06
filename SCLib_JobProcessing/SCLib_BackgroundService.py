@@ -347,7 +347,36 @@ class SCLib_BackgroundService:
         )
         result = self._call_internal_openvisus_resolved_idx(dataset_uuid, dataset)
         if not result.get("success"):
-            detail = result.get("error") or result.get("body") or str(result)
+            detail = str(result.get("error") or result.get("body") or result)
+            # Production may disable resolved-idx writes. Treat as ready link-only so
+            # dashboards (esp. DarkMatter) can load from the remote S3/HTTPS URL.
+            if "SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX" in detail or "resolved-idx writes are disabled" in detail.lower():
+                done_update = {
+                    "status": "done",
+                    "canonical_state": "ready",
+                    "updated_at": utc_now(),
+                    "completed_at": utc_now(),
+                    "status_message": (
+                        "Linked remote .idx registered (resolved-idx writes disabled on this server). "
+                        "Dashboards should load from the remote data link."
+                    ),
+                    "conversion_last_error": detail[:2000],
+                }
+                datasets_collection.update_one(
+                    {"uuid": dataset_uuid},
+                    {
+                        "$set": done_update,
+                        "$unset": {
+                            "conversion_lease_owner": "",
+                            "conversion_lease_expires_at": "",
+                            "error_message": "",
+                        },
+                    },
+                )
+                print(
+                    f"✅ Linked remote IDX left as link-only (resolved-idx disabled): {dataset_uuid}"
+                )
+                return True
             raise Exception(f"openvisus-resolved-idx failed: {detail}")
 
         os.makedirs(output_path, exist_ok=True)

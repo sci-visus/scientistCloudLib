@@ -1941,15 +1941,15 @@ scope = drive
                         and self._remote_job_targets_idx_descriptor(job_config)
                     )
                     # download = materialize S3/URL to upload/; convert = queue conversion.
-                    # Linked remote .idx with neither still needs background openvisus-resolved-idx
-                    # (visus.idx under converted/) without mirroring tiles to upload/.
+                    # Linked remote .idx with convert unchecked must NOT auto-queue
+                    # openvisus-resolved-idx. DarkMatter (and other remote viewers) use the
+                    # remote link and/or converted/<uuid>/ when present — they do not need
+                    # a forced background "resolved visus.idx" write.
                     wants_download = bool(getattr(job_config, "download", False))
                     queue_for_conversion = bool(
                         job_config
-                        and (
-                            (job_config.convert and (not is_remote_link or is_linked_idx_remote_descriptor))
-                            or (is_linked_idx_remote_descriptor and not job_config.convert and not wants_download)
-                        )
+                        and job_config.convert
+                        and (not is_remote_link or is_linked_idx_remote_descriptor)
                     )
                     if queue_for_conversion:
                         # For multi-file datasets, do not queue conversion until all file jobs are terminal.
@@ -1981,13 +1981,7 @@ scope = drive
                             update_data["status"] = "conversion queued"
                             update_data["canonical_state"] = "conversion_queued"
                             update_data["data_conversion_needed"] = True
-                            if is_linked_idx_remote_descriptor and not job_config.convert and not wants_download:
-                                update_data["status_message"] = (
-                                    "Linked remote .idx registered. "
-                                    "Background conversion will produce a resolved descriptor under converted/ (no S3 mirror)."
-                                )
-                            else:
-                                update_data["status_message"] = "Upload complete. Dataset conversion has been queued."
+                            update_data["status_message"] = "Upload complete. Dataset conversion has been queued."
                             unset_data["error_message"] = ""
                             unset_data["missing_expected_files"] = ""
                             logger.info(f"Upload completed, conversion queued for dataset: {dataset_uuid}")
@@ -2013,6 +2007,16 @@ scope = drive
                             if wants_download and is_linked_idx_remote_descriptor and not job_config.convert:
                                 update_data["status_message"] = (
                                     "Downloaded from S3 to server. Conversion skipped (already IDX / convert unchecked)."
+                                )
+                                unset_data.pop("status_message", None)
+                            elif (
+                                is_linked_idx_remote_descriptor
+                                and not job_config.convert
+                                and not wants_download
+                            ):
+                                update_data["status_message"] = (
+                                    "Linked remote .idx registered (no local mirror). "
+                                    "Dashboards can load from the remote data link."
                                 )
                                 unset_data.pop("status_message", None)
                             else:
