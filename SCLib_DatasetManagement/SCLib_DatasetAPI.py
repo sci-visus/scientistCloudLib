@@ -1068,6 +1068,20 @@ def _build_and_store_resolved_idx(
     target_dir.mkdir(parents=True, exist_ok=True)
     resolved_idx_path = target_dir / output_name
 
+    # Kill-switch: allow proxy idx text only (no OpenVisus copy-dataset / bin streaming).
+    # DarkMatter linked loads need this: FTH ?access_key= GETs 403; object-proxy does SigV4.
+    if _openvisus_resolved_idx_writes_disabled() and template_mode == "proxy":
+        resolved_idx_path.write_text(resolved_idx_text, encoding="utf-8")
+        logger.info(
+            "Wrote proxy-only resolved idx (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX; skipped ARCO convert): %s",
+            resolved_idx_path,
+        )
+        return {
+            "resolved_key": resolved_key,
+            "filename_template": full_template,
+            "resolved_idx_path": str(resolved_idx_path),
+        }
+
     if arco_value == 0:
         work_root = target_dir.parent / f"{target_dir.name}__arco_work__{uuid.uuid4().hex[:8]}"
         src_dir = work_root / "src"
@@ -2662,8 +2676,11 @@ async def create_openvisus_resolved_idx(
         resolved_idx_path = target_dir / output_name
         marker_path = target_dir / f".{output_name}.generating"
 
-        # Global kill switch: blocks OpenVisusSlice / DarkMatter / other dashboards from materializing idx.
+        # Global kill switch: blocks heavy ARCO conversion / non-proxy materialization.
+        # Proxy-mode still allowed: small visus.idx with object-proxy HTTPS templates
+        # (OpenVisus streams bins; SCLib does SigV4 — same auth model as ORNL Strain).
         if _openvisus_resolved_idx_writes_disabled():
+            template_mode_req = (request.filename_template_mode or "proxy").strip().lower()
             if resolved_idx_path.exists():
                 logger.info(
                     "OpenVisus resolved idx reuse only (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX): %s",
@@ -2682,13 +2699,21 @@ async def create_openvisus_resolved_idx(
                     ),
                     "converted_dir": str(target_dir),
                 }
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "OpenVisus resolved-idx writes are disabled (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1) "
-                    f"and no file exists at {resolved_idx_path}"
-                ),
+            if template_mode_req != "proxy":
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "OpenVisus resolved-idx writes are disabled (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1) "
+                        f"for mode={template_mode_req!r} and no file exists at {resolved_idx_path}. "
+                        "Proxy mode is still allowed (lightweight object-proxy visus.idx, no bin download)."
+                    ),
+                )
+            logger.info(
+                "SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1 but allowing proxy-mode visus.idx "
+                "for linked remote OpenVisus (no bin download): %s",
+                target_uuid,
             )
+            # fall through to proxy-only generation below
 
         # Fast path: if resolved idx already exists and is valid, reuse it without requiring credentials.
         # This supports dashboard consumers that should not manage credential-bearing generation requests.
