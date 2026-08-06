@@ -664,7 +664,21 @@ def _filename_template_to_s3_key_pattern(template: str, bucket: str, resolved_id
     # Relative templates (e.g. "./%04x.bin") are relative to the idx object directory.
     if raw.startswith("./") or raw.startswith("../"):
         joined = posixpath.normpath(posixpath.join(idx_dir, raw)) if idx_dir else posixpath.normpath(raw)
-        return joined.lstrip("/")
+        joined = joined.lstrip("/")
+        # CDMS often ships "(filename_template): ./<dataset>/%04x.bin" while the .idx
+        # already lives under …/<dataset>/<dataset>.idx — normpath then doubles the stem
+        # (…/<dataset>/<dataset>/%04x.bin). Real bins are flat beside the .idx.
+        idx_base = resolved_idx_key.rsplit("/", 1)[-1] if resolved_idx_key else ""
+        stem_name = idx_base[:-4] if idx_base.lower().endswith(".idx") else ""
+        if stem_name:
+            doubled = f"{stem_name}/{stem_name}/%04x.bin"
+            if joined.endswith(doubled):
+                joined = joined[: -len(doubled)] + f"{stem_name}/%04x.bin"
+                logger.info(
+                    "Collapsed doubled stem filename_template key to flat layout: %s",
+                    joined,
+                )
+        return joined
 
     return raw.lstrip("/")
 
@@ -685,45 +699,64 @@ def _infer_arco_filename_template_key(
     bucket: str,
     key_stem: str,
     idx_text: str,
+    resolved_idx_key: str = "",
 ) -> str:
     """
-    Infer ``(filename_template)`` S3 key pattern for ARCO datasets.
+    Infer ``(filename_template)`` S3 key pattern for remote IDX bins.
 
-    Nexus-style physics idx (under ``.../arco/<stem>/``) stores blocks at
-    ``<stem>/0/data/0000/0000/0000/0000.bin``. Climate-style layouts often use
-    ``<stem>/0000/0000/0000/0000.bin`` (see nex-gddp-cmip6). The old fallback
-    ``{key_stem}/%04x.bin`` misses the ``0/data/0000/0000/0000/`` segment and
-    makes object-proxy return empty reads in Dark Matter / OpenVisus.
+    Probe order:
+      1. Flat next to the .idx (``{idx_dir}/0000.bin``) — CDMS / SLAC linked layout
+      2. ARCO / Nexus nested layouts under ``key_stem``
     """
     stem = (key_stem or "").strip().rstrip("/")
-    if not stem:
-        return ""
+    idx_key = (resolved_idx_key or "").strip()
+    idx_dir = idx_key.rsplit("/", 1)[0] if "/" in idx_key else ""
 
-    candidates: List[Tuple[str, str]] = [
-        (f"{stem}/0/data/0000/0000/0000/%04x.bin", f"{stem}/0/data/0000/0000/0000/0000.bin"),
-        (f"{stem}/0000/0000/0000/%04x.bin", f"{stem}/0000/0000/0000/0000.bin"),
-        (f"{stem}/0/data/0000/%04x.bin", f"{stem}/0/data/0000/0000.bin"),
-        (f"{stem}/0/%04x.bin", f"{stem}/0/0000.bin"),
-        (f"{stem}/%04x.bin", f"{stem}/0000.bin"),
-    ]
+    candidates: List[Tuple[str, str]] = []
+    if idx_dir:
+        # CDMS / SLAC linked: bins sit flat beside the .idx (…/F0003/0000.bin).
+        # Prefer this BEFORE relative ./segment/%04x.bin — that relative form often
+        # becomes …/F0003/F0003/%04x.bin when the parent folder is already named F0003.
+        candidates.append((f"{idx_dir}/%04x.bin", f"{idx_dir}/0000.bin"))
+        tpl = _extract_filename_template(idx_text)
+        seg_m = re.match(r"^\./([^/]+)/%04x\.bin\s*$", (tpl or "").strip())
+        if seg_m:
+            seg = seg_m.group(1).strip()
+            if seg:
+                candidates.append(
+                    (f"{idx_dir}/{seg}/%04x.bin", f"{idx_dir}/{seg}/0000.bin")
+                )
+    if stem:
+        candidates.extend(
+            [
+                (f"{stem}/0/data/0000/0000/0000/%04x.bin", f"{stem}/0/data/0000/0000/0000/0000.bin"),
+                (f"{stem}/0000/0000/0000/%04x.bin", f"{stem}/0000/0000/0000/0000.bin"),
+                (f"{stem}/0/data/0000/%04x.bin", f"{stem}/0/data/0000/0000.bin"),
+                (f"{stem}/0/%04x.bin", f"{stem}/0/0000.bin"),
+                (f"{stem}/%04x.bin", f"{stem}/0000.bin"),
+            ]
+        )
+
     for pattern, probe_key in candidates:
         if _s3_object_exists(s3, bucket, probe_key):
             logger.info(
-                "Inferred ARCO filename_template_key: probe_key=%s pattern=%s",
+                "Inferred filename_template_key: probe_key=%s pattern=%s",
                 probe_key,
                 pattern,
             )
             return pattern
 
     if "/arco/" in stem.lower() or _extract_arco_value(idx_text) != 0:
-        default = f"{stem}/0/data/0000/0000/0000/%04x.bin"
+        default = f"{stem}/0/data/0000/0000/0000/%04x.bin" if stem else ""
         logger.info(
             "ARCO filename_template_key default (no probe hit): %s",
             default,
         )
         return default
 
-    return f"{stem}/%04x.bin"
+    if idx_dir:
+        return f"{idx_dir}/%04x.bin"
+    return f"{stem}/%04x.bin" if stem else ""
 
 
 def _resolved_idx_needs_regeneration(existing_text: str) -> bool:
@@ -740,6 +773,14 @@ def _resolved_idx_needs_regeneration(existing_text: str) -> bool:
         return True
     # Stale: proxy points at .../arco/<name>/%04x.bin but bins live under .../0/data/0000/0000/0000/
     if "/arco/" in tpl and "0/data/" not in tpl:
+        return True
+    # Stale CDMS: relative ./F0003/%04x.bin under folder …/…_F0003 → …/F0003/F0003/%04x.bin
+    if re.search(r"/([^/]+)/\1/%04[xX]\.bin", tpl):
+        return True
+    # OpenVisus must use filename_template (object-proxy), not ARCO companion paths.
+    if _extract_arco_value(existing_text) != 0:
+        return True
+    if "default_compression(zip)" in existing_text and "/object-proxy/" in tpl:
         return True
     return False
 
@@ -951,17 +992,36 @@ def _build_and_store_resolved_idx(
         bucket,
         resolved_idx_key=resolved_key,
     )
-    if not filename_template_key or "%" not in filename_template_key:
-        filename_template_key = _infer_arco_filename_template_key(
-            s3, bucket, key_stem, idx_text
+    # Always verify 0000.bin exists for the mapped pattern; CDMS flat layout is often
+    # next to the .idx while relative templates / key_stem guesses nest incorrectly.
+    def _pattern_bin0(pattern: str) -> str:
+        return (pattern or "").replace("%04x", "0000").replace("%04X", "0000")
+
+    need_infer = (
+        not filename_template_key
+        or "%" not in filename_template_key
+        or not _s3_object_exists(s3, bucket, _pattern_bin0(filename_template_key))
+    )
+    if need_infer:
+        inferred = _infer_arco_filename_template_key(
+            s3, bucket, key_stem, idx_text, resolved_idx_key=resolved_key
         )
+        if inferred:
+            logger.info(
+                "Replacing filename_template_key %s with probed %s",
+                filename_template_key or "(empty)",
+                inferred,
+            )
+            filename_template_key = inferred
     elif (
         "/arco/" in (key_stem or "").lower()
         and "0/data/" not in filename_template_key
         and filename_template_key.endswith("%04x.bin")
     ):
         # Mapped relative template often becomes {stem}/%04x.bin — wrong for Nexus ARCO layout.
-        inferred = _infer_arco_filename_template_key(s3, bucket, key_stem, idx_text)
+        inferred = _infer_arco_filename_template_key(
+            s3, bucket, key_stem, idx_text, resolved_idx_key=resolved_key
+        )
         if inferred and "0/data/" in inferred:
             logger.info(
                 "Replacing short ARCO template %s with inferred %s",
@@ -1034,6 +1094,12 @@ def _build_and_store_resolved_idx(
             template_mode,
             prev_arco,
         )
+    # CDMS / many linked IDX declare zip but store raw bins — zip decode yields all zeros.
+    if template_mode == "proxy" and "default_compression(zip)" in resolved_idx_text:
+        resolved_idx_text = resolved_idx_text.replace(
+            "default_compression(zip)", "default_compression(raw)", 1
+        )
+        logger.info("Resolved idx: default_compression(zip) -> raw for proxy template")
 
     # If the source idx is not ARCO (arco == 0), convert it into a cloud-friendly ARCO layout.
     # We convert using OpenVisus while pointing the src idx to the object-proxy URL template,
