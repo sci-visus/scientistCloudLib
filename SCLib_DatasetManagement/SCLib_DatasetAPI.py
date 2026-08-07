@@ -90,7 +90,7 @@ logger = logging.getLogger(__name__)
 
 
 def _openvisus_resolved_idx_writes_disabled() -> bool:
-    """When true, openvisus-resolved-idx never creates or regenerates files (testing / pure-remote loads)."""
+    """When true, openvisus-resolved-idx never creates or regenerates files (including proxy stubs)."""
     v = str(os.getenv("SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX", "")).strip().lower()
     return v in ("1", "true", "yes", "on")
 
@@ -1148,19 +1148,21 @@ def _build_and_store_resolved_idx(
     target_dir.mkdir(parents=True, exist_ok=True)
     resolved_idx_path = target_dir / output_name
 
-    # Kill-switch: allow proxy idx text only (no OpenVisus copy-dataset / bin streaming).
-    # DarkMatter linked loads need this: FTH ?access_key= GETs 403; object-proxy does SigV4.
-    if _openvisus_resolved_idx_writes_disabled() and template_mode == "proxy":
-        resolved_idx_path.write_text(resolved_idx_text, encoding="utf-8")
-        logger.info(
-            "Wrote proxy-only resolved idx (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX; skipped ARCO convert): %s",
-            resolved_idx_path,
+    # Kill-switch / no-proxy policy: never write access-stub visus.idx here.
+    if _openvisus_resolved_idx_writes_disabled():
+        raise RuntimeError(
+            "OpenVisus resolved-idx writes disabled (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1); "
+            "refusing proxy visus.idx write"
         )
-        return {
-            "resolved_key": resolved_key,
-            "filename_template": full_template,
-            "resolved_idx_path": str(resolved_idx_path),
-        }
+    if template_mode == "proxy" and str(os.getenv("SCLIB_ALLOW_PROXY_RESOLVED_IDX", "")).strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        raise RuntimeError(
+            "Proxy-mode visus.idx disabled (set SCLIB_ALLOW_PROXY_RESOLVED_IDX=1 only for legacy debugging)"
+        )
 
     if arco_value == 0:
         work_root = target_dir.parent / f"{target_dir.name}__arco_work__{uuid.uuid4().hex[:8]}"
@@ -2756,12 +2758,10 @@ async def create_openvisus_resolved_idx(
         resolved_idx_path = target_dir / output_name
         marker_path = target_dir / f".{output_name}.generating"
 
-        # Global kill switch: blocks heavy ARCO conversion / non-proxy materialization.
-        # Proxy-mode still allowed: small visus.idx with object-proxy HTTPS templates
-        # (OpenVisus streams bins; SCLib does SigV4 — same auth model as ORNL Strain).
+        # Global kill switch: never create/regenerate resolved or proxy visus.idx.
+        # Linked remotes use LoadDataset(HTTPS idx) only — no access-stub under converted/.
         if _openvisus_resolved_idx_writes_disabled():
-            template_mode_req = (request.filename_template_mode or "proxy").strip().lower()
-            if resolved_idx_path.exists():
+            if resolved_idx_path.exists() and not request.force_refresh:
                 logger.info(
                     "OpenVisus resolved idx reuse only (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX): %s",
                     resolved_idx_path,
@@ -2779,21 +2779,48 @@ async def create_openvisus_resolved_idx(
                     ),
                     "converted_dir": str(target_dir),
                 }
-            if template_mode_req != "proxy":
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "OpenVisus resolved-idx writes are disabled (SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1) "
-                        f"for mode={template_mode_req!r} and no file exists at {resolved_idx_path}. "
-                        "Proxy mode is still allowed (lightweight object-proxy visus.idx, no bin download)."
-                    ),
-                )
-            logger.info(
-                "SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1 but allowing proxy-mode visus.idx "
-                "for linked remote OpenVisus (no bin download): %s",
-                target_uuid,
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "OpenVisus resolved-idx writes are disabled "
+                    "(SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX=1), including proxy-mode "
+                    f"visus.idx. No file at {resolved_idx_path}. "
+                    "Linked datasets should LoadDataset the remote HTTPS .idx directly."
+                ),
             )
-            # fall through to proxy-only generation below
+
+        # Product default: do not create proxy access stubs unless explicitly opted in.
+        # (Legacy callers used filename_template_mode=proxy to write converted/.../visus.idx.)
+        template_mode_req = (request.filename_template_mode or "proxy").strip().lower()
+        allow_proxy = str(os.getenv("SCLIB_ALLOW_PROXY_RESOLVED_IDX", "")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if template_mode_req == "proxy" and not allow_proxy:
+            if resolved_idx_path.exists() and not request.force_refresh:
+                return {
+                    "success": True,
+                    "status": "ready",
+                    "reused": True,
+                    "dataset_uuid": target_uuid,
+                    "source_s3_uri": s3_uri,
+                    "resolved_idx_path": str(resolved_idx_path),
+                    "resolved_idx_http_url": _resolved_idx_http_url(
+                        dataset_uuid=target_uuid,
+                        file_name=output_name,
+                    ),
+                    "converted_dir": str(target_dir),
+                }
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Proxy-mode visus.idx is disabled (set SCLIB_ALLOW_PROXY_RESOLVED_IDX=1 "
+                    "only for legacy debugging). Linked datasets must use the remote HTTPS .idx "
+                    "with OpenVisus LoadDataset — no converted/ access stub."
+                ),
+            )
 
         # Fast path: if resolved idx already exists and is valid, reuse it without requiring credentials.
         # This supports dashboard consumers that should not manage credential-bearing generation requests.
