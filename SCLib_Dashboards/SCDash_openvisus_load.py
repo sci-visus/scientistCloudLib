@@ -42,16 +42,20 @@ def _server_is_remote(server: object) -> bool:
 
 def prefer_direct_remote_openvisus() -> bool:
     """
-    Legacy behavior: LoadDataset on HTTPS/S3 idx URL (credentials in query string).
-    Materialized visus.idx under converted/ is opt-in (SC_OPENVISUS_USE_RESOLVED_IDX=1).
+    Whether to LoadDataset the remote HTTPS/S3 idx URL with query credentials.
+
+    Default **False**: FTH (and similar gateways) often 403 OpenVisus bin GETs that use
+    ``?access_key=&secret_key=``. Instead we build a tiny access ``visus.idx`` whose
+    ``(filename_template)`` points at HTTPS object-proxy URLs — OpenVisus still fetches
+    the bins over HTTPS; SCLib only signs the requests (same idea as Strain/boto3).
+
+    Force legacy direct remote with ``SC_OPENVISUS_DIRECT_REMOTE=1``.
     """
-    if os.getenv("SC_OPENVISUS_USE_RESOLVED_IDX", "").lower() in ("1", "true", "yes"):
-        return False
-    if os.getenv("SC_OPENVISUS_DIRECT_REMOTE", "").lower() in ("0", "false", "no"):
-        return False
-    if os.getenv("SCLIB_DISABLE_OPENVISUS_RESOLVED_IDX", "").lower() in ("1", "true", "yes", "on"):
+    if os.getenv("SC_OPENVISUS_DIRECT_REMOTE", "").lower() in ("1", "true", "yes", "on"):
         return True
-    return True
+    if os.getenv("SC_OPENVISUS_USE_RESOLVED_IDX", "").lower() in ("0", "false", "no", "off"):
+        return True
+    return False
 
 
 def normalize_remote_openvisus_url(url: str) -> str:
@@ -77,7 +81,7 @@ def http_object_url_to_s3_uri(url: str) -> str:
     path_parts = [segment for segment in (parts.path or "").split("/") if segment]
     if len(path_parts) < 2:
         return ""
-    return f"s3://{path_parts[0]}/{'/'.join(path_parts[1])}"
+    return f"s3://{path_parts[0]}/{'/'.join(path_parts[1:])}"
 
 
 def _valid_email_or_none(value: object) -> Optional[str]:
@@ -251,8 +255,10 @@ def resolve_openvisus_resolved_idx_via_api(
     region_name="us-east-1",
     cache_credentials=True,
     use_cached_credentials=True,
+    filename_template_mode: str = "proxy",
+    force_refresh: bool = False,
 ) -> Tuple[str, dict]:
-    """Optional materialized idx under converted/ — only when policy allows."""
+    """Build access visus.idx (object-proxy HTTPS bin template) for OpenVisus."""
     dataset_api_base = (
         os.getenv("SCLIB_DATASET_URL")
         or os.getenv("SCLIB_API_URL")
@@ -271,6 +277,8 @@ def resolve_openvisus_resolved_idx_via_api(
         "cache_credentials": bool(cache_credentials),
         "use_cached_credentials": bool(use_cached_credentials),
         "output_filename": "visus.idx",
+        "filename_template_mode": filename_template_mode or "proxy",
+        "force_refresh": bool(force_refresh),
     }
     last_detail = "Resolved idx endpoint returned no path"
     for _ in range(15):
@@ -313,41 +321,40 @@ def openvisus_set_dataset(
         view.setDataset(normalized)
         return
 
-    if target.is_s3 and not target.prefer_direct_remote:
-        resolved_idx_path, _meta = resolve_openvisus_resolved_idx_via_api(
-            dataset_identifier=target.portal_uuid
-            if not is_remote_dataset_identifier(target.portal_uuid)
-            else None,
-            s3_uri=url,
-            user_email=user_email,
-            endpoint_url=os.getenv("S3_ENDPOINT_URL", ""),
-            region_name=os.getenv("AWS_S3_REGION", "us-east-1"),
-            cache_credentials=False,
-            use_cached_credentials=True,
-        )
-        _log(f"[SCLib][OpenVisus] setDataset resolved idx: {resolved_idx_path}")
-        view.setDataset(resolved_idx_path)
+    # Linked / remote: access stub with object-proxy HTTPS template (OpenVisus fetches bins).
+    if (target.is_s3 or is_http_remote(url)) and not target.prefer_direct_remote:
+        s3_for_api = url if target.is_s3 else http_object_url_to_s3_uri(url)
+        last_ex: Optional[Exception] = None
+        for force in (False, True):
+            try:
+                resolved_idx_path, _meta = resolve_openvisus_resolved_idx_via_api(
+                    dataset_identifier=target.portal_uuid
+                    if not is_remote_dataset_identifier(target.portal_uuid)
+                    else None,
+                    s3_uri=s3_for_api or None,
+                    user_email=user_email,
+                    endpoint_url=os.getenv("S3_ENDPOINT_URL", ""),
+                    region_name=os.getenv("AWS_S3_REGION", "us-east-1"),
+                    cache_credentials=False,
+                    use_cached_credentials=True,
+                    filename_template_mode="proxy",
+                    force_refresh=force,
+                )
+                _log(
+                    f"[SCLib][OpenVisus] setDataset access-stub visus.idx "
+                    f"(object-proxy HTTPS bins, force_refresh={force}): {resolved_idx_path}"
+                )
+                view.setDataset(resolved_idx_path)
+                return
+            except Exception as ex:
+                last_ex = ex
+                if force:
+                    break
+                _log(f"[SCLib][OpenVisus] access-stub failed ({ex}); retry force_refresh=1")
+        normalized = normalize_remote_openvisus_url(url)
+        _log(f"[SCLib][OpenVisus] access-stub failed ({last_ex}); direct fallback: {normalized}")
+        view.setDataset(normalized)
         return
-
-    if is_http_remote(url) and not target.prefer_direct_remote:
-        try:
-            resolved_idx_path, _meta = resolve_openvisus_resolved_idx_via_api(
-                dataset_identifier=target.portal_uuid if not is_remote_dataset_identifier(target.portal_uuid) else None,
-                s3_uri=http_object_url_to_s3_uri(url),
-                user_email=user_email,
-                endpoint_url=os.getenv("S3_ENDPOINT_URL", ""),
-                region_name=os.getenv("AWS_S3_REGION", "us-east-1"),
-                cache_credentials=False,
-                use_cached_credentials=True,
-            )
-            _log(f"[SCLib][OpenVisus] setDataset resolved idx: {resolved_idx_path}")
-            view.setDataset(resolved_idx_path)
-            return
-        except Exception as ex:
-            normalized = normalize_remote_openvisus_url(url)
-            _log(f"[SCLib][OpenVisus] resolved idx failed ({ex}); direct: {normalized}")
-            view.setDataset(normalized)
-            return
 
     if is_http_remote(url):
         normalized = normalize_remote_openvisus_url(url)
