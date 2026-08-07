@@ -1941,15 +1941,13 @@ scope = drive
                         and self._remote_job_targets_idx_descriptor(job_config)
                     )
                     # download = materialize S3/URL to upload/; convert = queue conversion.
-                    # Linked remote .idx with convert unchecked must NOT auto-queue
-                    # openvisus-resolved-idx. DarkMatter (and other remote viewers) use the
-                    # remote link and/or converted/<uuid>/ when present — they do not need
-                    # a forced background "resolved visus.idx" write.
+                    # Linked-only (remote .idx, no download): never convert / never write
+                    # converted/ — DarkMatter loads HTTPS + keys only.
+                    # Upload or Download of IDX with convert unchecked: stay in upload/, done.
                     wants_download = bool(getattr(job_config, "download", False))
+                    linked_only = bool(is_linked_idx_remote_descriptor and not wants_download)
                     queue_for_conversion = bool(
-                        job_config
-                        and job_config.convert
-                        and (not is_remote_link or is_linked_idx_remote_descriptor)
+                        job_config and job_config.convert and not linked_only
                     )
                     if queue_for_conversion:
                         # For multi-file datasets, do not queue conversion until all file jobs are terminal.

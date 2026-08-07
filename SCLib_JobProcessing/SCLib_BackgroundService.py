@@ -327,11 +327,10 @@ class SCLib_BackgroundService:
         datasets_collection,
     ) -> bool:
         """
-        For linked (non-copied) remote .idx datasets with stored S3 credentials, generate
-        visus.idx via the internal FastAPI openvisus-resolved-idx endpoint and finish
-        conversion without staging files under upload/.
-        Returns True if this path handled the conversion (success); False to fall through.
-        Raises on failure when this path is applicable.
+        Linked remote .idx (no files under upload/): do **not** write converted/visus.idx.
+
+        Product policy: linked datasets stay remote HTTPS+keys. Mark ready as link-only.
+        Returns True when this path handled the job; False to fall through to local convert.
         """
         sensor = str(dataset.get("sensor") or "").strip().upper()
         if sensor != "IDX":
@@ -341,6 +340,41 @@ class SCLib_BackgroundService:
             return False
         if self._find_local_idx(input_path):
             return False
+
+        # Opt-in legacy path: write proxy visus.idx under converted/ (not default).
+        allow_resolved = str(os.getenv("SCLIB_LINKED_IDX_WRITE_RESOLVED", "")).strip().lower() in (
+            "1",
+            "true",
+            "yes",
+            "on",
+        )
+        if not allow_resolved:
+            done_update = {
+                "status": "done",
+                "canonical_state": "ready",
+                "updated_at": utc_now(),
+                "completed_at": utc_now(),
+                "status_message": (
+                    "Linked remote .idx registered (no local mirror under upload/ or converted/). "
+                    "Dashboards load from the remote HTTPS link with stored credentials."
+                ),
+            }
+            datasets_collection.update_one(
+                {"uuid": dataset_uuid},
+                {
+                    "$set": done_update,
+                    "$unset": {
+                        "conversion_lease_owner": "",
+                        "conversion_lease_expires_at": "",
+                        "error_message": "",
+                        "converted_idx_path": "",
+                    },
+                },
+            )
+            print(
+                f"✅ Linked remote IDX left as link-only (no converted/ write): {dataset_uuid}"
+            )
+            return True
 
         print(
             f"Linked remote IDX (no local copy): calling openvisus-resolved-idx for {dataset_uuid}"
