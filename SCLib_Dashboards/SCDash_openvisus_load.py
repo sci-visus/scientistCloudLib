@@ -315,50 +315,14 @@ def openvisus_set_dataset(
     _log = log or (lambda _msg: None)
     url = target.load_url
 
-    if target.prefer_direct_remote and (target.is_remote or target.is_s3):
+    # Remote / linked: LoadDataset(HTTPS idx with keys) only — never rewrite filename_template
+    # via openvisus-resolved-idx / object-proxy access stubs.
+    if target.is_remote or target.is_s3 or is_http_remote(url):
         normalized = normalize_remote_openvisus_url(url)
-        _log(f"[SCLib][OpenVisus] setDataset direct remote: {normalized}")
+        _log(f"[SCLib][OpenVisus] setDataset direct remote (no idx rewrite): {normalized}")
         view.setDataset(normalized)
         return
 
-    # Linked / remote: access stub with object-proxy HTTPS template (OpenVisus fetches bins).
-    if (target.is_s3 or is_http_remote(url)) and not target.prefer_direct_remote:
-        s3_for_api = url if target.is_s3 else http_object_url_to_s3_uri(url)
-        last_ex: Optional[Exception] = None
-        for force in (False, True):
-            try:
-                resolved_idx_path, _meta = resolve_openvisus_resolved_idx_via_api(
-                    dataset_identifier=target.portal_uuid
-                    if not is_remote_dataset_identifier(target.portal_uuid)
-                    else None,
-                    s3_uri=s3_for_api or None,
-                    user_email=user_email,
-                    endpoint_url=os.getenv("S3_ENDPOINT_URL", ""),
-                    region_name=os.getenv("AWS_S3_REGION", "us-east-1"),
-                    cache_credentials=False,
-                    use_cached_credentials=True,
-                    filename_template_mode="proxy",
-                    force_refresh=force,
-                )
-                _log(
-                    f"[SCLib][OpenVisus] setDataset access-stub visus.idx "
-                    f"(object-proxy HTTPS bins, force_refresh={force}): {resolved_idx_path}"
-                )
-                view.setDataset(resolved_idx_path)
-                return
-            except Exception as ex:
-                last_ex = ex
-                if force:
-                    break
-                _log(f"[SCLib][OpenVisus] access-stub failed ({ex}); retry force_refresh=1")
-        normalized = normalize_remote_openvisus_url(url)
-        _log(f"[SCLib][OpenVisus] access-stub failed ({last_ex}); direct fallback: {normalized}")
-        view.setDataset(normalized)
-        return
-
-    if is_http_remote(url):
-        normalized = normalize_remote_openvisus_url(url)
-    else:
-        normalized = url
+    normalized = url
     _log(f"[SCLib][OpenVisus] setDataset: {normalized}")
     view.setDataset(normalized)

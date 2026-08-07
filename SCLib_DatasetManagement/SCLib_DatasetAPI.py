@@ -786,23 +786,37 @@ def _resolved_idx_needs_regeneration(existing_text: str) -> bool:
 
 
 def _proxy_base_url() -> str:
-    # Prefer publicly reachable URLs for idx templates consumed by dashboards.
-    # Internal host is only a final fallback for local/container-only scenarios.
-    public_base = (
-        os.getenv("SCLIB_DATASET_URL")
-        or os.getenv("SCLIB_API_URL")
-        or os.getenv("SC_SERVER_URL")
-        or os.getenv("DEPLOY_SERVER")
-        or ""
-    ).strip()
-    if public_base:
-        return public_base.rstrip("/")
+    """
+    Base URL embedded in ``(filename_template)`` for OpenVisus bin GETs.
 
-    domain_name = (os.getenv("DOMAIN_NAME") or "").strip()
-    if domain_name:
-        if not domain_name.startswith(("http://", "https://")):
-            domain_name = f"https://{domain_name}"
-        return domain_name.rstrip("/")
+    Dashboards run OpenVisus **inside** Docker and LoadDataset a local access stub;
+    those bin GETs must reach SCLib on the compose network. Public
+    ``https://scientistcloud.com`` often fails hairpin NAT from the container → all-zero tiles.
+
+    Prefer internal API. Set ``SCLIB_RESOLVED_IDX_PROXY_PUBLIC=1`` only if a client
+    outside Docker must fetch the object-proxy URLs directly.
+    """
+    use_public = str(os.getenv("SCLIB_RESOLVED_IDX_PROXY_PUBLIC", "")).strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    )
+    if use_public:
+        public_base = (
+            os.getenv("SCLIB_DATASET_URL")
+            or os.getenv("SCLIB_API_URL")
+            or os.getenv("SC_SERVER_URL")
+            or os.getenv("DEPLOY_SERVER")
+            or ""
+        ).strip()
+        if public_base:
+            return public_base.rstrip("/")
+        domain_name = (os.getenv("DOMAIN_NAME") or "").strip()
+        if domain_name:
+            if not domain_name.startswith(("http://", "https://")):
+                domain_name = f"https://{domain_name}"
+            return domain_name.rstrip("/")
 
     return (os.getenv("SCLIB_INTERNAL_API_URL") or "http://sclib_fastapi:5001").rstrip("/")
 
