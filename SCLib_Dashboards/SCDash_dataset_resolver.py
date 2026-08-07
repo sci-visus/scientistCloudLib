@@ -30,18 +30,18 @@ def get_local_dataset_roots(
     """
     Return local dataset directories in dashboard contract order.
 
-    Order is always converted/<uuid> first, then upload/<uuid>. Explicit
-    converted_dir/upload_dir are accepted so dashboards can pass save_dir/base_dir.
+    Order is always upload/<uuid> first, then converted/<uuid>. Explicit
+    upload_dir/converted_dir are accepted so dashboards can pass base_dir/save_dir.
     """
     dataset_uuid = str(dataset_uuid or "").strip()
     converted_root = str(converted_root or os.getenv("JOB_OUT_DATA_DIR") or DEFAULT_CONVERTED_ROOT).rstrip("/")
     upload_root = str(upload_root or os.getenv("JOB_IN_DATA_DIR") or DEFAULT_UPLOAD_ROOT).rstrip("/")
 
     candidates = [
-        converted_dir,
-        f"{converted_root}/{dataset_uuid}" if dataset_uuid else "",
         upload_dir,
         f"{upload_root}/{dataset_uuid}" if dataset_uuid else "",
+        converted_dir,
+        f"{converted_root}/{dataset_uuid}" if dataset_uuid else "",
     ]
 
     roots: List[str] = []
@@ -100,7 +100,7 @@ def resolve_local_dataset_file(
     upload_dir: object = None,
     preferred_filenames: Sequence[str] = (),
 ) -> Optional[str]:
-    """Resolve one local dataset file in converted-then-upload order."""
+    """Resolve one local dataset file in upload-then-converted order."""
     for root in get_local_dataset_roots(
         dataset_uuid,
         converted_dir=converted_dir,
@@ -122,13 +122,24 @@ def resolve_local_idx_file(
     converted_dir: object = None,
     upload_dir: object = None,
 ) -> Optional[str]:
-    return resolve_local_dataset_file(
+    """
+    Resolve a local .idx: upload/<uuid> first, then converted/<uuid>.
+
+    Prefer a native stem .idx over proxy ``visus.idx`` when both exist under the same root.
+    """
+    for root in get_local_dataset_roots(
         dataset_uuid,
-        [".idx"],
         converted_dir=converted_dir,
         upload_dir=upload_dir,
-        preferred_filenames=["visus.idx"],
-    )
+    ):
+        matches = find_dataset_files(root, [".idx"], preferred_filenames=[])
+        if not matches:
+            continue
+        # Prefer non-proxy native descriptors (e.g. 07180808_….idx) over visus.idx stubs.
+        native = [p for p in matches if os.path.basename(p).lower() != "visus.idx"]
+        chosen = (native or matches)[0]
+        return chosen
+    return None
 
 
 def resolve_local_nexus_file(

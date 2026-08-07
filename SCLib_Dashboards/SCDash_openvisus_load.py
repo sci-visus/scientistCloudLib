@@ -181,8 +181,8 @@ def resolve_openvisus_load_target(
     load_url: Optional[str] = None
     display_uuid = portal_uuid
 
-    # 1) Upload + convert (or upload with .idx): materialized on server wins over google_drive_link.
-    # 2) Link-only (S3/HTTPS, no local idx): remote from Mongo / portal uuid.
+    # 1) On-disk: upload/<uuid> then converted/<uuid> (never prefer remote over local files).
+    # 2) Link-only (no local idx): remote from Mongo / portal uuid.
     # 3) Upload without idx yet: mod_visus fallback or uuid.
     local_idx = resolve_local_idx_file(
         portal_uuid,
@@ -191,7 +191,7 @@ def resolve_openvisus_load_target(
     )
     if local_idx:
         load_url = local_idx
-        _log(f"[SCLib][OpenVisus] prefer local idx (over server={server}): {load_url}")
+        _log(f"[SCLib][OpenVisus] prefer local idx upload→converted (over server={server}): {load_url}")
     elif _server_is_remote(server) or is_remote_dataset_identifier(portal_uuid):
         load_url = portal_uuid
         if collection is not None and portal_uuid and "http" not in portal_uuid:
