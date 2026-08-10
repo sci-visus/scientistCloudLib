@@ -3,6 +3,10 @@ Shared dataset file resolution for ScientistCloud dashboards.
 
 Dashboards should use these helpers instead of hardcoding /mnt paths so local
 materialized data is resolved consistently across IDX and 4D Nexus viewers.
+
+On-disk search order: upload/<uuid> first, then converted/<uuid>.
+Proxy access stubs (converted/.../visus.idx without local bins / object-proxy text)
+are never treated as real local packages — linked datasets use the remote HTTPS idx.
 """
 from __future__ import annotations
 
@@ -17,6 +21,38 @@ DEFAULT_UPLOAD_ROOT = "/mnt/visus_datasets/upload"
 def is_remote_dataset_identifier(value: object) -> bool:
     candidate = str(value or "").strip().lower()
     return candidate.startswith(("s3://", "http://", "https://", "pelican://"))
+
+
+def is_proxy_visus_idx_stub(path: object) -> bool:
+    """
+    True for converted/<uuid>/visus.idx access stubs (object-proxy rewrite), not a real package.
+
+    Real conversions leave .bin tiles under converted/; proxy stubs are a lone small visus.idx
+    (often containing object-proxy URLs) with no local tiles.
+    """
+    p = os.path.abspath(str(path or "").strip()).replace("\\", "/")
+    if not p or not os.path.isfile(p):
+        return False
+    if os.path.basename(p).lower() != "visus.idx":
+        return False
+    if "/converted/" not in p:
+        return False
+    parent = os.path.dirname(p)
+    try:
+        for _root, _dirs, files in os.walk(parent):
+            if any(str(f).lower().endswith(".bin") for f in files):
+                return False
+    except OSError:
+        pass
+    try:
+        with open(p, "r", encoding="utf-8", errors="replace") as fh:
+            head = fh.read(4000)
+        if "object-proxy" in head or "filename_template" in head and "http" in head.lower():
+            return True
+    except OSError:
+        pass
+    # converted/visus.idx with no bins nearby — treat as proxy/leftover stub
+    return True
 
 
 def get_local_dataset_roots(
@@ -126,6 +162,7 @@ def resolve_local_idx_file(
     Resolve a local .idx: upload/<uuid> first, then converted/<uuid>.
 
     Prefer a native stem .idx over proxy ``visus.idx`` when both exist under the same root.
+    Skip converted/visus.idx proxy stubs (no local bins / object-proxy text).
     """
     for root in get_local_dataset_roots(
         dataset_uuid,
@@ -135,10 +172,12 @@ def resolve_local_idx_file(
         matches = find_dataset_files(root, [".idx"], preferred_filenames=[])
         if not matches:
             continue
-        # Prefer non-proxy native descriptors (e.g. 07180808_….idx) over visus.idx stubs.
         native = [p for p in matches if os.path.basename(p).lower() != "visus.idx"]
-        chosen = (native or matches)[0]
-        return chosen
+        for candidate in (native or matches):
+            if is_proxy_visus_idx_stub(candidate):
+                continue
+            return candidate
+        # All matches were proxy stubs under this root — try next root.
     return None
 
 

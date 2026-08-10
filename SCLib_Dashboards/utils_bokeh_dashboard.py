@@ -184,14 +184,7 @@ def initialize_dashboard(request=None, status_callback=None):
 
 def find_visus_idx_file(uuid):
     """
-    Recursively search for visus.idx file given a UUID in either:
-    - /mnt/visus_datasets/converted/{uuid}/visus.idx
-    - /mnt/visus_datasets/upload/{uuid}/visus.idx
-    
-    Args:
-        uuid: UUID string to search for
-        
-    Returns:
-        str or None: Full path to visus.idx file if found, None otherwise
+    Find a local .idx for a UUID: upload/<uuid> first, then converted/<uuid>.
+    Skips converted/visus.idx proxy stubs (no local bins).
     """
     return resolve_local_idx_file(uuid)

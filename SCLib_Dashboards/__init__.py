@@ -78,6 +78,7 @@ from .SCData_process_zarr import (
 from .SCDash_dataset_resolver import (
     find_dataset_files,
     get_local_dataset_roots,
+    is_proxy_visus_idx_stub,
     is_remote_dataset_identifier,
     resolve_local_dataset_file,
     resolve_local_idx_file,
@@ -205,6 +206,7 @@ __all__ = [
     # Dataset resolution
     "find_dataset_files",
     "get_local_dataset_roots",
+    "is_proxy_visus_idx_stub",
     "is_remote_dataset_identifier",
     "resolve_local_dataset_file",
     "resolve_local_idx_file",

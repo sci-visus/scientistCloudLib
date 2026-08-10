@@ -44,18 +44,16 @@ def prefer_direct_remote_openvisus() -> bool:
     """
     Whether to LoadDataset the remote HTTPS/S3 idx URL with query credentials.
 
-    Default **False**: FTH (and similar gateways) often 403 OpenVisus bin GETs that use
-    ``?access_key=&secret_key=``. Instead we build a tiny access ``visus.idx`` whose
-    ``(filename_template)`` points at HTTPS object-proxy URLs — OpenVisus still fetches
-    the bins over HTTPS; SCLib only signs the requests (same idea as Strain/boto3).
+    Default **True**: same as notebook ``ov.LoadDataset(https://…idx?access_key&secret_key)``.
+    Never create converted/visus.idx proxy stubs for linked data.
 
-    Force legacy direct remote with ``SC_OPENVISUS_DIRECT_REMOTE=1``.
+    Legacy proxy path only if ``SC_OPENVISUS_USE_RESOLVED_IDX=1`` (and API allow-list).
     """
-    if os.getenv("SC_OPENVISUS_DIRECT_REMOTE", "").lower() in ("1", "true", "yes", "on"):
-        return True
-    if os.getenv("SC_OPENVISUS_USE_RESOLVED_IDX", "").lower() in ("0", "false", "no", "off"):
-        return True
-    return False
+    if os.getenv("SC_OPENVISUS_USE_RESOLVED_IDX", "").lower() in ("1", "true", "yes", "on"):
+        return False
+    if os.getenv("SC_OPENVISUS_DIRECT_REMOTE", "1").lower() in ("0", "false", "no", "off"):
+        return False
+    return True
 
 
 def normalize_remote_openvisus_url(url: str) -> str:
@@ -181,8 +179,8 @@ def resolve_openvisus_load_target(
     load_url: Optional[str] = None
     display_uuid = portal_uuid
 
-    # 1) On-disk: upload/<uuid> then converted/<uuid> (never prefer remote over local files).
-    # 2) Link-only (no local idx): remote from Mongo / portal uuid.
+    # 1) On-disk: upload/<uuid> then converted/<uuid> (skips proxy visus.idx stubs).
+    # 2) Link-only (no real local idx): remote HTTPS from Mongo / portal uuid.
     # 3) Upload without idx yet: mod_visus fallback or uuid.
     local_idx = resolve_local_idx_file(
         portal_uuid,
@@ -201,7 +199,7 @@ def resolve_openvisus_load_target(
                 load_url, display_uuid = _remote_from_mongo_document(
                     document, portal_uuid=portal_uuid, name=name
                 )
-                _log(f"[SCLib][OpenVisus] remote from Mongo: {load_url}")
+                _log(f"[SCLib][OpenVisus] remote from Mongo (direct LoadDataset, no proxy idx): {load_url}")
             else:
                 alt = collection.find_one({"google_drive_link": portal_uuid})
                 if alt:
@@ -258,7 +256,36 @@ def resolve_openvisus_resolved_idx_via_api(
     filename_template_mode: str = "proxy",
     force_refresh: bool = False,
 ) -> Tuple[str, dict]:
-    """Build access visus.idx (object-proxy HTTPS bin template) for OpenVisus."""
+    """
+    Legacy: POST openvisus-resolved-idx to write converted/visus.idx proxy stubs.
+
+    **Disabled by default.** Linked/remote OpenVisus loads must use
+    ``LoadDataset(https://…idx?access_key&secret_key)`` directly.
+    Opt in only with ``SCLIB_ALLOW_PROXY_RESOLVED_IDX=1``.
+    """
+    _ = (
+        dataset_identifier,
+        s3_uri,
+        user_email,
+        access_key,
+        secret_key,
+        endpoint_url,
+        region_name,
+        cache_credentials,
+        use_cached_credentials,
+        filename_template_mode,
+        force_refresh,
+    )
+    if str(os.getenv("SCLIB_ALLOW_PROXY_RESOLVED_IDX", "")).strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+        "on",
+    ):
+        raise RuntimeError(
+            "Proxy visus.idx creation is disabled. Use LoadDataset on the remote HTTPS .idx "
+            "with credentials (set SCLIB_ALLOW_PROXY_RESOLVED_IDX=1 only for legacy debugging)."
+        )
     dataset_api_base = (
         os.getenv("SCLIB_DATASET_URL")
         or os.getenv("SCLIB_API_URL")
