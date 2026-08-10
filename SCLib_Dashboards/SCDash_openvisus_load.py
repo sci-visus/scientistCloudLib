@@ -25,6 +25,40 @@ from .SCDash_dataset_resolver import (
 )
 
 
+def redact_url_secrets(url: object) -> str:
+    """Mask credential-like query params / s3 userinfo for logs."""
+    out = str(url or "").strip()
+    if not out:
+        return out
+    if out.lower().startswith("s3://"):
+        rest = out[5:]
+        if "@" in rest:
+            _userinfo, _, hostpath = rest.partition("@")
+            out = f"s3://...@{hostpath}"
+    for param in (
+        "secret_key",
+        "access_key",
+        "secret_access_key",
+        "access_key_id",
+        "password",
+        "token",
+        "api_key",
+        "apikey",
+        "signature",
+        "x-amz-signature",
+        "x-amz-security-token",
+        "x-amz-credential",
+        "awsaccesskeyid",
+    ):
+        out = re.sub(
+            rf"([?&]{re.escape(param)}=)[^&]*",
+            r"\1...",
+            out,
+            flags=re.I,
+        )
+    return out
+
+
 def is_s3_uri(url: object) -> bool:
     return isinstance(url, str) and url.strip().lower().startswith("s3://")
 
@@ -199,7 +233,10 @@ def resolve_openvisus_load_target(
                 load_url, display_uuid = _remote_from_mongo_document(
                     document, portal_uuid=portal_uuid, name=name
                 )
-                _log(f"[SCLib][OpenVisus] remote from Mongo (direct LoadDataset, no proxy idx): {load_url}")
+                _log(
+                    "[SCLib][OpenVisus] remote from Mongo (direct LoadDataset, no proxy idx): "
+                    f"{redact_url_secrets(load_url)}"
+                )
             else:
                 alt = collection.find_one({"google_drive_link": portal_uuid})
                 if alt:
@@ -207,7 +244,7 @@ def resolve_openvisus_load_target(
                     load_url = portal_uuid
         elif portal_uuid and "http" in portal_uuid:
             load_url = portal_uuid
-        _log(f"[SCLib][OpenVisus] link-only remote load_url={load_url}")
+        _log(f"[SCLib][OpenVisus] link-only remote load_url={redact_url_secrets(load_url)}")
     else:
         if is_remote_dataset_identifier(name):
             if collection is not None and portal_uuid and not is_remote_dataset_identifier(portal_uuid):
@@ -346,10 +383,10 @@ def openvisus_set_dataset(
     # via openvisus-resolved-idx / object-proxy access stubs.
     if target.is_remote or target.is_s3 or is_http_remote(url):
         normalized = normalize_remote_openvisus_url(url)
-        _log(f"[SCLib][OpenVisus] setDataset direct remote (no idx rewrite): {normalized}")
+        _log(f"[SCLib][OpenVisus] setDataset direct remote (no idx rewrite): {redact_url_secrets(normalized)}")
         view.setDataset(normalized)
         return
 
     normalized = url
-    _log(f"[SCLib][OpenVisus] setDataset: {normalized}")
+    _log(f"[SCLib][OpenVisus] setDataset: {redact_url_secrets(normalized)}")
     view.setDataset(normalized)

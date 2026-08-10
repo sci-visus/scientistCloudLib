@@ -94,6 +94,7 @@ from .SCDash_openvisus_load import (
     normalize_remote_openvisus_url,
     openvisus_set_dataset,
     prefer_direct_remote_openvisus,
+    redact_url_secrets,
     resolve_openvisus_load_target,
     resolve_openvisus_resolved_idx_via_api,
 )
@@ -221,6 +222,7 @@ __all__ = [
     "is_s3_uri",
     "is_http_remote",
     "http_object_url_to_s3_uri",
+    "redact_url_secrets",
     "resolve_openvisus_resolved_idx_via_api",
     # Undo/Redo (core functionality, doesn't depend on bokeh)
     "StateHistory",
