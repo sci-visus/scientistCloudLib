@@ -35,18 +35,25 @@ except ImportError:
     print("ERROR: pymongo is not installed. Install it with: pip install pymongo")
     sys.exit(1)
 
-# Configure logging
-# Determine log file location (use script directory)
+# Configure logging (file under script dir if writable, else /tmp, else stdout only)
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-LOG_FILE = os.path.join(SCRIPT_DIR, 'update_dataset_sizes.log')
+_log_handlers = [logging.StreamHandler(sys.stdout)]
+LOG_FILE = None
+for _candidate in (
+    os.path.join(SCRIPT_DIR, "update_dataset_sizes.log"),
+    "/tmp/update_dataset_sizes.log",
+):
+    try:
+        _log_handlers.insert(0, logging.FileHandler(_candidate))
+        LOG_FILE = _candidate
+        break
+    except OSError:
+        continue
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(LOG_FILE),
-        logging.StreamHandler(sys.stdout)
-    ]
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=_log_handlers,
 )
 logger = logging.getLogger(__name__)
 
