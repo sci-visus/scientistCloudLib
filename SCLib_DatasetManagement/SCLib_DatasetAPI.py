@@ -4493,36 +4493,19 @@ async def get_user_storage(
                 total_size += size_info['raw_size']
                 files_count += size_info['file_count']
         
-        # TODO: Get user limits from user_profile or config
-        total_available = 1024 * 1024 * 1024 * 1024  # 1TB default
-        usage_percentage = (total_size / total_available) * 100 if total_available > 0 else 0
-        
         return {
             "success": True,
             "user": user_email,
             "storage": {
                 "total_used": _format_size(total_size),
                 "total_used_bytes": total_size,
-                "total_available": _format_size(total_available),
-                "total_available_bytes": total_available,
-                "usage_percentage": round(usage_percentage, 2),
                 "datasets_count": datasets_count,
                 "files_count": files_count
             },
             "breakdown": {
                 "raw_data": _format_size(total_size),
-                "processed_data": _format_size(0),  # TODO: Calculate processed data size
-                "compressed_data": _format_size(0)   # TODO: Calculate compressed data size
-            },
-            "billing": {
-                "current_month_cost": "$12.50",  # TODO: Calculate from actual usage
-                "projected_monthly_cost": "$15.75",
-                "cost_per_gb": "$0.10"
-            },
-            "limits": {
-                "max_dataset_size": "100 GB",
-                "max_files_per_dataset": 1000,
-                "max_datasets": 100
+                "processed_data": _format_size(0),
+                "compressed_data": _format_size(0)
             }
         }
         
@@ -4561,36 +4544,19 @@ async def get_team_storage(
                 total_size += size_info['raw_size']
                 files_count += size_info['file_count']
         
-        # TODO: Get team limits from team collection or config
-        total_available = 10 * 1024 * 1024 * 1024 * 1024  # 10TB default for teams
-        usage_percentage = (total_size / total_available) * 100 if total_available > 0 else 0
-        
         return {
             "success": True,
             "team_uuid": team_uuid,
             "storage": {
                 "total_used": _format_size(total_size),
                 "total_used_bytes": total_size,
-                "total_available": _format_size(total_available),
-                "total_available_bytes": total_available,
-                "usage_percentage": round(usage_percentage, 2),
                 "datasets_count": datasets_count,
                 "files_count": files_count
             },
             "breakdown": {
                 "raw_data": _format_size(total_size),
-                "processed_data": _format_size(0),  # TODO: Calculate
-                "compressed_data": _format_size(0)   # TODO: Calculate
-            },
-            "billing": {
-                "current_month_cost": "$125.00",  # TODO: Calculate from actual usage
-                "projected_monthly_cost": "$157.50",
-                "cost_per_gb": "$0.10"
-            },
-            "limits": {
-                "max_dataset_size": "500 GB",
-                "max_files_per_dataset": 5000,
-                "max_datasets": 500
+                "processed_data": _format_size(0),
+                "compressed_data": _format_size(0)
             }
         }
         
