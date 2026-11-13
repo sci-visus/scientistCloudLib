@@ -227,6 +227,29 @@ def downsample_2d(image: Any, max_pixels: int = 640000) -> Tuple[np.ndarray, int
     return values[::step, ::step], step
 
 
+AXIS_NAMES = ("X", "Y", "Z")
+# Plane shown when the offset axis is X, Y, or Z.
+PLANE_NAMES = ("Y–Z", "X–Z", "X–Y")
+
+
+def layer_count(shape: Optional[Sequence[int]], direction: int) -> int:
+    """Number of slices along ``direction``. Z is the last axis, so a Z offset shows X–Y."""
+    dims = tuple(int(v) for v in (shape or ()))
+    axis = int(direction) if int(direction) in (0, 1, 2) else 2
+    if len(dims) <= axis:
+        return 1
+    return max(int(dims[axis]), 1)
+
+
+def clamp_layer(offset: object, length: int) -> int:
+    last = max(int(length) - 1, 0)
+    try:
+        value = int(round(float(offset)))
+    except (TypeError, ValueError):
+        value = 0
+    return int(np.clip(value, 0, last))
+
+
 def map_offset(full_offset: float, full_len: int, coarse_len: int) -> int:
     full_len = max(int(full_len), 1)
     coarse_len = max(int(coarse_len), 1)

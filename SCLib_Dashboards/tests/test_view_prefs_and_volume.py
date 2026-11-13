@@ -20,6 +20,8 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     find_velocity,
     fraction_point,
     initial_window,
+    clamp_layer,
+    layer_count,
     map_offset,
     mask_to_window,
     opacity_nodes,
@@ -154,6 +156,10 @@ class VolumeExplorerTests(unittest.TestCase):
         self.assertEqual((vmin, vmax), (34.5, 39.0))
         self.assertEqual(palette_family("Inferno256"), "Inferno")
         self.assertEqual(map_offset(10, 21, 11), 5)
+        self.assertEqual(layer_count((320, 240, 80), 2), 80)
+        self.assertEqual(layer_count((320, 240, 80), 0), 320)
+        self.assertEqual(clamp_layer(80, 80), 79)
+        self.assertEqual(clamp_layer(12, 80), 12)
         point = fraction_point((0, 10), (1, 11), (1, 21, 5), 0)
         self.assertEqual(point[0], 0.0)
         seeds = seeds_for_streamlines((8, 8, 8), 2, 3, (1, 1), (4, 2), rake=3)
