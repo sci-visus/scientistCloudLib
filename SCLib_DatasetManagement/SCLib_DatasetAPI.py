@@ -136,6 +136,7 @@ class DatasetCreateRequest(BaseModel):
     data_conversion_needed: bool = Field(True, description="Whether data conversion is needed")
     preferred_dashboard: Optional[str] = Field(None, description="Preferred dashboard type")
     dimensions: Optional[str] = Field(None, description="Dataset dimensions")
+    view_prefs: Optional[Dict[str, Any]] = Field(None, description="Saved slice, time, range, and transfer function")
 
 class DatasetUpdateRequest(BaseModel):
     """Request model for updating a dataset."""
@@ -147,6 +148,7 @@ class DatasetUpdateRequest(BaseModel):
     sensor: Optional[str] = None
     dimensions: Optional[str] = None
     preferred_dashboard: Optional[str] = None
+    view_prefs: Optional[Dict[str, Any]] = None
     # Remote data URL (HTTPS gateway, s3://, etc.) — stored as-is for dashboards / OpenVisus.
     google_drive_link: Optional[str] = Field(None, max_length=4096)
     is_public: Optional[bool] = None
@@ -163,6 +165,7 @@ class SettingsUpdateRequest(BaseModel):
     sensor: Optional[str] = None
     dimensions: Optional[str] = None
     preferred_dashboard: Optional[str] = None
+    view_prefs: Optional[Dict[str, Any]] = None
     google_drive_link: Optional[str] = Field(None, max_length=4096)
     is_public: Optional[bool] = None
     is_downloadable: Optional[str] = None
@@ -1664,6 +1667,94 @@ def _user_is_dataset_owner(dataset: Dict[str, Any], user_email: str) -> bool:
     return any(o in email_candidates for o in owner_fields if o)
 
 
+_VIEW_PREF_RANGE_MODES = {"metadata", "user", "dynamic", "dynamic-acc"}
+_VIEW_PREF_COLORMAPS = {"linear", "log"}
+
+
+def _normalize_view_prefs(raw: Any) -> Optional[Dict[str, Any]]:
+    """Store only the slice/volume fields the dashboards know how to apply."""
+    if not isinstance(raw, dict):
+        return None
+    out: Dict[str, Any] = {}
+    if raw.get("direction") is not None:
+        try:
+            direction = int(raw["direction"])
+        except (TypeError, ValueError):
+            direction = None
+        if direction in (0, 1, 2):
+            out["direction"] = direction
+    for key in ("offset", "range_min", "range_max"):
+        if raw.get(key) is None or raw.get(key) == "":
+            continue
+        try:
+            out[key] = float(raw[key])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("timestep") is not None:
+        try:
+            out["timestep"] = int(raw["timestep"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("resolution") is not None:
+        try:
+            out["resolution"] = int(raw["resolution"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("num_refinements") is not None:
+        try:
+            refinements = int(raw["num_refinements"])
+        except (TypeError, ValueError):
+            refinements = None
+        if refinements is not None and 0 <= refinements <= 8:
+            out["num_refinements"] = refinements
+    palette = raw.get("palette")
+    if isinstance(palette, str) and palette.strip():
+        out["palette"] = palette.strip()[:80]
+    field = raw.get("field")
+    if isinstance(field, str) and field.strip():
+        out["field"] = field.strip()[:120]
+    colormap = str(raw.get("colormap") or "").strip().lower()
+    if colormap in _VIEW_PREF_COLORMAPS:
+        out["colormap"] = colormap
+    range_mode = str(raw.get("range_mode") or "").strip().lower()
+    if range_mode in _VIEW_PREF_RANGE_MODES:
+        out["range_mode"] = range_mode
+    if raw.get("auto_res") is not None:
+        auto_res = raw.get("auto_res")
+        if isinstance(auto_res, str):
+            out["auto_res"] = auto_res.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            out["auto_res"] = bool(auto_res)
+    transfer = raw.get("transfer_function")
+    if isinstance(transfer, dict):
+        clean_tf: Dict[str, Any] = {}
+        if isinstance(transfer.get("palette"), str) and transfer["palette"].strip():
+            clean_tf["palette"] = transfer["palette"].strip()[:80]
+        window = transfer.get("window")
+        if isinstance(window, (list, tuple)) and len(window) == 2:
+            try:
+                clean_tf["window"] = [float(window[0]), float(window[1])]
+            except (TypeError, ValueError):
+                pass
+        opacity = transfer.get("opacity")
+        if isinstance(opacity, list):
+            nodes = []
+            for node in opacity[:32]:
+                if not isinstance(node, (list, tuple)) or len(node) != 2:
+                    continue
+                try:
+                    nodes.append([float(node[0]), min(1.0, max(0.0, float(node[1])))])
+                except (TypeError, ValueError):
+                    continue
+            if nodes:
+                clean_tf["opacity"] = nodes
+        if clean_tf:
+            out["transfer_function"] = clean_tf
+    if out.get("range_min") is not None and out.get("range_max") is not None and out["range_min"] > out["range_max"]:
+        out["range_min"], out["range_max"] = out["range_max"], out["range_min"]
+    return out or None
+
+
 def _dataset_shared_with_user_teams(
     dataset_uuid: str,
     team_uuids: list,
@@ -2135,6 +2226,7 @@ async def get_public_datasets(
                     'is_public': doc_dict.get('is_public', False),
                     'is_downloadable': doc_dict.get('is_downloadable', 'only owner'),
                     'preferred_dashboard': doc_dict.get('preferred_dashboard', 'openvisus'),
+                    'view_prefs': _normalize_view_prefs(doc_dict.get('view_prefs')) or {},
                     'dimensions': doc_dict.get('dimensions', ''),
                     'description': doc_dict.get('description', ''),
                     'bucket': doc_dict.get('bucket'),
@@ -2281,6 +2373,7 @@ async def get_public_dataset(
             'is_public': doc_dict.get('is_public', False),
             'is_downloadable': doc_dict.get('is_downloadable', 'only owner'),
             'preferred_dashboard': doc_dict.get('preferred_dashboard', 'openvisus'),
+            'view_prefs': _normalize_view_prefs(doc_dict.get('view_prefs')) or {},
             'dimensions': doc_dict.get('dimensions', ''),
             'description': doc_dict.get('description', ''),
             # Note: user information is intentionally excluded for public access
@@ -3237,6 +3330,7 @@ async def create_dataset(
             "is_downloadable": request.is_downloadable,
             "data_conversion_needed": request.data_conversion_needed,
             "preferred_dashboard": request.preferred_dashboard or "openvisus",
+            "view_prefs": _normalize_view_prefs(request.view_prefs) or {},
             "dimensions": request.dimensions,
             "status": "submitted",
             "file_count": 0,
@@ -3365,6 +3459,8 @@ async def update_dataset(
             update_data["dimensions"] = request.dimensions
         if request.preferred_dashboard is not None:
             update_data["preferred_dashboard"] = request.preferred_dashboard
+        if request.view_prefs is not None:
+            update_data["view_prefs"] = _normalize_view_prefs(request.view_prefs) or {}
         if request.google_drive_link is not None:
             link = str(request.google_drive_link).strip()
             update_data["google_drive_link"] = link
@@ -4234,6 +4330,10 @@ async def update_dataset_settings(
             update_data["dimensions"] = request.dimensions
         if request.preferred_dashboard is not None:
             update_data["preferred_dashboard"] = request.preferred_dashboard
+        if request.view_prefs is not None:
+            if not _user_is_dataset_owner(dataset, user_email):
+                raise HTTPException(status_code=403, detail="Only the dataset owner can save the default view")
+            update_data["view_prefs"] = _normalize_view_prefs(request.view_prefs) or {}
         if request.google_drive_link is not None:
             link = str(request.google_drive_link).strip()
             update_data["google_drive_link"] = link
@@ -4305,6 +4405,7 @@ async def get_dataset_settings(
             "sensor": dataset.get('sensor'),
             "dimensions": dataset.get('dimensions'),
             "preferred_dashboard": dataset.get('preferred_dashboard'),
+            "view_prefs": _normalize_view_prefs(dataset.get('view_prefs')) or {},
             "is_public": dataset.get('is_public', False),
             "data_conversion_needed": dataset.get('data_conversion_needed', True)
         }

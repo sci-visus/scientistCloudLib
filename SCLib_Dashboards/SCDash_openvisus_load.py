@@ -366,15 +366,257 @@ def resolve_openvisus_resolved_idx_via_api(
     raise RuntimeError(last_detail)
 
 
+_RANGE_MODES = {"metadata", "user", "dynamic", "dynamic-acc"}
+_COLORMAPS = {"linear", "log"}
+_OWNER_FIELDS = ("user", "user_email", "owner", "user_id")
+
+
+def normalize_view_prefs(raw: object) -> Optional[dict]:
+    """Keep the saved slice / volume fields and drop anything else."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict = {}
+    if raw.get("direction") is not None:
+        try:
+            direction = int(raw["direction"])
+        except (TypeError, ValueError):
+            direction = None
+        if direction in (0, 1, 2):
+            out["direction"] = direction
+    for key in ("offset", "range_min", "range_max"):
+        if raw.get(key) is None or raw.get(key) == "":
+            continue
+        try:
+            out[key] = float(raw[key])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("timestep") is not None:
+        try:
+            out["timestep"] = int(raw["timestep"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("resolution") is not None:
+        try:
+            out["resolution"] = int(raw["resolution"])
+        except (TypeError, ValueError):
+            pass
+    if raw.get("num_refinements") is not None:
+        try:
+            refinements = int(raw["num_refinements"])
+        except (TypeError, ValueError):
+            refinements = None
+        if refinements is not None and 0 <= refinements <= 8:
+            out["num_refinements"] = refinements
+    palette = raw.get("palette")
+    if isinstance(palette, str) and palette.strip():
+        out["palette"] = palette.strip()[:80]
+    field = raw.get("field")
+    if isinstance(field, str) and field.strip():
+        out["field"] = field.strip()[:120]
+    colormap = str(raw.get("colormap") or "").strip().lower()
+    if colormap in _COLORMAPS:
+        out["colormap"] = colormap
+    range_mode = str(raw.get("range_mode") or "").strip().lower()
+    if range_mode in _RANGE_MODES:
+        out["range_mode"] = range_mode
+    if raw.get("auto_res") is not None:
+        auto_res = raw.get("auto_res")
+        if isinstance(auto_res, str):
+            out["auto_res"] = auto_res.strip().lower() in ("1", "true", "yes", "on")
+        else:
+            out["auto_res"] = bool(auto_res)
+    transfer = raw.get("transfer_function")
+    if isinstance(transfer, dict):
+        clean_tf: dict = {}
+        if isinstance(transfer.get("palette"), str) and transfer["palette"].strip():
+            clean_tf["palette"] = transfer["palette"].strip()[:80]
+        window = transfer.get("window")
+        if isinstance(window, (list, tuple)) and len(window) == 2:
+            try:
+                clean_tf["window"] = [float(window[0]), float(window[1])]
+            except (TypeError, ValueError):
+                pass
+        opacity = transfer.get("opacity")
+        if isinstance(opacity, list):
+            nodes = []
+            for node in opacity[:32]:
+                if not isinstance(node, (list, tuple)) or len(node) != 2:
+                    continue
+                try:
+                    nodes.append([float(node[0]), min(1.0, max(0.0, float(node[1])))])
+                except (TypeError, ValueError):
+                    continue
+            if nodes:
+                clean_tf["opacity"] = nodes
+        if clean_tf:
+            out["transfer_function"] = clean_tf
+    if out.get("range_min") is not None and out.get("range_max") is not None:
+        if out["range_min"] > out["range_max"]:
+            out["range_min"], out["range_max"] = out["range_max"], out["range_min"]
+    window = (out.get("transfer_function") or {}).get("window")
+    if isinstance(window, list) and window[0] > window[1]:
+        out["transfer_function"]["window"] = [window[1], window[0]]
+    return out or None
+
+
+def view_prefs_to_openvisus_config(url: str, prefs: Optional[dict]) -> dict:
+    """Config dict openvisuspy already applies inside setDataset."""
+    entry: dict = {"name": url, "url": url}
+    prefs = prefs or {}
+    if prefs.get("timestep") is not None:
+        entry["timestep"] = int(prefs["timestep"])
+    if prefs.get("palette"):
+        entry["palette"] = prefs["palette"]
+    if prefs.get("colormap") in _COLORMAPS:
+        entry["color-mapper-type"] = prefs["colormap"]
+    if prefs.get("resolution") is not None:
+        entry["resolution"] = int(prefs["resolution"])
+    if prefs.get("auto_res") is not None:
+        entry["view-dep"] = bool(prefs["auto_res"])
+    if prefs.get("num_refinements") is not None:
+        entry["num-refinements"] = int(prefs["num_refinements"])
+    if prefs.get("field"):
+        entry["field"] = prefs["field"]
+    # A saved user range must stay in user mode. Dynamic mode overwrites min/max
+    # from whichever slice loads next.
+    if (
+        prefs.get("range_mode") == "user"
+        and prefs.get("range_min") is not None
+        and prefs.get("range_max") is not None
+    ):
+        entry["palette-range"] = [float(prefs["range_min"]), float(prefs["range_max"])]
+    return {"datasets": [entry]}
+
+
+def user_owns_dataset(document: Optional[dict], user_email: object) -> bool:
+    """True when the session email is the dataset owner. Public sessions are not."""
+    if not isinstance(document, dict) or not user_email:
+        return False
+    email = str(user_email).strip().lower()
+    if "@" not in email:
+        return False
+    for field in _OWNER_FIELDS:
+        value = document.get(field)
+        if isinstance(value, str) and value.strip().lower() == email:
+            return True
+    return False
+
+
+def load_dataset_view_prefs(collection: Any, portal_uuid: object) -> Optional[dict]:
+    """Read view_prefs from visstoredatas. Missing or invalid prefs return None."""
+    if collection is None or not portal_uuid:
+        return None
+    try:
+        document = collection.find_one({"uuid": str(portal_uuid)}, {"view_prefs": 1})
+    except Exception:
+        return None
+    if not document:
+        return None
+    return normalize_view_prefs(document.get("view_prefs"))
+
+
+def save_dataset_view_prefs(
+    collection: Any,
+    portal_uuid: object,
+    prefs: object,
+    user_email: object,
+) -> Tuple[bool, str]:
+    """Owner-only write of view_prefs. Returns (ok, message)."""
+    normalized = normalize_view_prefs(prefs)
+    if not normalized:
+        return False, "Nothing to save"
+    if collection is None or not portal_uuid:
+        return False, "Dataset is not available"
+    try:
+        document = collection.find_one({"uuid": str(portal_uuid)})
+    except Exception as ex:
+        return False, f"Could not read dataset: {ex}"
+    if not document:
+        return False, "Dataset not found"
+    if not user_owns_dataset(document, user_email):
+        return False, "Only the dataset owner can save the default view"
+    try:
+        collection.update_one(
+            {"uuid": document.get("uuid") or str(portal_uuid)},
+            {"$set": {"view_prefs": normalized}},
+        )
+    except Exception as ex:
+        return False, f"Could not save the default view: {ex}"
+    return True, "Saved default view"
+
+
+def apply_openvisus_view_prefs(view: Any, prefs: Optional[dict], log: Optional[Any] = None) -> None:
+    """
+    Apply direction, offset, and user range after the slice layout exists.
+
+    openvisuspy resets direction to Z and the offset to the middle of the volume
+    while it loads, and child slices are created later by getMainLayout().
+    Call this after that layout.
+    """
+    _log = log or (lambda _msg: None)
+    prefs = normalize_view_prefs(prefs)
+    if not prefs:
+        return
+
+    def _call(label: str, fn) -> None:
+        try:
+            fn()
+        except Exception as ex:
+            _log(f"[SCLib][OpenVisus] could not apply {label}: {ex}")
+
+    if prefs.get("timestep") is not None and hasattr(view, "setTimestep"):
+        _call("timestep", lambda: view.setTimestep(int(prefs["timestep"])))
+    if prefs.get("palette") and hasattr(view, "setPalette"):
+        _call("palette", lambda: view.setPalette(prefs["palette"]))
+    if prefs.get("colormap") and hasattr(view, "setColorMapperType"):
+        _call("colormap", lambda: view.setColorMapperType(prefs["colormap"]))
+    if prefs.get("auto_res") is not None and hasattr(view, "setViewDependent"):
+        _call("auto res", lambda: view.setViewDependent(bool(prefs["auto_res"])))
+    if prefs.get("resolution") is not None and hasattr(view, "setResolution"):
+        _call("resolution", lambda: view.setResolution(int(prefs["resolution"])))
+    if prefs.get("field") and hasattr(view, "setField"):
+        _call("field", lambda: view.setField(prefs["field"]))
+    if prefs.get("direction") is not None and hasattr(view, "setDirection"):
+        _call("direction", lambda: view.setDirection(int(prefs["direction"])))
+    if prefs.get("offset") is not None and hasattr(view, "setOffset") and hasattr(view, "getOffsetStartEnd"):
+        def _apply_offset() -> None:
+            start, end, _step = view.getOffsetStartEnd()
+            value = float(prefs["offset"])
+            lo, hi = (start, end) if start <= end else (end, start)
+            if lo != hi:
+                value = min(max(value, float(lo)), float(hi))
+            else:
+                value = float(lo)
+            view.setOffset(value)
+        _call("offset", _apply_offset)
+    if (
+        prefs.get("range_mode") == "user"
+        and prefs.get("range_min") is not None
+        and prefs.get("range_max") is not None
+        and hasattr(view, "setPaletteRange")
+    ):
+        _call(
+            "range",
+            lambda: view.setPaletteRange([float(prefs["range_min"]), float(prefs["range_max"])]),
+        )
+        if hasattr(view, "setPaletteRangeMode"):
+            _call("range mode", lambda: view.setPaletteRangeMode("user"))
+
+
 def openvisus_set_dataset(
     view,
     target: OpenVisusLoadTarget,
     *,
     user_email=None,
+    view_prefs: Optional[dict] = None,
     log: Optional[Any] = None,
 ) -> None:
     """
     Call openvisuspy ``view.setDataset`` using SCLib load policy.
+
+    ``view_prefs`` supplies timestep, palette, colormap, resolution, and a
+    user color range. Direction and offset are applied separately with
+    ``apply_openvisus_view_prefs`` after the slice widgets exist.
     """
     _log = log or (lambda _msg: None)
     url = target.load_url
@@ -384,9 +626,23 @@ def openvisus_set_dataset(
     if target.is_remote or target.is_s3 or is_http_remote(url):
         normalized = normalize_remote_openvisus_url(url)
         _log(f"[SCLib][OpenVisus] setDataset direct remote (no idx rewrite): {redact_url_secrets(normalized)}")
-        view.setDataset(normalized)
-        return
+    else:
+        normalized = url
+        _log(f"[SCLib][OpenVisus] setDataset: {redact_url_secrets(normalized)}")
 
-    normalized = url
-    _log(f"[SCLib][OpenVisus] setDataset: {redact_url_secrets(normalized)}")
+    prefs = normalize_view_prefs(view_prefs)
+    if prefs and hasattr(view, "setConfig"):
+        config = view_prefs_to_openvisus_config(normalized, prefs)
+        try:
+            _log("[SCLib][OpenVisus] setDataset with saved view prefs")
+            view.setConfig(config)
+            return
+        except Exception as ex:
+            _log(f"[SCLib][OpenVisus] saved view config failed, loading dataset only: {ex}")
+            if hasattr(view, "setDataset"):
+                try:
+                    view.setDataset(normalized, force=True)
+                    return
+                except TypeError:
+                    pass
     view.setDataset(normalized)

@@ -88,15 +88,21 @@ from .SCDash_dataset_resolver import (
 
 from .SCDash_openvisus_load import (
     OpenVisusLoadTarget,
+    apply_openvisus_view_prefs,
     http_object_url_to_s3_uri,
     is_http_remote,
     is_s3_uri,
+    load_dataset_view_prefs,
     normalize_remote_openvisus_url,
+    normalize_view_prefs,
     openvisus_set_dataset,
     prefer_direct_remote_openvisus,
     redact_url_secrets,
     resolve_openvisus_load_target,
     resolve_openvisus_resolved_idx_via_api,
+    save_dataset_view_prefs,
+    user_owns_dataset,
+    view_prefs_to_openvisus_config,
 )
 
 # Undo/Redo components (don't depend on bokeh, so import separately)
@@ -217,6 +223,12 @@ __all__ = [
     "OpenVisusLoadTarget",
     "resolve_openvisus_load_target",
     "openvisus_set_dataset",
+    "normalize_view_prefs",
+    "view_prefs_to_openvisus_config",
+    "load_dataset_view_prefs",
+    "save_dataset_view_prefs",
+    "apply_openvisus_view_prefs",
+    "user_owns_dataset",
     "prefer_direct_remote_openvisus",
     "normalize_remote_openvisus_url",
     "is_s3_uri",

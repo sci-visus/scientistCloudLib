@@ -225,6 +225,7 @@ class UserManager:
         
         # Check if user exists by email (primary identifier)
         existing_user = collection.find_one({"email": email})
+        created = existing_user is None
         
         if existing_user:
             logger.info(f"User exists, updating: {email} (existing user_id: {existing_user.get('user_id', 'N/A')})")
@@ -295,7 +296,8 @@ class UserManager:
             "created_at": final_user.get('created_at') if final_user else None,
             "last_login": final_user.get('last_login') if final_user else None,
             "preferences": final_user.get('preferences', {}) if final_user else {},
-            "auth0_id": final_user.get('auth0_metadata', {}).get('auth0_id') if final_user else user_data.get('auth0_id')
+            "auth0_id": final_user.get('auth0_metadata', {}).get('auth0_id') if final_user else user_data.get('auth0_id'),
+            "created": created,
         }
     
     @staticmethod
@@ -802,6 +804,7 @@ async def create_user(request: CreateUserRequest):
         
         return {
             "success": True,
+            "created": bool(user.get("created")),
             "user_id": user.get('user_id') or user_id,
             "user": {
                 "id": user.get('user_id') or user_id,
