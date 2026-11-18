@@ -28,6 +28,7 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     palette_family,
     seeds_for_streamlines,
     transect_image,
+    transect_polyline,
     window_from_selection,
 )
 
@@ -133,6 +134,10 @@ class VolumeExplorerTests(unittest.TestCase):
         self.assertEqual(image.shape, (6, 4))
         self.assertTrue(np.allclose(image[:, 0], np.arange(6)))
         self.assertTrue(np.allclose(image[:, -1], np.arange(6)))
+        curtain = transect_polyline(volume, 2, [(0, 0), (3, 0), (3, 4)], max_samples=8)
+        self.assertEqual(curtain.shape[0], 6)
+        self.assertGreaterEqual(curtain.shape[1], 3)
+        self.assertTrue(np.allclose(curtain[:, 0], np.arange(6)))
 
     def test_window_hides_outside_values(self):
         image = np.array([[0.0, 5.0], [10.0, 15.0]], dtype=np.float32)

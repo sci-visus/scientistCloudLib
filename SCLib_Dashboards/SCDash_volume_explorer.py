@@ -316,27 +316,50 @@ def orthogonal_axes(direction: int) -> Tuple[int, int]:
 
 def transect_image(volume: Any, direction: int, p0: Sequence[float], p1: Sequence[float], samples: int = 160) -> np.ndarray:
     """
-    Depth image under a line drawn on the slice.
+    Depth image under one straight segment on the slice.
 
     ``p0`` and ``p1`` are (u, v) indexes on the two axes that are not
     ``direction``. The result has shape (depth, samples).
     """
     data = np.asarray(volume)
-    direction = int(direction)
+    direction = int(direction) if int(direction) in (0, 1, 2) else 2
     axis_u, axis_v = orthogonal_axes(direction)
     count = max(2, int(samples))
-    depth = int(data.shape[direction])
-    columns = np.empty((depth, count), dtype=np.float32)
-    for sample_index, t in enumerate(np.linspace(0.0, 1.0, count)):
-        u = float(p0[0]) + (float(p1[0]) - float(p0[0])) * float(t)
-        v = float(p0[1]) + (float(p1[1]) - float(p0[1])) * float(t)
-        index = [0, 0, 0]
-        index[axis_u] = int(np.clip(int(round(u)), 0, data.shape[axis_u] - 1))
-        index[axis_v] = int(np.clip(int(round(v)), 0, data.shape[axis_v] - 1))
-        for depth_index in range(depth):
-            index[direction] = depth_index
-            columns[depth_index, sample_index] = data[tuple(index)]
-    return columns
+    t = np.linspace(0.0, 1.0, count)
+    u = np.clip(np.rint(float(p0[0]) + (float(p1[0]) - float(p0[0])) * t).astype(int), 0, data.shape[axis_u] - 1)
+    v = np.clip(np.rint(float(p0[1]) + (float(p1[1]) - float(p0[1])) * t).astype(int), 0, data.shape[axis_v] - 1)
+    if direction == 2:
+        curtain = data[u, v, :].T
+    elif direction == 1:
+        curtain = data[u, :, v].T
+    else:
+        curtain = data[:, u, v]
+    return np.asarray(curtain, dtype=np.float32)
+
+
+def transect_polyline(volume: Any, direction: int, points: Sequence[Sequence[float]], max_samples: int = 180) -> Optional[np.ndarray]:
+    """Depth curtain under a polyline. Sample count follows segment length."""
+    pts = [(float(p[0]), float(p[1])) for p in (points or [])]
+    if len(pts) < 2:
+        return None
+    lengths = [float(np.hypot(b[0] - a[0], b[1] - a[1])) for a, b in zip(pts, pts[1:])]
+    total = float(sum(lengths))
+    if total < 1e-3:
+        return transect_image(volume, direction, pts[0], pts[-1], samples=2)
+    pieces = []
+    budget = max(2, int(max_samples))
+    for (start, end), length in zip(zip(pts, pts[1:]), lengths):
+        if length < 1e-3:
+            continue
+        count = max(2, int(round(budget * length / total)))
+        piece = transect_image(volume, direction, start, end, samples=count)
+        if pieces:
+            piece = piece[:, 1:]
+        if piece.size:
+            pieces.append(piece)
+    if not pieces:
+        return None
+    return np.concatenate(pieces, axis=1)
 
 
 def fraction_point(
