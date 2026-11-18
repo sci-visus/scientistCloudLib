@@ -16,6 +16,7 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_openvisus_load import (  # noqa: 
     view_prefs_to_openvisus_config,
 )
 from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa: E402
+    align_volume_axes,
     apply_opacity_window,
     find_velocity,
     fraction_point,
@@ -26,6 +27,7 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     mask_to_window,
     opacity_nodes,
     palette_family,
+    sample_curtain,
     seeds_for_streamlines,
     transect_image,
     transect_polyline,
@@ -125,6 +127,27 @@ class VolumeExplorerTests(unittest.TestCase):
             {"kind": "vector", "names": ["velocity"]},
         )
         self.assertIsNone(find_velocity([{"name": "salinity", "ncomponents": 1}]))
+
+    def test_coarse_axes_follow_logic(self):
+        stored = np.zeros((8, 20, 30), dtype=np.float32)
+        stored[0, 0, 0] = 7
+        aligned = align_volume_axes(stored, (300, 200, 80))
+        self.assertEqual(aligned.shape, (30, 20, 8))
+        self.assertEqual(float(aligned[0, 0, 0]), 7.0)
+        already = align_volume_axes(np.zeros((30, 20, 8)), (300, 200, 80))
+        self.assertEqual(already.shape, (30, 20, 8))
+
+    def test_curtain_runs_start_to_end_with_zero_first(self):
+        volume = np.zeros((4, 5, 6), dtype=np.float32)
+        for depth in range(6):
+            volume[:, :, depth] = depth
+        image, distance = sample_curtain(volume, 2, [(0, 0, 0), (3, 4, 0)])
+        self.assertEqual(image.shape[0], 6)
+        self.assertGreaterEqual(image.shape[1], 2)
+        self.assertTrue(np.allclose(image[:, 0], np.arange(6)))
+        self.assertTrue(np.allclose(image[:, -1], np.arange(6)))
+        self.assertEqual(float(distance[0]), 0.0)
+        self.assertGreater(float(distance[-1]), float(distance[0]))
 
     def test_transect_reads_depth(self):
         volume = np.zeros((4, 5, 6), dtype=np.float32)
