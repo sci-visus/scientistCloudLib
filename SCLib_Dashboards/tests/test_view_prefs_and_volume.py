@@ -28,6 +28,7 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     palette_family,
     seeds_for_streamlines,
     transect_image,
+    window_from_selection,
 )
 
 
@@ -160,6 +161,9 @@ class VolumeExplorerTests(unittest.TestCase):
         self.assertEqual(layer_count((320, 240, 80), 0), 320)
         self.assertEqual(clamp_layer(80, 80), 79)
         self.assertEqual(clamp_layer(12, 80), 12)
+        self.assertEqual(window_from_selection({"range": {"x": [12, 4]}}, 0, 20), [4.0, 12.0])
+        self.assertEqual(window_from_selection({"points": [{"x": 2}, {"x": 9}]}, 0, 20), [2.0, 9.0])
+        self.assertIsNone(window_from_selection(None))
         point = fraction_point((0, 10), (1, 11), (1, 21, 5), 0)
         self.assertEqual(point[0], 0.0)
         seeds = seeds_for_streamlines((8, 8, 8), 2, 3, (1, 1), (4, 2), rake=3)

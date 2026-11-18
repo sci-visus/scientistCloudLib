@@ -206,6 +206,37 @@ def opacity_nodes(nodata: float, vmin: float, vmax: float) -> list:
     ]
 
 
+def window_from_selection(selected: Any, lower: Optional[float] = None, upper: Optional[float] = None):
+    """Value window from a horizontal brush on the scalar-range plot."""
+    if not isinstance(selected, dict):
+        return None
+    span = (selected.get("range") or {}).get("x")
+    if not span or len(span) < 2:
+        xs = []
+        for point in selected.get("points") or []:
+            if not isinstance(point, dict) or point.get("x") is None:
+                continue
+            try:
+                xs.append(float(point["x"]))
+            except (TypeError, ValueError):
+                continue
+        if not xs:
+            return None
+        span = [min(xs), max(xs)]
+    try:
+        lo = float(min(float(span[0]), float(span[1])))
+        hi = float(max(float(span[0]), float(span[1])))
+    except (TypeError, ValueError):
+        return None
+    if lower is not None:
+        lo = max(lo, float(lower))
+    if upper is not None:
+        hi = min(hi, float(upper))
+    if not np.isfinite(lo) or not np.isfinite(hi) or hi <= lo:
+        return None
+    return [lo, hi]
+
+
 def scalar_histogram(values: Any, bins: int = 48) -> Tuple[np.ndarray, np.ndarray]:
     arr = np.asarray(values, dtype=np.float64).ravel()
     arr = arr[np.isfinite(arr)]
