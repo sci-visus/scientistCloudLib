@@ -567,28 +567,20 @@ def read_vector_volume(
 
 
 def plane_from_read(image: Any, direction: int) -> Optional[np.ndarray]:
-    """2D plane in OpenVisus order: rows along the first in-plane axis.
+    """2D plane in the order OpenVisus returned.
 
-    A 2D read is returned as-is. That is the upright map. A 3D read still has
-    the sliced axis at size 1. Dropping that axis with a blind squeeze swaps
-    the other two when the storage order is reversed, which turns the map
-    when the offset changes. The size-1 axis says which order this read used.
+    Drop a length-1 depth axis and leave the other two alone. Transposing
+    here turns the map. ``direction`` is unused; the slice axis is whichever
+    dimension came back with size 1.
     """
+    del direction
     data = np.asarray(image)
-    direction = int(direction) if int(direction) in (0, 1, 2) else 2
     if data.ndim == 2:
         return data
     if data.ndim != 3:
         return None
-    singleton = [axis for axis, size in enumerate(data.shape) if int(size) == 1]
-    if len(singleton) != 1:
-        flat = np.squeeze(data)
-        return flat if flat.ndim == 2 else None
-    axis = int(singleton[0])
-    plane = np.take(data, 0, axis=axis)
-    if axis == 2 - direction and axis != direction:
-        return np.ascontiguousarray(plane.T)
-    return plane
+    flat = np.squeeze(data)
+    return flat if getattr(flat, "ndim", 0) == 2 else None
 
 
 def read_depth_columns(

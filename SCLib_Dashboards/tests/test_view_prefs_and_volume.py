@@ -156,15 +156,16 @@ class VolumeExplorerTests(unittest.TestCase):
         kept = plane_from_read(upright, 2)
         self.assertEqual(kept.shape, (2, 3))
         self.assertEqual(float(kept[1, 2]), 5.0)
-        xyz = np.zeros((5, 7, 1), dtype=np.float32)
-        xyz[1, 2, 0] = 3
-        self.assertEqual(plane_from_read(xyz, 2).shape, (5, 7))
-        self.assertEqual(float(plane_from_read(xyz, 2)[1, 2]), 3.0)
-        zyx = np.zeros((1, 7, 5), dtype=np.float32)
-        zyx[0, 2, 1] = 3
-        turned = plane_from_read(zyx, 2)
-        self.assertEqual(turned.shape, (5, 7))
-        self.assertEqual(float(turned[1, 2]), 3.0)
+        leading = np.zeros((1, 7, 5), dtype=np.float32)
+        leading[0, 2, 1] = 3
+        flat = plane_from_read(leading, 2)
+        self.assertEqual(flat.shape, (7, 5))
+        self.assertEqual(float(flat[2, 1]), 3.0)
+        trailing = np.zeros((5, 7, 1), dtype=np.float32)
+        trailing[1, 2, 0] = 4
+        flat = plane_from_read(trailing, 2)
+        self.assertEqual(flat.shape, (5, 7))
+        self.assertEqual(float(flat[1, 2]), 4.0)
 
     def test_depth_axis_is_thick_enough_to_read_as_a_volume(self):
         spacing = volume_spacing((400, 500, 30), 2)
