@@ -556,7 +556,7 @@ def read_vector_volume(
                 dtype=np.float32,
             ))
         try:
-            raw = np.stack(parts, axis=-1)
+            raw = align_volume_axes(np.stack(parts, axis=-1), logic_shape)
         except Exception:
             return None
     if int(step) > 1:
