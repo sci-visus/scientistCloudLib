@@ -8,6 +8,7 @@ so the slice math can be tested without a GPU.
 """
 from __future__ import annotations
 
+from itertools import permutations
 from typing import Any, Optional, Sequence, Tuple
 
 import numpy as np
@@ -109,6 +110,50 @@ def default_scalar_field(fields: Sequence[dict], velocity: Optional[dict]) -> Op
     if fields and fields[0].get("name"):
         return fields[0]["name"]
     return None
+
+
+def volume_axis_permutation(shape: Sequence[int], logic_shape: Optional[Sequence[int]]) -> Tuple[int, int, int]:
+    """Which stored axes line up with logic X, Y, Z.
+
+    A coarse OpenVisus read is smaller than the logic box, so an exact shape
+    match cannot tell a reversed axis order from the real one. The permutation
+    is the one whose downsample ratios are most alike, and the original order
+    is kept unless another order is clearly better.
+    """
+    if shape is None or len(shape) < 3 or not logic_shape or len(list(logic_shape)) < 3:
+        return (0, 1, 2)
+    logic = [max(int(v), 1) for v in list(logic_shape)[:3]]
+    got = [max(int(shape[i]), 1) for i in range(3)]
+
+    def score(perm: Tuple[int, int, int]) -> float:
+        ratios = [got[perm[i]] / float(logic[i]) for i in range(3)]
+        logs = np.log(np.maximum(ratios, 1e-6))
+        return float(np.std(logs))
+
+    identity = (0, 1, 2)
+    best = identity
+    best_score = score(identity)
+    for perm in permutations(range(3)):
+        value = score(perm)
+        if value < best_score - 0.05:
+            best = perm
+            best_score = value
+    return best
+
+
+def align_volume_axes(array: Any, logic_shape: Optional[Sequence[int]]) -> np.ndarray:
+    """Return the array with axes ordered as logic X, Y, Z."""
+    data = np.asarray(array)
+    if data.ndim < 3:
+        return data
+    perm = volume_axis_permutation(data.shape[:3], logic_shape)
+    if perm == (0, 1, 2):
+        return data
+    if data.ndim == 3:
+        return np.transpose(data, perm)
+    if data.ndim == 4:
+        return np.transpose(data, perm + (3,))
+    return data
 
 
 def orient_volume(array: Any, logic_shape: Optional[Sequence[int]]) -> np.ndarray:
@@ -366,6 +411,57 @@ def transect_polyline(volume: Any, direction: int, points: Sequence[Sequence[flo
     return np.concatenate(pieces, axis=1)
 
 
+def sample_curtain(volume: Any, depth_axis: int, points_xyz: Sequence[Sequence[float]], max_samples: int = 180):
+    """Curtain along one dataset axis under a 3D polyline.
+
+    The result is ``(image, distance)``. ``image`` has shape ``(depth, samples)``
+    and row 0 is index 0 of ``depth_axis``. ``distance`` starts at 0 on the
+    first point and grows toward the last point.
+    """
+    data = np.asarray(volume)
+    if data.ndim < 3:
+        return None
+    depth_axis = int(depth_axis) if int(depth_axis) in (0, 1, 2) else 2
+    points = [(float(p[0]), float(p[1]), float(p[2])) for p in (points_xyz or []) if len(p) >= 3]
+    if len(points) < 2:
+        return None
+    others = [axis for axis in range(3) if axis != depth_axis]
+    lengths = []
+    for start, end in zip(points, points[1:]):
+        lengths.append(float(np.hypot(end[others[0]] - start[others[0]], end[others[1]] - start[others[1]])))
+    total = float(sum(lengths))
+    if total < 1e-3:
+        lengths = [1.0 for _ in lengths]
+        total = float(len(lengths))
+    budget = max(2, int(max_samples))
+    samples = []
+    distance = []
+    traveled = 0.0
+    for (start, end), length in zip(zip(points, points[1:]), lengths):
+        if length < 1e-6:
+            continue
+        count = max(2, int(round(budget * max(length, 1e-6) / total)))
+        for index, t in enumerate(np.linspace(0.0, 1.0, count)):
+            if samples and index == 0:
+                continue
+            point = tuple(float(start[axis]) + (float(end[axis]) - float(start[axis])) * float(t) for axis in range(3))
+            samples.append(point)
+            distance.append(traveled + float(length) * float(t))
+        traveled += float(length)
+    if not samples:
+        return None
+    columns = []
+    for point in samples:
+        index = [int(np.clip(round(point[axis]), 0, data.shape[axis] - 1)) for axis in range(3)]
+        if depth_axis == 0:
+            columns.append(data[:, index[1], index[2]])
+        elif depth_axis == 1:
+            columns.append(data[index[0], :, index[2]])
+        else:
+            columns.append(data[index[0], index[1], :])
+    return np.stack(columns, axis=1).astype(np.float32), np.asarray(distance, dtype=np.float32)
+
+
 def fraction_point(
     point_rc: Sequence[float],
     plane_shape: Sequence[int],
@@ -424,7 +520,7 @@ def read_coarse_volume(
     kwargs = {"time": int(timestep), "quality": int(quality)}
     if field:
         kwargs["field"] = field
-    raw = orient_volume(db.read(**kwargs), logic_shape)
+    raw = align_volume_axes(orient_volume(db.read(**kwargs), logic_shape), logic_shape)
     if raw.ndim != 3:
         raise ValueError(f"Expected a 3D volume, got shape {getattr(raw, 'shape', None)}")
     volume, step = stride_to_fit(raw, int(max_voxels))
@@ -451,7 +547,7 @@ def read_vector_volume(
             raw = np.moveaxis(raw[:3], 0, -1)
         if raw.ndim != 4 or raw.shape[-1] < 3:
             return None
-        raw = orient_vectors(raw[..., :3], logic_shape)
+        raw = align_volume_axes(orient_vectors(raw[..., :3], logic_shape), logic_shape)
     else:
         parts = []
         for name in spec.get("names") or []:
