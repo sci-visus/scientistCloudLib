@@ -26,9 +26,11 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     map_offset,
     mask_to_window,
     opacity_nodes,
+    orient_plane,
     palette_family,
     sample_curtain,
     seeds_for_streamlines,
+    volume_spacing,
     transect_image,
     transect_polyline,
     window_from_selection,
@@ -148,6 +150,20 @@ class VolumeExplorerTests(unittest.TestCase):
         self.assertTrue(np.allclose(image[:, -1], np.arange(6)))
         self.assertEqual(float(distance[0]), 0.0)
         self.assertGreater(float(distance[-1]), float(distance[0]))
+
+    def test_plane_stays_on_the_logic_axes(self):
+        wide = np.arange(20 * 40, dtype=np.float32).reshape(20, 40)
+        upright = orient_plane(wide, 400, 200)
+        self.assertEqual(upright.shape, (40, 20))
+        already = orient_plane(wide.T, 400, 200)
+        self.assertEqual(already.shape, (40, 20))
+        square = orient_plane(np.zeros((10, 12)), 100, 100)
+        self.assertEqual(square.shape, (10, 12))
+
+    def test_depth_axis_is_thick_enough_to_read_as_a_volume(self):
+        spacing = volume_spacing((400, 500, 30), 2)
+        self.assertEqual(spacing[0], 1.0)
+        self.assertGreater(spacing[2] * 30, 200)
 
     def test_transect_reads_depth(self):
         volume = np.zeros((4, 5, 6), dtype=np.float32)

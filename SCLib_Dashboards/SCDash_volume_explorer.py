@@ -566,6 +566,82 @@ def read_vector_volume(
     return np.asarray(raw, dtype=np.float32)
 
 
+def orient_plane(image: Any, logic_u: int, logic_v: int) -> np.ndarray:
+    """Keep the slice's row axis on logic ``u`` and its columns on logic ``v``.
+
+    A coarse plane is smaller than the logic box, so an exact shape match never
+    fires. When one offset comes back transposed, the map turns. The aspect of
+    the two logic axes picks the orientation, and a nearly square pair is left
+    as OpenVisus returned it.
+    """
+    values = np.asarray(image)
+    if values.ndim != 2:
+        return values
+    lu = max(int(logic_u), 1)
+    lv = max(int(logic_v), 1)
+    if abs(lu - lv) / float(max(lu, lv)) < 0.05:
+        return values
+    rows, cols = values.shape
+    if rows < 2 or cols < 2:
+        return values
+    target = lu / float(lv)
+    direct = abs(np.log(max((rows / float(cols)) / target, 1e-6)))
+    flipped = abs(np.log(max((cols / float(rows)) / target, 1e-6)))
+    if flipped + 0.08 < direct:
+        return np.ascontiguousarray(values.T)
+    return values
+
+
+def read_depth_columns(
+    db: Any,
+    logic_shape: Sequence[int],
+    depth_axis: int,
+    samples_xyz: Sequence[Sequence[float]],
+    timestep: int,
+    field: Optional[str] = None,
+    quality: int = 0,
+) -> Optional[np.ndarray]:
+    """One full-depth column per sample, at a quality that keeps the depth axis.
+
+    The coarse 3D read drops most depth layers. These are narrow IDX queries,
+    so the curtain can use every offset the slider can reach.
+    """
+    if not logic_shape or len(logic_shape) < 3 or not samples_xyz:
+        return None
+    depth_axis = int(depth_axis) if int(depth_axis) in (0, 1, 2) else 2
+    logic = [max(int(v), 1) for v in list(logic_shape)[:3]]
+    columns = []
+    for point in samples_xyz:
+        starts = [0, 0, 0]
+        ends = logic[:]
+        for axis in range(3):
+            if axis == depth_axis:
+                continue
+            index = int(np.clip(round(float(point[axis])), 0, logic[axis] - 1))
+            starts[axis] = index
+            ends[axis] = min(logic[axis], index + 1)
+        kwargs = {
+            "time": int(timestep),
+            "quality": int(quality),
+            "logic_box": [starts, ends],
+        }
+        if field:
+            kwargs["field"] = field
+        try:
+            raw = np.squeeze(np.asarray(db.read(**kwargs), dtype=np.float32))
+        except Exception:
+            return None
+        column = np.asarray(raw, dtype=np.float32).ravel()
+        if column.size == 0:
+            return None
+        columns.append(column)
+    length = max(int(column.size) for column in columns)
+    image = np.full((length, len(columns)), np.nan, dtype=np.float32)
+    for index, column in enumerate(columns):
+        image[: int(column.size), index] = column
+    return image
+
+
 def read_plane(
     db: Any,
     logic_shape: Sequence[int],
@@ -585,16 +661,15 @@ def read_plane(
     if field:
         kwargs["field"] = field
     try:
-        image = np.squeeze(np.asarray(db.read(**kwargs)))
+        image = np.asarray(db.read(**kwargs))
     except Exception:
         return None
+    if image.ndim == 3:
+        image = np.squeeze(image)
     if image.ndim != 2:
         return None
     axis_u, axis_v = orthogonal_axes(int(direction))
-    expected = (int(logic_shape[axis_u]), int(logic_shape[axis_v]))
-    if image.shape == expected[::-1] and image.shape != expected:
-        image = image.T
-    return image
+    return orient_plane(image, int(logic_shape[axis_u]), int(logic_shape[axis_v]))
 
 
 def compute_streamlines(vectors: Any, seeds: Sequence[Sequence[float]]):
@@ -642,7 +717,18 @@ def compute_streamlines(vectors: Any, seeds: Sequence[Sequence[float]]):
     return output
 
 
-def volume_mesh_state(array: Any):
+def volume_spacing(shape: Sequence[int], depth_axis: int = 2) -> Tuple[float, float, float]:
+    """Stretch the depth axis so a flat dataset reads as a volume, not a slice."""
+    dims = [max(int(shape[i]), 1) for i in range(3)]
+    depth_axis = int(depth_axis) if int(depth_axis) in (0, 1, 2) else 2
+    others = [axis for axis in range(3) if axis != depth_axis]
+    horizontal = max(dims[others[0]], dims[others[1]], 1)
+    spacing = [1.0, 1.0, 1.0]
+    spacing[depth_axis] = max(horizontal * 0.65 / float(dims[depth_axis]), 1.0)
+    return (spacing[0], spacing[1], spacing[2])
+
+
+def volume_mesh_state(array: Any, depth_axis: int = 2):
     import vtk
     from vtk.util import numpy_support
     from dash_vtk.utils import to_volume_state
@@ -652,6 +738,8 @@ def volume_mesh_state(array: Any):
         data = data[:, :, None]
     image = vtk.vtkImageData()
     image.SetDimensions(int(data.shape[0]), int(data.shape[1]), int(data.shape[2]))
+    spacing = volume_spacing(data.shape, depth_axis)
+    image.SetSpacing(spacing[0], spacing[1], spacing[2])
     flat = np.ascontiguousarray(data).ravel(order="F")
     vtk_array = numpy_support.numpy_to_vtk(flat, deep=True, array_type=vtk.VTK_FLOAT)
     image.GetPointData().SetScalars(vtk_array)
