@@ -566,30 +566,29 @@ def read_vector_volume(
     return np.asarray(raw, dtype=np.float32)
 
 
-def orient_plane(image: Any, logic_u: int, logic_v: int) -> np.ndarray:
-    """Keep the slice's row axis on logic ``u`` and its columns on logic ``v``.
+def plane_from_read(image: Any, direction: int) -> Optional[np.ndarray]:
+    """2D plane in OpenVisus order: rows along the first in-plane axis.
 
-    A coarse plane is smaller than the logic box, so an exact shape match never
-    fires. When one offset comes back transposed, the map turns. The aspect of
-    the two logic axes picks the orientation, and a nearly square pair is left
-    as OpenVisus returned it.
+    A 2D read is returned as-is. That is the upright map. A 3D read still has
+    the sliced axis at size 1. Dropping that axis with a blind squeeze swaps
+    the other two when the storage order is reversed, which turns the map
+    when the offset changes. The size-1 axis says which order this read used.
     """
-    values = np.asarray(image)
-    if values.ndim != 2:
-        return values
-    lu = max(int(logic_u), 1)
-    lv = max(int(logic_v), 1)
-    if abs(lu - lv) / float(max(lu, lv)) < 0.05:
-        return values
-    rows, cols = values.shape
-    if rows < 2 or cols < 2:
-        return values
-    target = lu / float(lv)
-    direct = abs(np.log(max((rows / float(cols)) / target, 1e-6)))
-    flipped = abs(np.log(max((cols / float(rows)) / target, 1e-6)))
-    if flipped + 0.08 < direct:
-        return np.ascontiguousarray(values.T)
-    return values
+    data = np.asarray(image)
+    direction = int(direction) if int(direction) in (0, 1, 2) else 2
+    if data.ndim == 2:
+        return data
+    if data.ndim != 3:
+        return None
+    singleton = [axis for axis, size in enumerate(data.shape) if int(size) == 1]
+    if len(singleton) != 1:
+        flat = np.squeeze(data)
+        return flat if flat.ndim == 2 else None
+    axis = int(singleton[0])
+    plane = np.take(data, 0, axis=axis)
+    if axis == 2 - direction and axis != direction:
+        return np.ascontiguousarray(plane.T)
+    return plane
 
 
 def read_depth_columns(
@@ -664,12 +663,7 @@ def read_plane(
         image = np.asarray(db.read(**kwargs))
     except Exception:
         return None
-    if image.ndim == 3:
-        image = np.squeeze(image)
-    if image.ndim != 2:
-        return None
-    axis_u, axis_v = orthogonal_axes(int(direction))
-    return orient_plane(image, int(logic_shape[axis_u]), int(logic_shape[axis_v]))
+    return plane_from_read(image, int(direction))
 
 
 def compute_streamlines(vectors: Any, seeds: Sequence[Sequence[float]]):
