@@ -180,16 +180,20 @@ def mask_to_window(image: Any, vmin: float, vmax: float) -> np.ndarray:
 
 
 def apply_opacity_window(volume: Any, vmin: float, vmax: float) -> Tuple[np.ndarray, float]:
-    """Values outside the window become a nodata scalar the opacity curve hides."""
+    """Values outside the user's window become one scalar the opacity curve hides.
+
+    The hidden scalar sits just below ``vmin``, so the visible ramp is the same
+    interval the slice colors from vmin to vmax.
+    """
     data = np.array(volume, dtype=np.float32, copy=True)
     if vmin > vmax:
         vmin, vmax = vmax, vmin
-    finite = data[np.isfinite(data)]
-    base = float(np.min(finite)) if finite.size else 0.0
-    nodata = min(base - max(abs(base), 1.0), float(vmin) - max(abs(float(vmin)) * 1e-3, 1e-3))
+    span = max(float(vmax) - float(vmin), 1e-6)
+    # Store the hidden scalar as float32 so it matches the array exactly.
+    nodata = float(np.float32(float(vmin) - 0.05 * span))
     bad = ~np.isfinite(data) | (data < vmin) | (data > vmax)
     data[bad] = np.float32(nodata)
-    return data, float(nodata)
+    return data, nodata
 
 
 def opacity_nodes(nodata: float, vmin: float, vmax: float) -> list:
@@ -200,9 +204,9 @@ def opacity_nodes(nodata: float, vmin: float, vmax: float) -> list:
     return [
         {"x": float(nodata), "y": 0.0, "midpoint": 0.5, "sharpness": 0.0},
         {"x": float(vmin), "y": 0.0, "midpoint": 0.5, "sharpness": 0.0},
-        {"x": float(vmin) + 0.08 * span, "y": 0.22, "midpoint": 0.5, "sharpness": 0.0},
-        {"x": mid, "y": 0.65, "midpoint": 0.5, "sharpness": 0.0},
-        {"x": float(vmax), "y": 0.9, "midpoint": 0.5, "sharpness": 0.0},
+        {"x": float(vmin) + 0.04 * span, "y": 0.35, "midpoint": 0.5, "sharpness": 0.0},
+        {"x": mid, "y": 0.7, "midpoint": 0.5, "sharpness": 0.0},
+        {"x": float(vmax), "y": 0.95, "midpoint": 0.5, "sharpness": 0.0},
     ]
 
 
