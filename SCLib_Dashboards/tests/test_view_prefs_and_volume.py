@@ -27,6 +27,7 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     mask_to_window,
     opacity_nodes,
     plane_from_read,
+    plane_from_volume,
     palette_family,
     sample_curtain,
     seeds_for_streamlines,
@@ -156,16 +157,23 @@ class VolumeExplorerTests(unittest.TestCase):
         kept = plane_from_read(upright, 2)
         self.assertEqual(kept.shape, (2, 3))
         self.assertEqual(float(kept[1, 2]), 5.0)
+        # toNumPy puts the Z singleton first: (1, Y, X). That order stays.
         leading = np.zeros((1, 7, 5), dtype=np.float32)
         leading[0, 2, 1] = 3
         flat = plane_from_read(leading, 2)
         self.assertEqual(flat.shape, (7, 5))
         self.assertEqual(float(flat[2, 1]), 3.0)
+        # The same layer with the singleton on the end is the swapped order.
         trailing = np.zeros((5, 7, 1), dtype=np.float32)
         trailing[1, 2, 0] = 4
         flat = plane_from_read(trailing, 2)
-        self.assertEqual(flat.shape, (5, 7))
-        self.assertEqual(float(flat[1, 2]), 4.0)
+        self.assertEqual(flat.shape, (7, 5))
+        self.assertEqual(float(flat[2, 1]), 4.0)
+        volume = np.zeros((6, 4, 3), dtype=np.float32)
+        volume[1, 2, 0] = 8
+        layer = plane_from_volume(volume, 2, 0)
+        self.assertEqual(layer.shape, (4, 6))
+        self.assertEqual(float(layer[2, 1]), 8.0)
 
     def test_depth_axis_is_thick_enough_to_read_as_a_volume(self):
         spacing = volume_spacing((400, 500, 30), 2)
@@ -216,7 +224,7 @@ class VolumeExplorerTests(unittest.TestCase):
         self.assertEqual(window_from_selection({"points": [{"x": 2}, {"x": 9}]}, 0, 20), [2.0, 9.0])
         self.assertIsNone(window_from_selection(None))
         point = fraction_point((0, 10), (1, 11), (1, 21, 5), 0)
-        self.assertEqual(point[0], 0.0)
+        self.assertEqual(point, (20.0, 0.0))
         seeds = seeds_for_streamlines((8, 8, 8), 2, 3, (1, 1), (4, 2), rake=3)
         self.assertEqual(len(seeds), 3)
         self.assertTrue(all(seed[2] == 3 for seed in seeds))

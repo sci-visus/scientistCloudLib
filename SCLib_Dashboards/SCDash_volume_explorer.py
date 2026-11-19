@@ -468,12 +468,16 @@ def fraction_point(
     volume_shape: Sequence[int],
     direction: int,
 ) -> Tuple[float, float]:
-    """Map a point on the displayed slice into the coarse volume's plane."""
+    """Map a displayed slice point into the coarse volume's plane.
+
+    The displayed plane is OpenVisus order: row is ``axis_v``, column is ``axis_u``.
+    The returned pair is still ``(u, v)`` on those two axes.
+    """
     axis_u, axis_v = orthogonal_axes(int(direction))
     row_span = max(int(plane_shape[0]) - 1, 1)
     col_span = max(int(plane_shape[1]) - 1, 1)
-    u = float(point_rc[0]) / float(row_span) * float(max(int(volume_shape[axis_u]) - 1, 0))
-    v = float(point_rc[1]) / float(col_span) * float(max(int(volume_shape[axis_v]) - 1, 0))
+    v = float(point_rc[0]) / float(row_span) * float(max(int(volume_shape[axis_v]) - 1, 0))
+    u = float(point_rc[1]) / float(col_span) * float(max(int(volume_shape[axis_u]) - 1, 0))
     return u, v
 
 
@@ -566,21 +570,43 @@ def read_vector_volume(
     return np.asarray(raw, dtype=np.float32)
 
 
-def plane_from_read(image: Any, direction: int) -> Optional[np.ndarray]:
-    """2D plane in the order OpenVisus returned.
+def plane_from_read(image: Any, direction: int, logic_shape: Optional[Sequence[int]] = None) -> Optional[np.ndarray]:
+    """2D plane in OpenVisus order: rows along the higher free axis, columns along the lower.
 
-    Drop a length-1 depth axis and leave the other two alone. Transposing
-    here turns the map. ``direction`` is unused; the slice axis is whichever
-    dimension came back with size 1.
+    ``Array.toNumPy`` reverses logic axes, so a Z slice arrives as ``(1, Y, X)``
+    or ``(Y, X)``. Some offsets come back unreversed, ``(X, Y, 1)``, and a
+    squeeze then turns the map. The length-1 axis belongs at index
+    ``2 - direction``; any other position is transposed back.
     """
-    del direction
+    del logic_shape
+    direction = int(direction) if int(direction) in (0, 1, 2) else 2
     data = np.asarray(image)
     if data.ndim == 2:
         return data
     if data.ndim != 3:
         return None
-    flat = np.squeeze(data)
-    return flat if getattr(flat, "ndim", 0) == 2 else None
+    singleton = [axis for axis, size in enumerate(data.shape) if int(size) == 1]
+    if len(singleton) == 1:
+        flat = np.squeeze(data)
+        if flat.ndim != 2:
+            return None
+        if singleton[0] != (2 - direction):
+            flat = flat.T
+        return np.ascontiguousarray(flat)
+    thin = int(np.argmin(data.shape))
+    others = [int(data.shape[axis]) for axis in range(3) if axis != thin]
+    if int(data.shape[thin]) * 4 > min(others):
+        return None
+    flat = np.take(data, 0, axis=thin)
+    if thin != (2 - direction):
+        flat = flat.T
+    return np.ascontiguousarray(flat)
+
+
+def plane_from_volume(volume: Any, direction: int, offset: int) -> np.ndarray:
+    """One layer of an X,Y,Z volume, in the same order as ``plane_from_read``."""
+    taken = slice_from_volume(volume, direction, offset)
+    return np.ascontiguousarray(np.swapaxes(taken, 0, 1))
 
 
 def read_depth_columns(
@@ -655,7 +681,7 @@ def read_plane(
         image = np.asarray(db.read(**kwargs))
     except Exception:
         return None
-    return plane_from_read(image, int(direction))
+    return plane_from_read(image, int(direction), logic_shape)
 
 
 def compute_streamlines(vectors: Any, seeds: Sequence[Sequence[float]]):
