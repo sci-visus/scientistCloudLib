@@ -23,12 +23,15 @@ from scientistCloudLib.SCLib_Dashboards.SCDash_volume_explorer import (  # noqa:
     initial_window,
     clamp_layer,
     layer_count,
+    logic_window_from_view,
     map_offset,
     mask_to_window,
     opacity_nodes,
+    orient_box_read,
     plane_from_read,
     plane_from_volume,
     palette_family,
+    quality_for_box,
     sample_curtain,
     seeds_for_streamlines,
     volume_spacing,
@@ -151,6 +154,24 @@ class VolumeExplorerTests(unittest.TestCase):
         self.assertTrue(np.allclose(image[:, -1], np.arange(6)))
         self.assertEqual(float(distance[0]), 0.0)
         self.assertGreater(float(distance[-1]), float(distance[0]))
+
+    def test_volume_box_follows_the_slice_and_depth_view(self):
+        box = logic_window_from_view(
+            (100, 50, 90),
+            2,
+            2,
+            {"x": [0.25, 0.5], "y": [0.0, 1.0]},
+            [10, 20],
+        )
+        self.assertEqual(box, [[25, 0, 10], [50, 50, 21]])
+        full = logic_window_from_view((100, 50, 90), 2, 2, None, None)
+        self.assertEqual(full, [[0, 0, 0], [100, 50, 90]])
+        raw = np.zeros((4, 5, 6), dtype=np.float32)
+        raw[0, 1, 2] = 9
+        ordered = orient_box_read(raw)
+        self.assertEqual(ordered.shape, (6, 5, 4))
+        self.assertEqual(float(ordered[2, 1, 0]), 9.0)
+        self.assertEqual(quality_for_box([[0, 0, 0], [200, 200, 200]], 0, limit=1_000_000), -3)
 
     def test_plane_keeps_openvisus_order(self):
         upright = np.arange(6, dtype=np.float32).reshape(2, 3)

@@ -513,6 +513,106 @@ def seeds_for_streamlines(
     return seeds
 
 
+def logic_window_from_view(
+    logic_shape: Sequence[int],
+    direction: int,
+    depth_axis: int,
+    slice_fractions: Optional[dict],
+    depth_range: Optional[Sequence[float]],
+) -> list:
+    """Logic box for the volume: the slice view, extended through the depth view.
+
+    ``slice_fractions`` uses plot axes: ``x`` runs along columns (the first free
+    axis) and ``y`` along rows (the second). Values are fractions of that axis.
+    ``depth_range`` is a pair of offsets on ``depth_axis``. A missing range
+    keeps the whole axis.
+    """
+    logic = [max(int(v), 1) for v in list(logic_shape)[:3]]
+    while len(logic) < 3:
+        logic.append(1)
+    starts = [0, 0, 0]
+    ends = logic[:]
+    direction = int(direction) if int(direction) in (0, 1, 2) else 2
+    depth_axis = int(depth_axis) if int(depth_axis) in (0, 1, 2) else direction
+    axis_u, axis_v = orthogonal_axes(direction)
+
+    def tighten_fraction(axis: int, pair: Optional[Sequence[float]]) -> None:
+        if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+            return
+        length = logic[axis]
+        lo = float(np.clip(min(float(pair[0]), float(pair[1])), 0.0, 1.0))
+        hi = float(np.clip(max(float(pair[0]), float(pair[1])), 0.0, 1.0))
+        if hi <= lo:
+            hi = min(1.0, lo + 1.0 / float(length))
+        i0 = int(np.clip(np.floor(lo * length), 0, length - 1))
+        i1 = int(np.clip(np.ceil(hi * length), i0 + 1, length))
+        starts[axis] = max(starts[axis], i0)
+        ends[axis] = min(ends[axis], i1)
+        if ends[axis] <= starts[axis]:
+            ends[axis] = min(length, starts[axis] + 1)
+
+    if isinstance(slice_fractions, dict):
+        tighten_fraction(axis_u, slice_fractions.get("x"))
+        tighten_fraction(axis_v, slice_fractions.get("y"))
+    if isinstance(depth_range, (list, tuple)) and len(depth_range) >= 2:
+        length = logic[depth_axis]
+        lo = float(min(float(depth_range[0]), float(depth_range[1])))
+        hi = float(max(float(depth_range[0]), float(depth_range[1])))
+        i0 = int(np.clip(np.floor(lo), 0, length - 1))
+        i1 = int(np.clip(np.ceil(hi) + 1, i0 + 1, length))
+        starts[depth_axis] = max(starts[depth_axis], i0)
+        ends[depth_axis] = min(ends[depth_axis], i1)
+        if ends[depth_axis] <= starts[depth_axis]:
+            ends[depth_axis] = min(length, starts[depth_axis] + 1)
+    return [starts, ends]
+
+
+def orient_box_read(array: Any) -> np.ndarray:
+    """OpenVisus ``toNumPy`` reverses axes. A logic box comes back as (Z, Y, X)."""
+    data = np.asarray(array)
+    if data.ndim == 4 and int(data.shape[-1]) == 1:
+        data = data[..., 0]
+    if data.ndim != 3:
+        flat = np.squeeze(data)
+        if getattr(flat, "ndim", 0) != 3:
+            raise ValueError(f"Expected a 3D box, got shape {getattr(data, 'shape', None)}")
+        data = flat
+    return np.ascontiguousarray(np.transpose(data, (2, 1, 0)))
+
+
+def quality_for_box(box: Sequence[Sequence[int]], quality: int, limit: int = 4_000_000) -> int:
+    """Drop quality until a full-resolution read of ``box`` would fit in memory."""
+    voxels = 1
+    for start, end in zip(box[0], box[1]):
+        voxels *= max(int(end) - int(start), 1)
+    chosen = int(quality)
+    while chosen > -12 and voxels > int(limit) * (2 ** max(-chosen, 0)):
+        chosen -= 1
+    return chosen
+
+
+def read_box_volume(
+    db: Any,
+    box: Sequence[Sequence[int]],
+    timestep: int,
+    quality: int,
+    field: Optional[str] = None,
+    max_voxels: int = 1_200_000,
+) -> Tuple[np.ndarray, int, int]:
+    """Scalar volume for one logic box, ordered X, Y, Z.
+
+    Returns the array, the stride applied so it stays interactive, and the
+    quality actually read.
+    """
+    used = quality_for_box(box, int(quality))
+    kwargs = {"time": int(timestep), "quality": int(used), "logic_box": [list(box[0]), list(box[1])]}
+    if field:
+        kwargs["field"] = field
+    raw = orient_box_read(db.read(**kwargs))
+    volume, step = stride_to_fit(raw, int(max_voxels))
+    return np.asarray(volume, dtype=np.float32), int(step), int(used)
+
+
 def read_coarse_volume(
     db: Any,
     logic_shape: Sequence[int],
