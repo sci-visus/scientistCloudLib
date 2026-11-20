@@ -662,7 +662,7 @@ class DatasetConverter:
         """Convert TIFF RGB stacks to IDX."""
         logger.info("Converting TIFF RGB stacks")
         
-        os.chmod(self.input_dir, 0o777)
+        safe_chmod(self.input_dir, 0o777)
         
         # List all tif files
         extensions = ["tif", "tiff", "TIFF", "TIF"]
@@ -757,7 +757,7 @@ class DatasetConverter:
         """Convert HDF5 files to IDX."""
         logger.info("Converting HDF5 files")
         
-        os.chmod(self.input_dir, 0o777)
+        safe_chmod(self.input_dir, 0o777)
         
         # List all hdf5 files
         extensions = ["nxs", "h5", "hdf5", "hdf"]
@@ -794,7 +794,7 @@ class DatasetConverter:
         """Convert NetCDF files to IDX."""
         logger.info("Converting NetCDF files")
         
-        os.chmod(self.input_dir, 0o777)
+        safe_chmod(self.input_dir, 0o777)
         
         # Find all .nc files
         nc_files = list(self.input_dir.glob("*.nc"))
